@@ -6532,10 +6532,10 @@ packages:
 - pypi: ./
   name: q2lsp
   version: 0.1.0
-  sha256: 81f1fab3f9bd748589ddfeca876f4ff08c9d54a9cb4ceab7fd1f8f649ac35746
+  sha256: cd902d5c3d2e85dcff875143e537ccc196f8b8c41bea401b4f3d329ca4d5a5a9
   requires_dist:
   - returns>=0.26.0,<0.27
-  - pygls
+  - pygls>=2.0.0,<3
   requires_python: '>=3.10'
 - conda: https://packages.qiime2.org/qiime2/2025.10/tiny/released/linux-64/q2templates-2025.10.0-py310h86561eb_0.tar.bz2
   sha256: 20c927c579bf6132f88a0937bc798e8fea1d1bec4052e9dc1078c6f7e27b8662
