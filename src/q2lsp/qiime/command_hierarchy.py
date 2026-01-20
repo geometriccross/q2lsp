@@ -10,6 +10,7 @@ from q2lsp.qiime.types import (
     ActionCommandProperties,
     CommandHierarchy,
     JsonObject,
+    JsonValue,
     PluginCommandProperties,
 )
 
@@ -20,7 +21,7 @@ def build_command_hierarchy(root: RootCommand) -> CommandHierarchy:
         "name": root_name,
         "help": root.help,
         "short_help": root.short_help,
-        "builtins": sorted(root._builtin_commands.keys()),
+        "builtins": cast(list[JsonValue], sorted(root._builtin_commands.keys())),
     }
     ctx = click.Context(root)
 
