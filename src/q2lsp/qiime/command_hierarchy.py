@@ -33,9 +33,9 @@ def build_command_hierarchy(root: RootCommand) -> CommandHierarchy:
         )
         action_lookup.update(getattr(plugin_command, "_hidden_actions", {}))
 
-        plugin_node: JsonObject = dict(plugin_data)
+        plugin_node: JsonObject = cast(JsonObject, dict(plugin_data))
         for action_name, action_data in action_lookup.items():
-            plugin_node[action_name] = dict(action_data)
+            plugin_node[action_name] = cast(JsonObject, dict(action_data))
         root_node[plugin_name] = plugin_node
 
     return {root_name: root_node}
