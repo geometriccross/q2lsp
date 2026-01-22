@@ -103,7 +103,9 @@ def _position_to_offset(document: TextDocument, position: types.Position) -> int
 
     # Add characters from all lines before current line
     for i in range(min(position.line, len(lines))):
-        offset += len(lines[i]) + 1  # +1 for newline character
+        offset += len(
+            lines[i]
+        )  # lines already include newline characters (splitlines(True))
 
     # Add characters in current line up to cursor
     if position.line < len(lines):
