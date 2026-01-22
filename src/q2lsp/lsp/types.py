@@ -1,42 +1,35 @@
-"""Type definitions for LSP completion."""
+"""Type definitions for LSP shell parser."""
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict, TypeAlias
+from typing import Literal, NamedTuple, TypeAlias
 
 
-# Cursor Position: (line, column) zero-based
-CursorPosition: TypeAlias = tuple[int, int]
+# Completion mode determines what kind of completions to offer
+CompletionMode: TypeAlias = Literal["root", "plugin", "parameter", "none"]
 
 
-# Token Types
-class Token(TypedDict):
-    """Represents a parsed token from command line input."""
+class TokenSpan(NamedTuple):
+    """A token with its position in the original text."""
 
     text: str
-    start: int
-    end: int
-    type: Literal["command", "option", "argument", "unknown"]
+    start: int  # Start offset in original text
+    end: int  # End offset in original text (exclusive)
 
 
-# Parse Context
-class ParseContext(TypedDict):
-    """Context information about the parsed command line."""
+class ParsedCommand(NamedTuple):
+    """A parsed QIIME command with its tokens and position."""
 
-    line: str
-    tokens: list[Token]
-    cursor_pos: CursorPosition
-
-
-# Command Context
-class CommandContext(TypedDict):
-    """Context information about the command being completed."""
-
-    plugin: str | None
-    action: str | None
-    option: str | None
-    remaining_args: list[str]
+    tokens: list[TokenSpan]
+    start: int  # Start offset in original text
+    end: int  # End offset in original text (exclusive)
 
 
-# Completion Mode
-CompletionMode: TypeAlias = Literal["command", "plugin", "action", "option", "argument"]
+class CompletionContext(NamedTuple):
+    """Context for completion at a specific position."""
+
+    mode: CompletionMode
+    command: ParsedCommand | None  # The QIIME command containing the cursor
+    current_token: TokenSpan | None  # Token at cursor (may be partial)
+    token_index: int  # Index of current token in command (0-based)
+    prefix: str  # Text before cursor in current token

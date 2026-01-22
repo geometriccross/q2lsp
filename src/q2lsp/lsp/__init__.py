@@ -1,17 +1,15 @@
 """LSP types for QIIME 2 language server."""
 
 from q2lsp.lsp.types import (
-    CommandContext,
+    CompletionContext,
     CompletionMode,
-    CursorPosition,
-    ParseContext,
-    Token,
+    ParsedCommand,
+    TokenSpan,
 )
 
 __all__ = [
-    "Token",
-    "ParseContext",
-    "CommandContext",
+    "CompletionContext",
     "CompletionMode",
-    "CursorPosition",
+    "ParsedCommand",
+    "TokenSpan",
 ]

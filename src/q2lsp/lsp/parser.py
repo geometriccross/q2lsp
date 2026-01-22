@@ -1,203 +1,358 @@
-"""Parser for QIIME 2 shell command completion."""
+"""Shell parser for QIIME2 CLI completion.
+
+Handles line continuations, shell tokenization with quote handling,
+and QIIME command detection for completion context.
+"""
 
 from __future__ import annotations
 
-from q2lsp.lsp.types import ParseContext, Token
+from q2lsp.lsp.types import CompletionContext, CompletionMode, ParsedCommand, TokenSpan
 
 
-def collect_continued_lines(
-    lines: list[str],
-    line_index: int,
-) -> tuple[str, int]:
+def merge_line_continuations(text: str) -> tuple[str, list[int]]:
     """
-    Join lines with backslash line continuations.
+    Merge lines with backslash continuations into a single line.
 
     Args:
-        lines: List of complete lines from the document.
-        line_index: The line index where the cursor is located.
+        text: The input text potentially containing backslash line continuations.
 
     Returns:
-        A tuple of (joined_line, start_line_index) where joined_line contains
-        all continued lines merged into one with single spaces, and
-        start_line_index is the index of the first line in the continuation.
+        A tuple of (merged_text, offset_map) where:
+        - merged_text: Text with continuations merged (backslash+newline removed)
+        - offset_map: Maps merged position -> original position.
+                      Length is len(merged_text) + 1 for boundary mapping.
     """
-    # Find the start of the continued line block
-    start_index = line_index
+    merged: list[str] = []
+    offset_map: list[int] = []
+    i = 0
+    n = len(text)
 
-    # Walk backwards to find the start of the continuation block
-    while start_index > 0:
-        previous_line = lines[start_index - 1].rstrip()
-        if previous_line.endswith("\\"):
-            start_index -= 1
-        else:
-            break
+    while i < n:
+        # Check for backslash followed by newline (line continuation)
+        if text[i] == "\\" and i + 1 < n and text[i + 1] == "\n":
+            # Skip the backslash and newline - don't add to merged
+            i += 2
+            continue
 
-    # Collect all lines from start to current
-    continued_lines = []
-    for i in range(start_index, line_index + 1):
-        line = lines[i].rstrip()
-        # Remove trailing backslash if present
-        if line.endswith("\\"):
-            line = line[:-1]
-        continued_lines.append(line)
+        # Regular character - add to merged and record mapping
+        offset_map.append(i)
+        merged.append(text[i])
+        i += 1
 
-    # Join with single spaces
-    joined_line = " ".join(line.rstrip() for line in continued_lines)
+    # Add final boundary mapping (position after last char)
+    offset_map.append(i)
 
-    return joined_line, start_index
+    return "".join(merged), offset_map
 
 
-def tokenize_shell(line: str) -> list[Token]:
+def tokenize_shell_line(line: str, line_start_offset: int) -> list[TokenSpan]:
     """
-    Basic shell tokenization respecting quotes and backslash escapes.
+    Tokenize a shell line respecting quotes.
 
     Args:
-        line: The shell command line to tokenize.
+        line: The shell line to tokenize (already merged, no continuations).
+        line_start_offset: Offset in original text where this line starts.
 
     Returns:
-        A list of Token objects, each with text, start offset, and end offset.
+        List of TokenSpan with positions relative to original text.
+
+    Quote handling:
+        - Single quotes: no escapes inside, everything is literal
+        - Double quotes: backslash escapes the next character
+        - Unquoted: backslash escapes the next character
     """
-    tokens: list[Token] = []
+    tokens: list[TokenSpan] = []
     i = 0
     n = len(line)
 
     while i < n:
         # Skip whitespace
-        while i < n and line[i].isspace():
+        while i < n and line[i] in " \t":
             i += 1
         if i >= n:
             break
 
-        # Record start position
-        start = i
-        text_parts: list[str] = []
-        state: Literal["normal", "single_quote", "double_quote"] = "normal"
+        # Start of a token
+        token_start = i
+        token_chars: list[str] = []
 
         while i < n:
             char = line[i]
 
-            if state == "normal":
-                if char.isspace():
-                    # End of token
-                    break
-                elif char == "\\" and i + 1 < n:
-                    # Escape sequence
-                    text_parts.append(line[i + 1])
-                    i += 2
-                    continue
-                elif char == "'":
-                    state = "single_quote"
-                elif char == '"':
-                    state = "double_quote"
-                else:
-                    text_parts.append(char)
+            if char in " \t":
+                # End of token (unquoted whitespace)
+                break
+            elif char == "'":
+                # Single quoted string - no escapes
+                i += 1  # Skip opening quote
+                while i < n and line[i] != "'":
+                    token_chars.append(line[i])
+                    i += 1
+                if i < n:
+                    i += 1  # Skip closing quote
+            elif char == '"':
+                # Double quoted string - backslash escapes
+                i += 1  # Skip opening quote
+                while i < n and line[i] != '"':
+                    if line[i] == "\\" and i + 1 < n:
+                        i += 1  # Skip backslash
+                        token_chars.append(line[i])
+                        i += 1
+                    else:
+                        token_chars.append(line[i])
+                        i += 1
+                if i < n:
+                    i += 1  # Skip closing quote
+            elif char == "\\" and i + 1 < n:
+                # Unquoted backslash escape
+                i += 1  # Skip backslash
+                token_chars.append(line[i])
                 i += 1
-            elif state == "single_quote":
-                if char == "'":
-                    state = "normal"
-                else:
-                    text_parts.append(char)
-                i += 1
-            elif state == "double_quote":
-                if char == "\\" and i + 1 < n:
-                    # Escape sequence in double quotes
-                    text_parts.append(line[i + 1])
-                    i += 2
-                    continue
-                elif char == '"':
-                    state = "normal"
-                else:
-                    text_parts.append(char)
+            else:
+                # Regular character
+                token_chars.append(char)
                 i += 1
 
-        if text_parts:
+        if token_chars or i > token_start:
             tokens.append(
-                Token(
-                    text="".join(text_parts),
-                    start=start,
-                    end=i,  # i is at the position after the last character
+                TokenSpan(
+                    text="".join(token_chars),
+                    start=line_start_offset + token_start,
+                    end=line_start_offset + i,
                 )
             )
 
     return tokens
 
 
-def find_qiime_command_start(tokens: list[Token]) -> int | None:
+def find_qiime_commands(text: str) -> list[ParsedCommand]:
     """
-    Find the index of the most recent 'qiime' command.
+    Find all QIIME commands in the text.
 
-    Scans tokens treating ;, |, && as command boundaries.
-    Returns the index of the 'qiime' token after the last boundary.
+    Splits on command separators (;, &&, ||, |, newline) outside quotes,
+    then looks for commands starting with "qiime".
 
     Args:
-        tokens: List of tokens from tokenize_shell.
+        text: The full text to parse (already merged).
 
     Returns:
-        Index of the 'qiime' token, or None if not found.
+        List of ParsedCommand for each qiime command found.
     """
-    qiime_index: int | None = None
-    boundary_indices: list[int] = []
+    commands: list[ParsedCommand] = []
 
-    for i, token in enumerate(tokens):
-        if token.text in (";", "|", "&&"):
-            boundary_indices.append(i)
-        elif token.text == "qiime":
-            qiime_index = i
+    # Split into command segments at separators
+    segments = _split_commands(text)
 
-    if qiime_index is None:
-        return None
+    for seg_start, seg_end in segments:
+        segment = text[seg_start:seg_end]
+        tokens = tokenize_shell_line(segment, seg_start)
 
-    # Find the last boundary before the qiime token
-    last_boundary = -1
-    for boundary in boundary_indices:
-        if boundary < qiime_index:
-            last_boundary = boundary
+        # Check if first token is "qiime"
+        if tokens and tokens[0].text == "qiime":
+            commands.append(
+                ParsedCommand(
+                    tokens=tokens,
+                    start=tokens[0].start,
+                    end=seg_end,
+                )
+            )
 
-    # Check if qiime is after the last boundary
-    if qiime_index > last_boundary:
-        return qiime_index
+    return commands
 
+
+def _split_commands(text: str) -> list[tuple[int, int]]:
+    """
+    Split text into command segments at ;, &&, ||, |, and newline.
+
+    Returns list of (start, end) tuples for each segment.
+    """
+    segments: list[tuple[int, int]] = []
+    i = 0
+    n = len(text)
+    seg_start = 0
+    in_single_quote = False
+    in_double_quote = False
+
+    while i < n:
+        char = text[i]
+
+        if in_single_quote:
+            if char == "'":
+                in_single_quote = False
+            i += 1
+        elif in_double_quote:
+            if char == "\\" and i + 1 < n:
+                i += 2  # Skip escaped char
+            elif char == '"':
+                in_double_quote = False
+                i += 1
+            else:
+                i += 1
+        else:
+            # Check for separators
+            if char == "'":
+                in_single_quote = True
+                i += 1
+            elif char == '"':
+                in_double_quote = True
+                i += 1
+            elif char == "\\" and i + 1 < n:
+                i += 2  # Skip escaped char
+            elif char == ";" or char == "\n":
+                # Single char separator
+                if i > seg_start:
+                    segments.append((seg_start, i))
+                seg_start = i + 1
+                i += 1
+            elif char == "|":
+                # Could be | or ||
+                if i + 1 < n and text[i + 1] == "|":
+                    if i > seg_start:
+                        segments.append((seg_start, i))
+                    seg_start = i + 2
+                    i += 2
+                else:
+                    if i > seg_start:
+                        segments.append((seg_start, i))
+                    seg_start = i + 1
+                    i += 1
+            elif char == "&" and i + 1 < n and text[i + 1] == "&":
+                # &&
+                if i > seg_start:
+                    segments.append((seg_start, i))
+                seg_start = i + 2
+                i += 2
+            else:
+                i += 1
+
+    # Add final segment
+    if i > seg_start:
+        segments.append((seg_start, i))
+
+    return segments
+
+
+def command_at_position(
+    commands: list[ParsedCommand], offset: int
+) -> ParsedCommand | None:
+    """
+    Find the command containing the given offset.
+
+    Args:
+        commands: List of parsed QIIME commands.
+        offset: Position in the original text.
+
+    Returns:
+        The ParsedCommand containing the offset, or None if not in any command.
+    """
+    for cmd in commands:
+        if cmd.start <= offset <= cmd.end:
+            return cmd
     return None
 
 
-def parse_context(
-    lines: list[str],
-    line: int,
-    character: int,
-) -> ParseContext:
+def get_completion_context(text: str, offset: int) -> CompletionContext:
     """
-    Parse the context around the cursor for completion.
+    Get completion context at the given position.
+
+    This is the main entry point for the parser.
 
     Args:
-        lines: List of complete lines from the document.
-        line: The line number where the cursor is located.
-        character: The character offset within the line.
+        text: The full document text.
+        offset: Cursor position (0-based offset in original text).
 
     Returns:
-        A ParseContext containing tokens, current token info, and cursor offset.
+        CompletionContext with mode, command, current token, etc.
     """
-    # Get the full command line with continuations
-    full_line, start_line_index = collect_continued_lines(lines, line)
+    # Merge line continuations
+    merged_text, offset_map = merge_line_continuations(text)
 
-    # Calculate the cursor offset within the full line
-    cursor_offset = character
-    for i in range(start_line_index, line):
-        cursor_offset += len(lines[i].rstrip())
-        if i < line:
-            cursor_offset += 1  # Account for space continuation
+    # Convert offset to merged position
+    merged_offset = _original_to_merged_offset(offset, offset_map)
 
-    # Tokenize the full line
-    tokens = tokenize_shell(full_line)
+    # Find all qiime commands
+    commands = find_qiime_commands(merged_text)
 
-    # Find the current token containing the cursor
-    current_token_index: int | None = None
-    for i, token in enumerate(tokens):
-        if token.start <= cursor_offset <= token.end:
-            current_token_index = i
+    # Find command at cursor position
+    command = command_at_position(commands, merged_offset)
+
+    if command is None:
+        return CompletionContext(
+            mode="none",
+            command=None,
+            current_token=None,
+            token_index=-1,
+            prefix="",
+        )
+
+    # Find current token and its index
+    current_token: TokenSpan | None = None
+    token_index = -1
+    prefix = ""
+
+    for i, token in enumerate(command.tokens):
+        if token.start <= merged_offset <= token.end:
+            current_token = token
+            token_index = i
+            # Prefix is text before cursor within token
+            prefix = token.text[: merged_offset - token.start]
             break
+        elif token.end < merged_offset:
+            # Cursor is after this token - might be starting a new token
+            token_index = i + 1
 
-    return ParseContext(
-        tokens=tokens,
-        current_token_index=current_token_index,
-        cursor_offset=cursor_offset,
+    # If cursor is between tokens or after last token, we're at a new token position
+    if current_token is None and token_index >= 0:
+        # Check if we're right after a space (new token position)
+        if merged_offset > 0 and merged_offset <= len(merged_text):
+            if (
+                merged_offset == len(merged_text)
+                or merged_text[merged_offset - 1] in " \t"
+            ):
+                token_index = len(command.tokens)
+
+    # Determine completion mode based on token index
+    mode = _determine_mode(token_index)
+
+    return CompletionContext(
+        mode=mode,
+        command=command,
+        current_token=current_token,
+        token_index=token_index,
+        prefix=prefix,
     )
+
+
+def _original_to_merged_offset(original_offset: int, offset_map: list[int]) -> int:
+    """
+    Convert original text offset to merged text offset.
+
+    The offset_map maps merged_idx -> original_idx.
+    We need the reverse: find merged_idx where offset_map[merged_idx] >= original_offset.
+    """
+    for merged_idx, orig_idx in enumerate(offset_map):
+        if orig_idx >= original_offset:
+            return merged_idx
+    return len(offset_map) - 1
+
+
+def _determine_mode(token_index: int) -> CompletionMode:
+    """
+    Determine completion mode based on token position.
+
+    Token 0: "qiime" command itself - no completion needed here
+    Token 1: plugin name -> "root" mode (completing plugin/builtin)
+    Token 2: action name -> "plugin" mode (completing action within plugin)
+    Token >= 3: parameters -> "parameter" mode
+    """
+    if token_index < 0:
+        return "none"
+    elif token_index == 0:
+        # On the "qiime" token itself
+        return "none"
+    elif token_index == 1:
+        return "root"
+    elif token_index == 2:
+        return "plugin"
+    else:
+        return "parameter"
