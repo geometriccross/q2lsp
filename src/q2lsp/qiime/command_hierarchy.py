@@ -8,6 +8,7 @@ from q2cli.commands import PluginCommand, RootCommand
 
 from q2lsp.qiime.types import (
     ActionCommandProperties,
+    BuiltinCommandProperties,
     CommandHierarchy,
     JsonObject,
     JsonValue,
@@ -23,6 +24,16 @@ def build_command_hierarchy(root: RootCommand) -> CommandHierarchy:
         "short_help": root.short_help,
         "builtins": cast(list[JsonValue], sorted(root._builtin_commands.keys())),
     }
+
+    for builtin_name, builtin_command in root._builtin_commands.items():
+        builtin_properties: BuiltinCommandProperties = {
+            "name": builtin_name,
+            "help": builtin_command.help,
+            "short_help": builtin_command.short_help,
+            "type": "builtin",
+        }
+        root_node[builtin_name] = cast(JsonObject, builtin_properties)
+
     ctx = click.Context(root)
 
     plugin_lookup = cast(Mapping[str, PluginCommandProperties], root._plugin_lookup)

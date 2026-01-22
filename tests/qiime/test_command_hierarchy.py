@@ -47,6 +47,25 @@ def test_build_command_hierarchy_contains_plugin_action() -> None:
     assert action_entry["id"] == action_data["id"]
 
 
+def test_build_command_hierarchy_builtin_details() -> None:
+    root = RootCommand()
+    hierarchy = build_command_hierarchy(root)
+    root_name = root.name or "qiime"
+    root_entry = cast(JsonObject, hierarchy[root_name])
+
+    # Assert that builtins list exists (existing assertion)
+    assert isinstance(root_entry["builtins"], list)
+
+    # For each builtin command, assert the hierarchy has the required metadata
+    for builtin_name in root._builtin_commands.keys():
+        assert builtin_name in root_entry
+        builtin_entry = cast(JsonObject, root_entry[builtin_name])
+        assert builtin_entry["name"] == builtin_name
+        assert "help" in builtin_entry
+        assert "short_help" in builtin_entry
+        assert builtin_entry["type"] == "builtin"
+
+
 def test_command_hierarchy_json_roundtrip() -> None:
     root = RootCommand()
     payload = command_hierarchy_json(root)

@@ -48,3 +48,10 @@ class RootCommandProperties(TypedDict):
     help: str | None
     short_help: str | None
     builtins: list[str]
+
+
+class BuiltinCommandProperties(TypedDict):
+    name: str
+    help: str | None
+    short_help: str | None
+    type: str
