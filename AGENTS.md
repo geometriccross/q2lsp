@@ -1,9 +1,16 @@
 # AGENTS.md
 This is a documentation file for the various agents available in this repository.
 
-Use pygls for lsp implementation.
 
-## About qiime2
+## Library information
+### pygls
+In this repository, pygls is available for lsp implementation.
+This is tha pygls documentation link.
+
+https://pygls.readthedocs.io/en/latest/
+
+
+### qiime2
 QIIME 2 is a framework for bioinformatics written in Python.
 While QIIME2 is commonly used via the CLI, an API is also provided in Python, allowing native handling of its commands.
 
