@@ -1,0 +1,322 @@
+"""Completion logic for QIIME2 CLI commands.
+
+Routes completion requests based on CompletionContext mode and
+generates completion items from the CommandHierarchy.
+"""
+
+from __future__ import annotations
+
+from typing import NamedTuple
+
+from q2lsp.lsp.types import CompletionContext
+from q2lsp.qiime.types import CommandHierarchy, JsonObject
+
+
+class CompletionItem(NamedTuple):
+    """A completion suggestion."""
+
+    label: str  # Display text
+    detail: str  # Additional info (e.g., description)
+    kind: str  # "plugin", "action", "parameter", "builtin"
+    insert_text: str | None = None  # Text to insert (if different from label)
+
+
+def get_completions(
+    ctx: CompletionContext,
+    hierarchy: CommandHierarchy,
+) -> list[CompletionItem]:
+    """
+    Get completion items based on the completion context.
+
+    Routes to appropriate handler based on mode:
+    - "root": Complete plugin names and builtin commands
+    - "plugin": Complete action names within a plugin
+    - "parameter": Complete parameter names for an action
+    - "none": Return empty list
+
+    Args:
+        ctx: The completion context from the parser
+        hierarchy: The QIIME2 command hierarchy
+
+    Returns:
+        List of CompletionItem matching the prefix
+    """
+    if ctx.mode == "none" or ctx.command is None:
+        return []
+
+    # Get the root node (usually "qiime")
+    root_node = _get_root_node(hierarchy)
+    if root_node is None:
+        return []
+
+    prefix = ctx.prefix
+
+    if ctx.mode == "root":
+        return _complete_root(root_node, prefix)
+    elif ctx.mode == "plugin":
+        # Get plugin name from token 1
+        plugin_name = _get_token_text(ctx, 1)
+        return _complete_plugin(root_node, plugin_name, prefix)
+    elif ctx.mode == "parameter":
+        # Get plugin name from token 1, action name from token 2
+        plugin_name = _get_token_text(ctx, 1)
+        action_name = _get_token_text(ctx, 2)
+        # Get already used parameters
+        used_params = _get_used_parameters(ctx)
+        return _complete_parameters(
+            root_node, plugin_name, action_name, prefix, used_params
+        )
+
+    return []
+
+
+def _get_root_node(hierarchy: CommandHierarchy) -> JsonObject | None:
+    """Get the root node from hierarchy (usually 'qiime')."""
+    if not hierarchy:
+        return None
+    # Return the first (and usually only) root
+    return next(iter(hierarchy.values()), None)
+
+
+def _get_token_text(ctx: CompletionContext, index: int) -> str:
+    """Get token text at index, or empty string if not available."""
+    if ctx.command is None or index >= len(ctx.command.tokens):
+        return ""
+    return ctx.command.tokens[index].text
+
+
+def _get_used_parameters(ctx: CompletionContext) -> set[str]:
+    """Get set of parameter names already used in the command."""
+    used: set[str] = set()
+    if ctx.command is None:
+        return used
+
+    # Parameters start at token index 3
+    for token in ctx.command.tokens[3:]:
+        text = token.text
+        if text.startswith("--"):
+            # Strip leading dashes and any value after =
+            param = text.lstrip("-").split("=")[0]
+            used.add(param)
+
+    return used
+
+
+def _complete_root(root_node: JsonObject, prefix: str) -> list[CompletionItem]:
+    """
+    Complete plugin names and builtin commands at root level.
+
+    Root node contains:
+    - "builtins": list of builtin command names
+    - Other keys: plugin names (excluding "name", "help", "short_help")
+    """
+    items: list[CompletionItem] = []
+
+    # Get builtin commands
+    builtins = root_node.get("builtins", [])
+    if isinstance(builtins, list):
+        for name in builtins:
+            if isinstance(name, str) and name.startswith(prefix):
+                # Get builtin details
+                builtin_data = root_node.get(name, {})
+                detail = ""
+                if isinstance(builtin_data, dict):
+                    detail = str(builtin_data.get("short_help", "")) or str(
+                        builtin_data.get("help", "")
+                    )
+                items.append(
+                    CompletionItem(
+                        label=name,
+                        detail=detail or "Built-in command",
+                        kind="builtin",
+                    )
+                )
+
+    # Get plugin names (keys that are not metadata)
+    metadata_keys = {"name", "help", "short_help", "builtins"}
+    for key, value in root_node.items():
+        if key in metadata_keys:
+            continue
+        if key in (builtins if isinstance(builtins, list) else []):
+            continue  # Already added as builtin
+        if not key.startswith(prefix):
+            continue
+        if not isinstance(value, dict):
+            continue
+
+        # It's a plugin
+        detail = str(value.get("short_description", "")) or str(
+            value.get("description", "")
+        )
+        items.append(
+            CompletionItem(
+                label=key,
+                detail=detail or "Plugin",
+                kind="plugin",
+            )
+        )
+
+    return items
+
+
+def _complete_plugin(
+    root_node: JsonObject,
+    plugin_name: str,
+    prefix: str,
+) -> list[CompletionItem]:
+    """
+    Complete action names within a plugin.
+
+    Plugin node contains:
+    - Metadata: "id", "name", "version", "website", etc.
+    - Action keys: action names with their properties
+    """
+    items: list[CompletionItem] = []
+
+    # Check if it's a builtin command first
+    builtins = root_node.get("builtins", [])
+    if isinstance(builtins, list) and plugin_name in builtins:
+        # Builtin commands don't have actions - return help options
+        return _complete_builtin_options(prefix)
+
+    # Get plugin node
+    plugin_node = root_node.get(plugin_name)
+    if not isinstance(plugin_node, dict):
+        return items
+
+    # Plugin metadata keys to skip
+    metadata_keys = {
+        "id",
+        "name",
+        "version",
+        "website",
+        "user_support_text",
+        "description",
+        "short_description",
+        "actions",
+    }
+
+    for key, value in plugin_node.items():
+        if key in metadata_keys:
+            continue
+        if not key.startswith(prefix):
+            continue
+        if not isinstance(value, dict):
+            continue
+
+        # It's an action
+        detail = str(value.get("description", ""))
+        items.append(
+            CompletionItem(
+                label=key,
+                detail=detail or "Action",
+                kind="action",
+            )
+        )
+
+    return items
+
+
+def _complete_builtin_options(prefix: str) -> list[CompletionItem]:
+    """Return common options for builtin commands."""
+    options = [
+        ("--help", "Show help message"),
+    ]
+    items: list[CompletionItem] = []
+    for opt, desc in options:
+        if opt.startswith(prefix):
+            items.append(
+                CompletionItem(
+                    label=opt,
+                    detail=desc,
+                    kind="parameter",
+                )
+            )
+    return items
+
+
+def _complete_parameters(
+    root_node: JsonObject,
+    plugin_name: str,
+    action_name: str,
+    prefix: str,
+    used_params: set[str],
+) -> list[CompletionItem]:
+    """
+    Complete parameter names for an action.
+
+    Action node contains:
+    - "signature": list of parameter definitions
+    """
+    items: list[CompletionItem] = []
+
+    # Check if it's a builtin command
+    builtins = root_node.get("builtins", [])
+    if isinstance(builtins, list) and plugin_name in builtins:
+        return _complete_builtin_options(prefix)
+
+    # Get plugin node
+    plugin_node = root_node.get(plugin_name)
+    if not isinstance(plugin_node, dict):
+        return items
+
+    # Get action node
+    action_node = plugin_node.get(action_name)
+    if not isinstance(action_node, dict):
+        return items
+
+    # Get signature (list of parameters)
+    signature = action_node.get("signature", [])
+    if not isinstance(signature, list):
+        return items
+
+    for param in signature:
+        if not isinstance(param, dict):
+            continue
+
+        name = param.get("name", "")
+        if not isinstance(name, str) or not name:
+            continue
+
+        # Skip already used parameters
+        if name in used_params:
+            continue
+
+        # Format as --parameter-name
+        option_name = f"--{name.replace('_', '-')}"
+        if not option_name.startswith(prefix):
+            continue
+
+        # Build detail string
+        detail_parts: list[str] = []
+        param_type = param.get("type", "")
+        if param_type:
+            detail_parts.append(f"[{param_type}]")
+        description = param.get("description", "")
+        if description:
+            detail_parts.append(str(description))
+
+        # Check if required (no default)
+        is_required = "default" not in param
+        if is_required:
+            detail_parts.insert(0, "(required)")
+
+        items.append(
+            CompletionItem(
+                label=option_name,
+                detail=" ".join(detail_parts) if detail_parts else "Parameter",
+                kind="parameter",
+            )
+        )
+
+    # Always add --help
+    if "--help".startswith(prefix) and "help" not in used_params:
+        items.append(
+            CompletionItem(
+                label="--help",
+                detail="Show help message",
+                kind="parameter",
+            )
+        )
+
+    return items
