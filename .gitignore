@@ -1,8 +1,16 @@
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# cache
 __pycache__
-*.egg-info
-sandbox.md
 .pytest_cache
 .ruff_cache
+
+# build artifacts
+build
+*.egg-info
+*.conda
+
+# other
+sandbox.md
