@@ -1,9 +1,13 @@
 # AGENTS.md
 This is a documentation file for the various agents available in this repository.
 
+Use pygls for lsp implementation.
+
 ## About qiime2
 QIIME 2 is a framework for bioinformatics written in Python.
 While QIIME2 is commonly used via the CLI, an API is also provided in Python, allowing native handling of its commands.
+
+qiime2 ref: https://amplicon-docs.qiime2.org/en/stable/
 
 The library used for QIIME 2 as a CLI is called `click`.
 QIIME 2 is built upon the foundation of `click`.
