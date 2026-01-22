@@ -1,6 +1,16 @@
 # AGENTS.md
 This is a documentation file for the various agents available in this repository.
 
+## Project Structure
+<Project Root>
+├── src
+│   └── q2lsp
+│       ├── lsp
+│       └── qiime
+└── tests
+    ├── lsp
+    └── qiime
+
 
 ## Library information
 ### pygls
