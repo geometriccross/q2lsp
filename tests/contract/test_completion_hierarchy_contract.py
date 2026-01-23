@@ -176,11 +176,6 @@ class TestSignatureShapeContract:
 class TestMetadataKeysCoverageContract:
     """Verify metadata skip list covers actual metadata keys."""
 
-    # Keys that may not appear in all hierarchies but are valid to skip
-    OPTIONAL_SKIP_KEYS = frozenset(
-        {"actions", "version", "website", "user_support_text"}
-    )
-
     def test_no_unknown_metadata_keys(self, root_node: JsonObject) -> None:
         """All metadata keys in hierarchy should be in _COMMAND_METADATA_KEYS."""
         unknown_keys: dict[str, set[str]] = {}
