@@ -1,6 +1,14 @@
 """Entry point for QIIME2 LSP server."""
 
-from q2lsp.lsp.server import start_server
+import sys
+
+from q2lsp.cli import run
+
+
+def main() -> None:
+    """Start the LSP server."""
+    sys.exit(run())
+
 
 if __name__ == "__main__":
-    start_server()
+    main()
