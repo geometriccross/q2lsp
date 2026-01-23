@@ -2,34 +2,11 @@
 
 from __future__ import annotations
 
-from enum import Enum
-
-from typing import NamedTuple
+from typing import Literal, NamedTuple, TypeAlias
 
 
-class _StrEnum(str, Enum):
-    """String-valued enum that behaves like str at runtime."""
-
-    def __str__(self) -> str:
-        return str(self.value)
-
-
-class CompletionMode(_StrEnum):
-    """Mode determines what kind of completions to offer."""
-
-    ROOT = "root"
-    PLUGIN = "plugin"
-    PARAMETER = "parameter"
-    NONE = "none"
-
-
-class CompletionKind(_StrEnum):
-    """Kind categorizes completion items."""
-
-    PLUGIN = "plugin"
-    ACTION = "action"
-    PARAMETER = "parameter"
-    BUILTIN = "builtin"
+# Completion mode determines what kind of completions to offer
+CompletionMode: TypeAlias = Literal["root", "plugin", "parameter", "none"]
 
 
 class TokenSpan(NamedTuple):
