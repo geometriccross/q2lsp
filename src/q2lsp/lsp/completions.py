@@ -269,8 +269,7 @@ def _complete_parameters(
 
     # Check if it's a builtin command
     builtins = root_node.get("builtins", [])
-    if isinstance(builtins, list) and plugin_name in builtins:
-        return _complete_builtin_options(prefix)
+    is_builtin = isinstance(builtins, list) and plugin_name in builtins
 
     # Get plugin node
     plugin_node = root_node.get(plugin_name)
@@ -285,6 +284,13 @@ def _complete_parameters(
     # Get signature (list of parameters)
     signature = action_node.get("signature", [])
     if not isinstance(signature, list):
+        if is_builtin:
+            return _complete_builtin_options(prefix)
+        return items
+
+    if not signature:
+        if is_builtin:
+            return _complete_builtin_options(prefix)
         return items
 
     for param in signature:

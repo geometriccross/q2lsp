@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TypedDict, TypeAlias
+from typing_extensions import NotRequired
 
 JsonPrimitive: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
@@ -55,3 +56,4 @@ class BuiltinCommandProperties(TypedDict):
     help: str | None
     short_help: str | None
     type: str
+    signature: NotRequired[list[ActionSignatureParameter]]

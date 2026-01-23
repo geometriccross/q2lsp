@@ -8,12 +8,54 @@ from q2cli.commands import PluginCommand, RootCommand
 
 from q2lsp.qiime.types import (
     ActionCommandProperties,
+    ActionSignatureParameter,
     BuiltinCommandProperties,
     CommandHierarchy,
     JsonObject,
     JsonValue,
     PluginCommandProperties,
 )
+
+
+def _build_click_signature(
+    command: click.BaseCommand,
+) -> list[ActionSignatureParameter]:
+    """Extract signature parameters from a click command."""
+    signature: list[ActionSignatureParameter] = []
+    # Use getattr to work around type stub limitations
+    params = getattr(command, "params", [])
+    for param in params:
+        if not isinstance(param, click.Option):
+            continue
+        if getattr(param, "hidden", False):
+            continue
+
+        entry: ActionSignatureParameter = {
+            "name": (param.name or "").replace("-", "_"),
+            "type": param.type.name
+            if param.type.name
+            else param.type.__class__.__name__,
+            "description": param.help or "",
+        }
+
+        if not param.required:
+            default_value = param.default
+            # Skip callable defaults (lazy defaults)
+            if not callable(default_value):
+                entry["default"] = default_value
+
+        if param.metavar is not None:
+            entry["metavar"] = param.metavar
+
+        if param.multiple:
+            entry["multiple"] = str(param.multiple)
+
+        if getattr(param, "is_flag", False):
+            entry["is_bool_flag"] = True
+
+        signature.append(entry)
+
+    return signature
 
 
 def build_command_hierarchy(root: RootCommand) -> CommandHierarchy:
@@ -32,7 +74,26 @@ def build_command_hierarchy(root: RootCommand) -> CommandHierarchy:
             "short_help": builtin_command.short_help,
             "type": "builtin",
         }
-        root_node[builtin_name] = cast(JsonObject, builtin_properties)
+        # Check if builtin is a MultiCommand (has subcommands)
+        if isinstance(builtin_command, click.MultiCommand):
+            builtin_ctx = click.Context(builtin_command)
+            builtin_node: JsonObject = cast(JsonObject, builtin_properties)
+            for subcommand_name in builtin_command.list_commands(builtin_ctx):
+                subcommand = builtin_command.get_command(builtin_ctx, subcommand_name)
+                if subcommand is not None:
+                    builtin_node[subcommand_name] = cast(
+                        JsonObject,
+                        {
+                            "name": subcommand_name,
+                            "help": subcommand.help,
+                            "short_help": subcommand.short_help,
+                            "type": "builtin_action",
+                            "signature": _build_click_signature(subcommand),
+                        },
+                    )
+            root_node[builtin_name] = builtin_node
+        else:
+            root_node[builtin_name] = cast(JsonObject, builtin_properties)
 
     ctx = click.Context(root)
 
