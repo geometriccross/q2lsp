@@ -8,9 +8,8 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from q2lsp.lsp.types import CompletionContext
+from q2lsp.lsp.types import CompletionContext, CompletionKind, CompletionMode
 from q2lsp.qiime.types import CommandHierarchy, JsonObject
-
 
 # Metadata keys to skip when looking for commands/actions
 _ROOT_METADATA_KEYS = frozenset({"name", "help", "short_help", "builtins"})
@@ -37,7 +36,7 @@ class CompletionItem(NamedTuple):
 
     label: str  # Display text
     detail: str  # Additional info (e.g., description)
-    kind: str  # "plugin", "action", "parameter", "builtin"
+    kind: CompletionKind  # "plugin", "action", "parameter", "builtin"
     insert_text: str | None = None  # Text to insert (if different from label)
 
 
@@ -61,7 +60,7 @@ def get_completions(
     Returns:
         List of CompletionItem matching the prefix
     """
-    if ctx.mode == "none" or ctx.command is None:
+    if ctx.mode == CompletionMode.NONE or ctx.command is None:
         return []
 
     # Get the root node (usually "qiime")
@@ -71,13 +70,13 @@ def get_completions(
 
     prefix = ctx.prefix
 
-    if ctx.mode == "root":
+    if ctx.mode == CompletionMode.ROOT:
         return _complete_root(root_node, prefix)
-    elif ctx.mode == "plugin":
+    elif ctx.mode == CompletionMode.PLUGIN:
         # Get plugin name from token 1
         plugin_name = _get_token_text(ctx, 1)
         return _complete_plugin(root_node, plugin_name, prefix)
-    elif ctx.mode == "parameter":
+    elif ctx.mode == CompletionMode.PARAMETER:
         # Get plugin name from token 1, action name from token 2
         plugin_name = _get_token_text(ctx, 1)
         action_name = _get_token_text(ctx, 2)
@@ -116,7 +115,7 @@ def _get_used_parameters(ctx: CompletionContext) -> set[str]:
         text = token.text
         if text.startswith("--"):
             # Strip leading dashes and any value after =
-            param = text.lstrip("-").split("=")[0]
+            param = text.lstrip("-").split("=")[0].replace("-", "_")
             used.add(param)
 
     return used
@@ -148,13 +147,13 @@ def _complete_root(root_node: JsonObject, prefix: str) -> list[CompletionItem]:
                     CompletionItem(
                         label=name,
                         detail=detail or "Built-in command",
-                        kind="builtin",
+                        kind=CompletionKind.BUILTIN,
                     )
                 )
 
     # Get plugin names (keys that are not metadata)
     for key, value in root_node.items():
-        if not key:
+        if not key:  # Skip empty keys
             continue
         if key in _ROOT_METADATA_KEYS:
             continue
@@ -173,7 +172,7 @@ def _complete_root(root_node: JsonObject, prefix: str) -> list[CompletionItem]:
             CompletionItem(
                 label=key,
                 detail=detail or "Plugin",
-                kind="plugin",
+                kind=CompletionKind.PLUGIN,
             )
         )
 
@@ -193,7 +192,8 @@ def _complete_plugin(
     - Action keys: action names with their properties
 
     Note: Actions are expected as direct keys under the command node,
-    not nested in an "actions" array.
+    not nested in an "actions" array. The "actions" key in metadata_keys
+    is included to skip any summary metadata that might use this name.
     """
     items: list[CompletionItem] = []
 
@@ -223,7 +223,7 @@ def _complete_plugin(
             CompletionItem(
                 label=key,
                 detail=detail or "Action",
-                kind="action",
+                kind=CompletionKind.ACTION,
             )
         )
 
@@ -246,7 +246,7 @@ def _complete_builtin_options(prefix: str) -> list[CompletionItem]:
                 CompletionItem(
                     label=opt,
                     detail=desc,
-                    kind="parameter",
+                    kind=CompletionKind.PARAMETER,
                 )
             )
     return items
@@ -322,7 +322,7 @@ def _complete_parameters(
             CompletionItem(
                 label=option_name,
                 detail=" ".join(detail_parts) if detail_parts else "Parameter",
-                kind="parameter",
+                kind=CompletionKind.PARAMETER,
             )
         )
 
@@ -332,7 +332,7 @@ def _complete_parameters(
             CompletionItem(
                 label="--help",
                 detail="Show help message",
-                kind="parameter",
+                kind=CompletionKind.PARAMETER,
             )
         )
 

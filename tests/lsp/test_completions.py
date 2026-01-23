@@ -253,6 +253,7 @@ class TestCompletePlugin:
         """Test that builtins with actions return their subcommands, not just --help."""
         items = _complete_plugin(mock_hierarchy["qiime"], "tools", "")
         labels = [i.label for i in items]
+        # Should return the tool subcommands, not just --help
         assert "import" in labels
         assert "export" in labels
         assert "peek" in labels
@@ -266,13 +267,6 @@ class TestCompletePlugin:
         assert "import" in labels
         assert "export" not in labels
         assert "peek" not in labels
-
-    def test_builtin_with_actions_no_matching_prefix_returns_empty(
-        self, mock_hierarchy: dict
-    ) -> None:
-        """Test that builtin with actions returns empty list when no actions match prefix."""
-        items = _complete_plugin(mock_hierarchy["qiime"], "tools", "xyz")
-        assert items == []
 
     def test_builtin_types_returns_actions(self, mock_hierarchy: dict) -> None:
         """Test that 'types' builtin returns its subcommands."""
@@ -302,6 +296,14 @@ class TestCompletePlugin:
         items = _complete_plugin(mock_hierarchy["qiime"], "tools", "import")
         assert len(items) == 1
         assert items[0].kind == "action"
+
+    def test_builtin_with_actions_no_matching_prefix_returns_empty(
+        self, mock_hierarchy: dict
+    ) -> None:
+        """Test that builtin with actions returns empty list when no actions match prefix."""
+        items = _complete_plugin(mock_hierarchy["qiime"], "tools", "xyz")
+        # Should return empty list, not --help, because tools has actions
+        assert items == []
 
 
 class TestCompleteParameters:
@@ -368,7 +370,7 @@ class TestGetUsedParameters:
         )
         used = _get_used_parameters(ctx)
         assert "table" in used
-        assert "output-dir" in used
+        assert "output_dir" in used  # normalized to underscore
 
     def test_handles_equals_syntax(self) -> None:
         tokens = [
