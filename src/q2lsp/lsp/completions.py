@@ -96,7 +96,7 @@ def _get_used_parameters(ctx: CompletionContext) -> set[str]:
         text = token.text
         if text.startswith("--"):
             # Strip leading dashes and any value after =
-            param = text.lstrip("-").split("=")[0]
+            param = text.lstrip("-").split("=")[0].replace("-", "_")
             used.add(param)
 
     return used
