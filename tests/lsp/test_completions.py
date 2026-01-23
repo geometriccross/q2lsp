@@ -23,7 +23,7 @@ def mock_hierarchy() -> dict:
             "name": "qiime",
             "help": "QIIME 2 command-line interface",
             "short_help": "QIIME 2 CLI",
-            "builtins": ["info", "tools"],
+            "builtins": ["info", "tools", "dev", "metadata", "types"],
             "info": {
                 "name": "info",
                 "short_help": "Display information about current deployment",
@@ -33,6 +33,99 @@ def mock_hierarchy() -> dict:
                 "name": "tools",
                 "short_help": "Tools for working with QIIME 2 files",
                 "type": "builtin",
+                "import": {
+                    "id": "import",
+                    "name": "import",
+                    "description": "Import data into a new QIIME 2 Artifact",
+                    "signature": [],
+                },
+                "export": {
+                    "id": "export",
+                    "name": "export",
+                    "description": "Export data from a QIIME 2 Artifact or Visualization",
+                    "signature": [],
+                },
+                "peek": {
+                    "id": "peek",
+                    "name": "peek",
+                    "description": "Take a peek at a QIIME 2 Artifact or Visualization",
+                    "signature": [],
+                },
+                "citations": {
+                    "id": "citations",
+                    "name": "citations",
+                    "description": "Print citations for a QIIME 2 result",
+                    "signature": [],
+                },
+                "validate": {
+                    "id": "validate",
+                    "name": "validate",
+                    "description": "Validate data in a QIIME 2 Artifact",
+                    "signature": [],
+                },
+            },
+            "metadata": {
+                "name": "metadata",
+                "short_help": "Plugin for working with Metadata",
+                "type": "builtin",
+                "distance-matrix": {
+                    "id": "distance-matrix",
+                    "name": "distance-matrix",
+                    "description": "Create a distance matrix from a numeric Metadata column",
+                    "signature": [],
+                },
+                "merge": {
+                    "id": "merge",
+                    "name": "merge",
+                    "description": "Merge metadata",
+                    "signature": [],
+                },
+                "shuffle-groups": {
+                    "id": "shuffle-groups",
+                    "name": "shuffle-groups",
+                    "description": "Shuffle values in a categorical sample metadata column",
+                    "signature": [],
+                },
+                "tabulate": {
+                    "id": "tabulate",
+                    "name": "tabulate",
+                    "description": "Interactively explore Metadata in an HTML table",
+                    "signature": [],
+                },
+            },
+            "dev": {
+                "name": "dev",
+                "short_help": "Utilities for developers and advanced users",
+                "type": "builtin",
+                "refresh-cache": {
+                    "id": "refresh-cache",
+                    "name": "refresh-cache",
+                    "description": "Refresh CLI cache",
+                    "signature": [],
+                },
+                "reset-theme": {
+                    "id": "reset-theme",
+                    "name": "reset-theme",
+                    "description": "Reset command line theme to default",
+                    "signature": [],
+                },
+            },
+            "types": {
+                "name": "types",
+                "short_help": "Plugin defining types for microbiome analysis",
+                "type": "builtin",
+                "collate-contigs": {
+                    "id": "collate-contigs",
+                    "name": "collate-contigs",
+                    "description": "Collate contigs",
+                    "signature": [],
+                },
+                "partition-samples-single": {
+                    "id": "partition-samples-single",
+                    "name": "partition-samples-single",
+                    "description": "Split demultiplexed sequence data into partitions",
+                    "signature": [],
+                },
             },
             "feature-table": {
                 "id": "feature-table",
@@ -97,6 +190,9 @@ class TestCompleteRoot:
         labels = [i.label for i in items]
         assert "info" in labels
         assert "tools" in labels
+        assert "dev" in labels
+        assert "metadata" in labels
+        assert "types" in labels
 
     def test_returns_plugins(self, mock_hierarchy: dict) -> None:
         items = _complete_root(mock_hierarchy["qiime"], "")
@@ -152,6 +248,54 @@ class TestCompletePlugin:
         items = _complete_plugin(mock_hierarchy["qiime"], "info", "")
         labels = [i.label for i in items]
         assert "--help" in labels
+
+    def test_builtin_with_actions_returns_actions(self, mock_hierarchy: dict) -> None:
+        """Test that builtins with actions return their subcommands, not just --help."""
+        items = _complete_plugin(mock_hierarchy["qiime"], "tools", "")
+        labels = [i.label for i in items]
+        # Should return the tool subcommands, not just --help
+        assert "import" in labels
+        assert "export" in labels
+        assert "peek" in labels
+        assert "citations" in labels
+        assert "validate" in labels
+
+    def test_builtin_with_actions_filters_by_prefix(self, mock_hierarchy: dict) -> None:
+        """Test that prefix filtering works for builtin actions."""
+        items = _complete_plugin(mock_hierarchy["qiime"], "tools", "i")
+        labels = [i.label for i in items]
+        assert "import" in labels
+        assert "export" not in labels
+        assert "peek" not in labels
+
+    def test_builtin_types_returns_actions(self, mock_hierarchy: dict) -> None:
+        """Test that 'types' builtin returns its subcommands."""
+        items = _complete_plugin(mock_hierarchy["qiime"], "types", "")
+        labels = [i.label for i in items]
+        assert "collate-contigs" in labels
+        assert "partition-samples-single" in labels
+
+    def test_builtin_metadata_returns_actions(self, mock_hierarchy: dict) -> None:
+        """Test that 'metadata' builtin returns its subcommands."""
+        items = _complete_plugin(mock_hierarchy["qiime"], "metadata", "")
+        labels = [i.label for i in items]
+        assert "distance-matrix" in labels
+        assert "merge" in labels
+        assert "shuffle-groups" in labels
+        assert "tabulate" in labels
+
+    def test_builtin_dev_returns_actions(self, mock_hierarchy: dict) -> None:
+        """Test that 'dev' builtin returns its subcommands."""
+        items = _complete_plugin(mock_hierarchy["qiime"], "dev", "")
+        labels = [i.label for i in items]
+        assert "refresh-cache" in labels
+        assert "reset-theme" in labels
+
+    def test_builtin_action_kind(self, mock_hierarchy: dict) -> None:
+        """Test that builtin actions have the 'action' kind."""
+        items = _complete_plugin(mock_hierarchy["qiime"], "tools", "import")
+        assert len(items) == 1
+        assert items[0].kind == "action"
 
 
 class TestCompleteParameters:
@@ -218,7 +362,7 @@ class TestGetUsedParameters:
         )
         used = _get_used_parameters(ctx)
         assert "table" in used
-        assert "output-dir" in used
+        assert "output_dir" in used  # normalized to underscore
 
     def test_handles_equals_syntax(self) -> None:
         tokens = [
