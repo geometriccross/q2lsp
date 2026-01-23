@@ -297,6 +297,14 @@ class TestCompletePlugin:
         assert len(items) == 1
         assert items[0].kind == "action"
 
+    def test_builtin_with_actions_no_matching_prefix_returns_empty(
+        self, mock_hierarchy: dict
+    ) -> None:
+        """Test that builtin with actions returns empty list when no actions match prefix."""
+        items = _complete_plugin(mock_hierarchy["qiime"], "tools", "xyz")
+        # Should return empty list, not --help, because tools has actions
+        assert items == []
+
 
 class TestCompleteParameters:
     def test_returns_parameters(self, mock_hierarchy: dict) -> None:
