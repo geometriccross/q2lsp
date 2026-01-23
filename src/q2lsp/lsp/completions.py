@@ -12,6 +12,26 @@ from q2lsp.lsp.types import CompletionContext
 from q2lsp.qiime.types import CommandHierarchy, JsonObject
 
 
+# Metadata keys to skip when looking for commands/actions
+_ROOT_METADATA_KEYS = frozenset({"name", "help", "short_help", "builtins"})
+
+_COMMAND_METADATA_KEYS = frozenset(
+    {
+        "id",
+        "name",
+        "version",
+        "website",
+        "user_support_text",
+        "description",
+        "short_description",
+        "short_help",
+        "help",
+        "actions",
+        "type",
+    }
+)
+
+
 class CompletionItem(NamedTuple):
     """A completion suggestion."""
 
@@ -133,9 +153,10 @@ def _complete_root(root_node: JsonObject, prefix: str) -> list[CompletionItem]:
                 )
 
     # Get plugin names (keys that are not metadata)
-    metadata_keys = {"name", "help", "short_help", "builtins"}
     for key, value in root_node.items():
-        if key in metadata_keys:
+        if not key:
+            continue
+        if key in _ROOT_METADATA_KEYS:
             continue
         if key in (builtins if isinstance(builtins, list) else []):
             continue  # Already added as builtin
@@ -165,39 +186,31 @@ def _complete_plugin(
     prefix: str,
 ) -> list[CompletionItem]:
     """
-    Complete action names within a plugin.
+    Complete action names within a plugin or builtin command.
 
-    Plugin node contains:
-    - Metadata: "id", "name", "version", "website", etc.
+    Plugin/builtin node contains:
+    - Metadata: "id", "name", "version", "website", "type", "short_help", etc.
     - Action keys: action names with their properties
+
+    Note: Actions are expected as direct keys under the command node,
+    not nested in an "actions" array.
     """
     items: list[CompletionItem] = []
 
-    # Check if it's a builtin command first
+    # Get builtin list for reference
     builtins = root_node.get("builtins", [])
-    if isinstance(builtins, list) and plugin_name in builtins:
-        # Builtin commands don't have actions - return help options
-        return _complete_builtin_options(prefix)
+    is_builtin = isinstance(builtins, list) and plugin_name in builtins
 
-    # Get plugin node
-    plugin_node = root_node.get(plugin_name)
-    if not isinstance(plugin_node, dict):
+    # Get the command node (works for both plugins and builtins)
+    command_node = root_node.get(plugin_name)
+    if not isinstance(command_node, dict):
         return items
 
-    # Plugin metadata keys to skip
-    metadata_keys = {
-        "id",
-        "name",
-        "version",
-        "website",
-        "user_support_text",
-        "description",
-        "short_description",
-        "actions",
-    }
-
-    for key, value in plugin_node.items():
-        if key in metadata_keys:
+    # Look for actions in the command node
+    for key, value in command_node.items():
+        if not key:  # Skip empty keys
+            continue
+        if key in _COMMAND_METADATA_KEYS:
             continue
         if not key.startswith(prefix):
             continue
@@ -213,6 +226,10 @@ def _complete_plugin(
                 kind="action",
             )
         )
+
+    # If no actions found and it's a builtin, return help option
+    if not items and is_builtin:
+        return _complete_builtin_options(prefix)
 
     return items
 
