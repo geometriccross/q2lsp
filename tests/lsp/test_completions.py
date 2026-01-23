@@ -218,7 +218,7 @@ class TestGetUsedParameters:
         )
         used = _get_used_parameters(ctx)
         assert "table" in used
-        assert "output-dir" in used
+        assert "output_dir" in used  # normalized to underscore
 
     def test_handles_equals_syntax(self) -> None:
         tokens = [
