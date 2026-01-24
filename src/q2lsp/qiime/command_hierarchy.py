@@ -55,7 +55,11 @@ def _click_option_to_signature_param(opt: click.Option) -> ActionSignatureParame
     if opt.multiple:
         entry["multiple"] = str(opt.multiple)
 
-    if getattr(opt, "is_flag", False):
+    flag_value = getattr(opt, "flag_value", None)
+    bool_flag = (getattr(opt, "is_flag", False) and isinstance(flag_value, bool)) or (
+        getattr(opt, "secondary_opts", []) and isinstance(flag_value, bool)
+    )
+    if bool_flag:
         entry["is_bool_flag"] = True
 
     return entry
@@ -84,13 +88,13 @@ def _build_click_signature(
 
 
 def _build_builtin_command_node(
-    builtin_name: str, builtin_command: click.BaseCommand
+    builtin_name: str, builtin_command: click.Command
 ) -> JsonObject:
     """Build a node for a builtin command, including its subcommands if any."""
     builtin_properties: BuiltinCommandProperties = {
         "name": builtin_name,
-        "help": builtin_command.help,
-        "short_help": builtin_command.short_help,
+        "help": getattr(builtin_command, "help", None),
+        "short_help": getattr(builtin_command, "short_help", None),
         "type": "builtin",
     }
     if isinstance(builtin_command, click.MultiCommand):
@@ -100,12 +104,14 @@ def _build_builtin_command_node(
             subcommand = builtin_command.get_command(builtin_ctx, subcommand_name)
             if subcommand is None:
                 continue
+            if not isinstance(subcommand, click.Command):
+                continue
             builtin_node[subcommand_name] = cast(
                 JsonObject,
                 {
                     "name": subcommand_name,
-                    "help": subcommand.help,
-                    "short_help": subcommand.short_help,
+                    "help": getattr(subcommand, "help", None),
+                    "short_help": getattr(subcommand, "short_help", None),
                     "type": "builtin_action",
                     "signature": _build_click_signature(subcommand),
                 },

@@ -11,7 +11,7 @@ from q2lsp.lsp.parser import (
     find_qiime_commands,
     merge_line_continuations,
 )
-from q2lsp.lsp.types import CompletionContext, CompletionMode, ParsedCommand, TokenSpan
+from q2lsp.lsp.types import CompletionContext, CompletionMode, TokenSpan
 
 
 def get_completion_context(text: str, offset: int) -> CompletionContext:

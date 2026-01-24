@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import TypedDict, TypeAlias
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, Required
 
 JsonPrimitive: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
@@ -10,11 +10,11 @@ CommandHierarchy: TypeAlias = dict[str, JsonObject]
 
 
 class ActionSignatureParameter(TypedDict, total=False):
-    name: str
-    type: str
+    name: Required[str]
+    type: Required[str]
     repr: str
     ast: dict[str, JsonValue]
-    description: str
+    description: Required[str]
     default: JsonValue
     metavar: str
     multiple: str | None
