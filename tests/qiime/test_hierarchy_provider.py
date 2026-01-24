@@ -21,7 +21,7 @@ class TestMakeCachedHierarchyProvider:
         def mock_builder() -> CommandHierarchy:
             nonlocal build_calls
             build_calls += 1
-            return {"test": "hierarchy"}
+            return {"test": {}}
 
         provider = make_cached_hierarchy_provider(mock_builder)
 
@@ -34,7 +34,7 @@ class TestMakeCachedHierarchyProvider:
 
     def test_returns_same_instance(self) -> None:
         """Same instance is returned on subsequent calls."""
-        hierarchy: CommandHierarchy = {"test": "value"}
+        hierarchy: CommandHierarchy = {"test": {}}
 
         def mock_builder() -> CommandHierarchy:
             return hierarchy
@@ -46,27 +46,30 @@ class TestMakeCachedHierarchyProvider:
 
         assert result1 is result2
 
-    def test_with_different_builder_return_values(self) -> None:
-        """Works with different builder return values."""
-        test_cases: list[tuple[CommandHierarchy, str]] = [
+    @pytest.mark.parametrize(
+        "expected_hierarchy,description",
+        [
             ({"root": {}}, "empty root"),
             ({"qiime": {"builtins": []}}, "root with builtins"),
             (
                 {"qiime": {"plugin1": {"actions": {}}, "builtins": []}},
                 "root with plugin",
             ),
-            ({"root": {"key1": "value1", "key2": "value2"}}, "root with multiple keys"),
-        ]
+            ({"root": {"key1": {}, "key2": {}}}, "root with multiple keys"),
+        ],
+    )
+    def test_with_different_builder_return_values(
+        self, expected_hierarchy: CommandHierarchy, description: str
+    ) -> None:
+        """Works with different builder return values."""
 
-        for expected_hierarchy, description in test_cases:
+        def builder(h: CommandHierarchy = expected_hierarchy) -> CommandHierarchy:
+            return h
 
-            def builder(h: CommandHierarchy = expected_hierarchy) -> CommandHierarchy:
-                return h
+        provider = make_cached_hierarchy_provider(builder)
+        result = provider()
 
-            provider = make_cached_hierarchy_provider(builder)
-            result = provider()
-
-            assert result == expected_hierarchy, f"Failed for: {description}"
+        assert result == expected_hierarchy, f"Failed for: {description}"
 
     def test_returns_callable_provider(self) -> None:
         """make_cached_hierarchy_provider returns a callable provider."""
