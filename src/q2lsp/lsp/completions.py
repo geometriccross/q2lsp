@@ -118,7 +118,27 @@ def _get_used_parameters(ctx: CompletionContext) -> set[str]:
             param = text.lstrip("-").split("=")[0].replace("-", "_")
             used.add(param)
 
+            # Normalize prefixed options: add base name for prefixed params
+            # If param matches pattern <prefix>_<rest> where prefix in {"i","o","p","m"}
+            parts = param.split("_", 1)
+            if len(parts) == 2 and parts[0] in {"i", "o", "p", "m"}:
+                base_name = parts[1]
+                used.add(base_name)
+
     return used
+
+
+def _option_matches_prefix(option_name: str, prefix_filter: str) -> bool:
+    """Check if option name matches prefix filter, handling i/o/p/m prefixes."""
+    if not prefix_filter:
+        return True
+    if option_name.startswith(prefix_filter):
+        return True
+    opt = option_name.lstrip("-")
+    pref = prefix_filter.lstrip("-")
+    if len(opt) >= 2 and opt[0] in {"i", "o", "p", "m"} and opt[1] == "-":
+        opt = opt[2:]  # strip the prefix plus dash
+    return opt.startswith(pref)
 
 
 def _complete_root(root_node: JsonObject, prefix: str) -> list[CompletionItem]:
@@ -267,6 +287,9 @@ def _complete_parameters(
     """
     items: list[CompletionItem] = []
 
+    # Preserve the incoming prefix filter to avoid shadowing
+    prefix_filter = prefix
+
     # Check if it's a builtin command
     builtins = root_node.get("builtins", [])
     is_builtin = isinstance(builtins, list) and plugin_name in builtins
@@ -285,12 +308,12 @@ def _complete_parameters(
     signature = action_node.get("signature", [])
     if not isinstance(signature, list):
         if is_builtin:
-            return _complete_builtin_options(prefix)
+            return _complete_builtin_options(prefix_filter)
         return items
 
     if not signature:
         if is_builtin:
-            return _complete_builtin_options(prefix)
+            return _complete_builtin_options(prefix_filter)
         return items
 
     for param in signature:
@@ -305,9 +328,25 @@ def _complete_parameters(
         if name in used_params:
             continue
 
-        # Format as --parameter-name
-        option_name = f"--{name.replace('_', '-')}"
-        if not option_name.startswith(prefix):
+        # Derive prefix from signature metadata
+        prefix_source = param.get("signature_type") or param.get("type")
+        option_prefix = ""
+        if isinstance(prefix_source, str):
+            prefix_source_lower = prefix_source.lower()
+            if prefix_source_lower.startswith("input"):
+                option_prefix = "i"
+            elif prefix_source_lower.startswith("output"):
+                option_prefix = "o"
+            elif prefix_source_lower.startswith("parameter"):
+                option_prefix = "p"
+            elif prefix_source_lower.startswith("metadata"):
+                option_prefix = "m"
+
+        # Format as --prefix-parameter-name (if prefix exists)
+        option_name = (
+            f"--{option_prefix + '-' if option_prefix else ''}{name.replace('_', '-')}"
+        )
+        if not _option_matches_prefix(option_name, prefix_filter):
             continue
 
         # Build detail string
@@ -333,7 +372,7 @@ def _complete_parameters(
         )
 
     # Always add --help
-    if "--help".startswith(prefix) and "help" not in used_params:
+    if "--help".startswith(prefix_filter) and "help" not in used_params:
         items.append(
             CompletionItem(
                 label="--help",

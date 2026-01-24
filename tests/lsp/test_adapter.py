@@ -166,3 +166,19 @@ class TestToLspCompletionItem:
         )
         lsp_item = to_lsp_completion_item(item)
         assert lsp_item.insert_text == "foo"
+
+    def test_text_edit_with_position_and_prefix(self) -> None:
+        """Verify text_edit is emitted when position and prefix are provided."""
+        item = InternalCompletionItem(
+            label="--p-input",
+            detail="test detail",
+            kind=CompletionKind.PARAMETER,
+        )
+        lsp_item = to_lsp_completion_item(
+            item, position=types.Position(line=0, character=5), prefix="--"
+        )
+        assert lsp_item.text_edit is not None
+        assert isinstance(lsp_item.text_edit, types.TextEdit)
+        assert lsp_item.text_edit.new_text == "--p-input"
+        assert lsp_item.text_edit.range.start == types.Position(line=0, character=3)
+        assert lsp_item.text_edit.range.end == types.Position(line=0, character=5)

@@ -78,7 +78,10 @@ def create_server(
         internal_items = get_completions(ctx, hierarchy)
 
         # Convert to LSP CompletionItems
-        lsp_items = [_to_lsp_completion_item(item) for item in internal_items]
+        lsp_items = [
+            _to_lsp_completion_item(item, position=params.position, prefix=ctx.prefix)
+            for item in internal_items
+        ]
 
         logger.debug("Returning %d completion items", len(lsp_items))
         return types.CompletionList(

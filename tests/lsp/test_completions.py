@@ -141,18 +141,21 @@ def mock_hierarchy() -> dict:
                             "name": "table",
                             "type": "FeatureTable",
                             "description": "The feature table to summarize",
+                            "signature_type": "input",
                         },
                         {
                             "name": "output_dir",
                             "type": "Path",
                             "description": "Output directory",
                             "default": None,
+                            "signature_type": "output",
                         },
                         {
                             "name": "sample_metadata",
                             "type": "Metadata",
                             "description": "Sample metadata",
                             "default": None,
+                            "signature_type": "parameter",
                         },
                     ],
                 },
@@ -165,6 +168,7 @@ def mock_hierarchy() -> dict:
                             "name": "table",
                             "type": "FeatureTable",
                             "description": "Input table",
+                            "signature_type": "input",
                         },
                     ],
                 },
@@ -312,25 +316,25 @@ class TestCompleteParameters:
             mock_hierarchy["qiime"], "feature-table", "summarize", "--", set()
         )
         labels = [i.label for i in items]
-        assert "--table" in labels
-        assert "--output-dir" in labels
-        assert "--sample-metadata" in labels
+        assert "--i-table" in labels
+        assert "--o-output-dir" in labels
+        assert "--p-sample-metadata" in labels
 
     def test_filters_by_prefix(self, mock_hierarchy: dict) -> None:
         items = _complete_parameters(
             mock_hierarchy["qiime"], "feature-table", "summarize", "--t", set()
         )
         labels = [i.label for i in items]
-        assert "--table" in labels
-        assert "--output-dir" not in labels
+        assert "--i-table" in labels
+        assert "--o-output-dir" not in labels
 
     def test_excludes_used_parameters(self, mock_hierarchy: dict) -> None:
         items = _complete_parameters(
             mock_hierarchy["qiime"], "feature-table", "summarize", "--", {"table"}
         )
         labels = [i.label for i in items]
-        assert "--table" not in labels
-        assert "--output-dir" in labels
+        assert "--i-table" not in labels
+        assert "--o-output-dir" in labels
 
     def test_includes_help(self, mock_hierarchy: dict) -> None:
         items = _complete_parameters(
@@ -341,14 +345,14 @@ class TestCompleteParameters:
 
     def test_parameter_kind(self, mock_hierarchy: dict) -> None:
         items = _complete_parameters(
-            mock_hierarchy["qiime"], "feature-table", "summarize", "--table", set()
+            mock_hierarchy["qiime"], "feature-table", "summarize", "--i-table", set()
         )
         assert len(items) == 1
         assert items[0].kind == "parameter"
 
     def test_required_indicator(self, mock_hierarchy: dict) -> None:
         items = _complete_parameters(
-            mock_hierarchy["qiime"], "feature-table", "summarize", "--table", set()
+            mock_hierarchy["qiime"], "feature-table", "summarize", "--i-table", set()
         )
         # table has no default, so it's required
         assert "(required)" in items[0].detail
@@ -360,11 +364,11 @@ class TestGetUsedParameters:
             TokenSpan("qiime", 0, 5),
             TokenSpan("feature-table", 6, 19),
             TokenSpan("summarize", 20, 29),
-            TokenSpan("--table", 30, 37),
-            TokenSpan("table.qza", 38, 47),
-            TokenSpan("--output-dir", 48, 60),
+            TokenSpan("--i-table", 30, 39),
+            TokenSpan("table.qza", 40, 49),
+            TokenSpan("--o-output-dir", 50, 64),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=60)
+        cmd = ParsedCommand(tokens=tokens, start=0, end=64)
         ctx = CompletionContext(
             mode="parameter", command=cmd, current_token=None, token_index=6, prefix=""
         )
@@ -377,9 +381,9 @@ class TestGetUsedParameters:
             TokenSpan("qiime", 0, 5),
             TokenSpan("feature-table", 6, 19),
             TokenSpan("summarize", 20, 29),
-            TokenSpan("--table=table.qza", 30, 47),
+            TokenSpan("--i-table=table.qza", 30, 49),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=47)
+        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
         ctx = CompletionContext(
             mode="parameter", command=cmd, current_token=None, token_index=4, prefix=""
         )
@@ -435,4 +439,4 @@ class TestGetCompletions:
         )
         items = get_completions(ctx, mock_hierarchy)
         labels = [i.label for i in items]
-        assert "--table" in labels
+        assert "--i-table" in labels

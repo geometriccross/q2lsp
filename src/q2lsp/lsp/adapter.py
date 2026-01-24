@@ -58,19 +58,39 @@ def completion_kind_to_lsp(kind: CompletionKind) -> types.CompletionItemKind:
     return _COMPLETION_KIND_TO_LSP.get(kind, types.CompletionItemKind.Text)
 
 
-def to_lsp_completion_item(item: InternalCompletionItem) -> types.CompletionItem:
+def to_lsp_completion_item(
+    item: InternalCompletionItem,
+    position: types.Position | None = None,
+    prefix: str = "",
+) -> types.CompletionItem:
     """
     Convert internal CompletionItem to LSP CompletionItem.
 
     Args:
         item: Internal completion item
+        position: LSP position where completion is requested (optional)
+        prefix: Text prefix to be replaced by text_edit (optional)
 
     Returns:
         LSP-compatible CompletionItem
     """
-    return types.CompletionItem(
+    completion_item = types.CompletionItem(
         label=item.label,
         detail=item.detail,
         kind=completion_kind_to_lsp(item.kind),
         insert_text=item.insert_text if item.insert_text else None,
     )
+
+    # If position and prefix are provided, add text_edit to replace the prefix
+    if position is not None and prefix:
+        start_character = max(0, position.character - len(prefix))
+        new_text = item.insert_text if item.insert_text else item.label
+        completion_item.text_edit = types.TextEdit(
+            range=types.Range(
+                start=types.Position(line=position.line, character=start_character),
+                end=types.Position(line=position.line, character=position.character),
+            ),
+            new_text=new_text,
+        )
+
+    return completion_item
