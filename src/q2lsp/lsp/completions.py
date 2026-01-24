@@ -9,6 +9,11 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from q2lsp.lsp.types import CompletionContext, CompletionKind, CompletionMode
+from q2lsp.qiime.options import (
+    format_qiime_option_label,
+    option_label_matches_prefix,
+    qiime_option_prefix,
+)
 from q2lsp.qiime.types import CommandHierarchy, JsonObject
 
 # Metadata keys to skip when looking for commands/actions
@@ -129,16 +134,8 @@ def _get_used_parameters(ctx: CompletionContext) -> set[str]:
 
 
 def _option_matches_prefix(option_name: str, prefix_filter: str) -> bool:
-    """Check if option name matches prefix filter, handling i/o/p/m prefixes."""
-    if not prefix_filter:
-        return True
-    if option_name.startswith(prefix_filter):
-        return True
-    opt = option_name.lstrip("-")
-    pref = prefix_filter.lstrip("-")
-    if len(opt) >= 2 and opt[0] in {"i", "o", "p", "m"} and opt[1] == "-":
-        opt = opt[2:]  # strip the prefix plus dash
-    return opt.startswith(pref)
+    """Wrapper for option_label_matches_prefix to keep exported name for tests."""
+    return option_label_matches_prefix(option_name, prefix_filter)
 
 
 def _complete_root(root_node: JsonObject, prefix: str) -> list[CompletionItem]:
@@ -328,24 +325,9 @@ def _complete_parameters(
         if name in used_params:
             continue
 
-        # Derive prefix from signature metadata
-        prefix_source = param.get("signature_type") or param.get("type")
-        option_prefix = ""
-        if isinstance(prefix_source, str):
-            prefix_source_lower = prefix_source.lower()
-            if prefix_source_lower.startswith("input"):
-                option_prefix = "i"
-            elif prefix_source_lower.startswith("output"):
-                option_prefix = "o"
-            elif prefix_source_lower.startswith("parameter"):
-                option_prefix = "p"
-            elif prefix_source_lower.startswith("metadata"):
-                option_prefix = "m"
-
-        # Format as --prefix-parameter-name (if prefix exists)
-        option_name = (
-            f"--{option_prefix + '-' if option_prefix else ''}{name.replace('_', '-')}"
-        )
+        # Derive prefix and format option name
+        option_prefix = qiime_option_prefix(param)
+        option_name = format_qiime_option_label(option_prefix, name)
         if not _option_matches_prefix(option_name, prefix_filter):
             continue
 

@@ -17,45 +17,126 @@ from q2lsp.qiime.types import (
 )
 
 
-def _build_click_signature(
+def _normalize_param_name(name: str | None) -> str:
+    """Normalize a parameter name by replacing hyphens with underscores."""
+    return (name or "").replace("-", "_")
+
+
+def _option_default(opt: click.Option) -> object | None:
+    """Get the default value for an option, excluding callable defaults."""
+    if opt.required:
+        return None
+    default_value = opt.default
+    if callable(default_value):
+        return None
+    return default_value
+
+
+def _option_type_name(opt: click.Option) -> str:
+    """Get the type name for an option."""
+    return getattr(opt.type, "name", "") or opt.type.__class__.__name__
+
+
+def _click_option_to_signature_param(opt: click.Option) -> ActionSignatureParameter:
+    """Convert a click Option to an ActionSignatureParameter dict."""
+    entry: ActionSignatureParameter = {
+        "name": _normalize_param_name(opt.name),
+        "type": _option_type_name(opt),
+        "description": opt.help or "",
+    }
+
+    default_value = _option_default(opt)
+    if default_value is not None:
+        entry["default"] = cast(JsonValue, default_value)
+
+    if opt.metavar is not None:
+        entry["metavar"] = opt.metavar
+
+    if opt.multiple:
+        entry["multiple"] = str(opt.multiple)
+
+    if getattr(opt, "is_flag", False):
+        entry["is_bool_flag"] = True
+
+    return entry
+
+
+def _extract_signature_from_click_command(
     command: click.BaseCommand,
 ) -> list[ActionSignatureParameter]:
     """Extract signature parameters from a click command."""
     signature: list[ActionSignatureParameter] = []
-    # Use getattr to work around type stub limitations
     params = getattr(command, "params", [])
     for param in params:
         if not isinstance(param, click.Option):
             continue
         if getattr(param, "hidden", False):
             continue
-
-        entry: ActionSignatureParameter = {
-            "name": (param.name or "").replace("-", "_"),
-            "type": param.type.name
-            if param.type.name
-            else param.type.__class__.__name__,
-            "description": param.help or "",
-        }
-
-        if not param.required:
-            default_value = param.default
-            # Skip callable defaults (lazy defaults)
-            if not callable(default_value):
-                entry["default"] = default_value
-
-        if param.metavar is not None:
-            entry["metavar"] = param.metavar
-
-        if param.multiple:
-            entry["multiple"] = str(param.multiple)
-
-        if getattr(param, "is_flag", False):
-            entry["is_bool_flag"] = True
-
-        signature.append(entry)
-
+        signature.append(_click_option_to_signature_param(param))
     return signature
+
+
+def _build_click_signature(
+    command: click.BaseCommand,
+) -> list[ActionSignatureParameter]:
+    """Extract signature parameters from a click command."""
+    return _extract_signature_from_click_command(command)
+
+
+def _build_builtin_command_node(
+    builtin_name: str, builtin_command: click.BaseCommand
+) -> JsonObject:
+    """Build a node for a builtin command, including its subcommands if any."""
+    builtin_properties: BuiltinCommandProperties = {
+        "name": builtin_name,
+        "help": builtin_command.help,
+        "short_help": builtin_command.short_help,
+        "type": "builtin",
+    }
+    if isinstance(builtin_command, click.MultiCommand):
+        builtin_ctx = click.Context(builtin_command)
+        builtin_node: JsonObject = cast(JsonObject, builtin_properties)
+        for subcommand_name in builtin_command.list_commands(builtin_ctx):
+            subcommand = builtin_command.get_command(builtin_ctx, subcommand_name)
+            if subcommand is None:
+                continue
+            builtin_node[subcommand_name] = cast(
+                JsonObject,
+                {
+                    "name": subcommand_name,
+                    "help": subcommand.help,
+                    "short_help": subcommand.short_help,
+                    "type": "builtin_action",
+                    "signature": _build_click_signature(subcommand),
+                },
+            )
+        return builtin_node
+    return cast(JsonObject, builtin_properties)
+
+
+def _build_builtin_nodes(root: RootCommand) -> dict[str, JsonObject]:
+    """Build all builtin command nodes."""
+    nodes: dict[str, JsonObject] = {}
+    for builtin_name, builtin_command in root._builtin_commands.items():
+        nodes[builtin_name] = _build_builtin_command_node(builtin_name, builtin_command)
+    return nodes
+
+
+def _build_plugin_nodes(root: RootCommand, ctx: click.Context) -> dict[str, JsonObject]:
+    """Build all plugin command nodes."""
+    plugin_lookup = cast(Mapping[str, PluginCommandProperties], root._plugin_lookup)
+    nodes: dict[str, JsonObject] = {}
+    for plugin_name, plugin_data in plugin_lookup.items():
+        plugin_command = _get_plugin_command(root, ctx, plugin_name)
+        action_lookup: dict[str, ActionCommandProperties] = dict(
+            plugin_command._action_lookup
+        )
+        action_lookup.update(getattr(plugin_command, "_hidden_actions", {}))
+        plugin_node: JsonObject = cast(JsonObject, dict(plugin_data))
+        for action_name, action_data in action_lookup.items():
+            plugin_node[action_name] = cast(JsonObject, dict(action_data))
+        nodes[plugin_name] = plugin_node
+    return nodes
 
 
 def build_command_hierarchy(root: RootCommand) -> CommandHierarchy:
@@ -67,48 +148,14 @@ def build_command_hierarchy(root: RootCommand) -> CommandHierarchy:
         "builtins": cast(list[JsonValue], sorted(root._builtin_commands.keys())),
     }
 
-    for builtin_name, builtin_command in root._builtin_commands.items():
-        builtin_properties: BuiltinCommandProperties = {
-            "name": builtin_name,
-            "help": builtin_command.help,
-            "short_help": builtin_command.short_help,
-            "type": "builtin",
-        }
-        # Check if builtin is a MultiCommand (has subcommands)
-        if isinstance(builtin_command, click.MultiCommand):
-            builtin_ctx = click.Context(builtin_command)
-            builtin_node: JsonObject = cast(JsonObject, builtin_properties)
-            for subcommand_name in builtin_command.list_commands(builtin_ctx):
-                subcommand = builtin_command.get_command(builtin_ctx, subcommand_name)
-                if subcommand is not None:
-                    builtin_node[subcommand_name] = cast(
-                        JsonObject,
-                        {
-                            "name": subcommand_name,
-                            "help": subcommand.help,
-                            "short_help": subcommand.short_help,
-                            "type": "builtin_action",
-                            "signature": _build_click_signature(subcommand),
-                        },
-                    )
-            root_node[builtin_name] = builtin_node
-        else:
-            root_node[builtin_name] = cast(JsonObject, builtin_properties)
+    # Add builtins
+    for name, node in _build_builtin_nodes(root).items():
+        root_node[name] = node
 
+    # Add plugins
     ctx = click.Context(root)
-
-    plugin_lookup = cast(Mapping[str, PluginCommandProperties], root._plugin_lookup)
-    for plugin_name, plugin_data in plugin_lookup.items():
-        plugin_command = _get_plugin_command(root, ctx, plugin_name)
-        action_lookup: dict[str, ActionCommandProperties] = dict(
-            plugin_command._action_lookup
-        )
-        action_lookup.update(getattr(plugin_command, "_hidden_actions", {}))
-
-        plugin_node: JsonObject = cast(JsonObject, dict(plugin_data))
-        for action_name, action_data in action_lookup.items():
-            plugin_node[action_name] = cast(JsonObject, dict(action_data))
-        root_node[plugin_name] = plugin_node
+    for name, node in _build_plugin_nodes(root, ctx).items():
+        root_node[name] = node
 
     return {root_name: root_node}
 
