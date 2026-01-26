@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Callable, TypeAlias
 
 from q2lsp.logging import get_logger
@@ -28,16 +29,24 @@ def make_cached_hierarchy_provider(builder: HierarchyBuilder) -> HierarchyProvid
     """Create a cached provider that calls builder once and caches result.
 
     Logs cache misses (first call) and cache hits (subsequent calls).
+    Thread-safe: ensures builder is called exactly once even under concurrent access.
     """
 
     cache: CommandHierarchy | None = None
+    _lock = threading.Lock()
     _logger = get_logger("qiime.hierarchy_provider")
 
     def provider() -> CommandHierarchy:
         nonlocal cache
+        # Double-checked locking: check cache without lock first
         if cache is None:
-            _logger.debug("Hierarchy cache miss - building hierarchy")
-            cache = builder()
+            with _lock:
+                # Check again while holding lock
+                if cache is None:
+                    _logger.debug("Hierarchy cache miss - building hierarchy")
+                    cache = builder()
+                else:
+                    _logger.debug("Hierarchy cache hit - using cached hierarchy")
         else:
             _logger.debug("Hierarchy cache hit - using cached hierarchy")
         return cache

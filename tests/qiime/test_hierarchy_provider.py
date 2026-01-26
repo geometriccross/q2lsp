@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 from q2lsp.qiime.hierarchy_provider import (
@@ -148,3 +151,95 @@ class TestDefaultHierarchyProvider:
         provider()
 
         assert build_calls == 1, "Builder should be called only once due to caching"
+
+
+class TestThreadSafety:
+    """Tests for thread-safe cache behavior."""
+
+    def test_concurrent_calls_build_once(self) -> None:
+        """Multiple threads calling provider simultaneously result in exactly one build.
+
+        This test is deterministic by using a Barrier to ensure all threads
+        attempt to build at the same time, and tracking call counts precisely.
+        """
+        build_calls = 0
+        build_lock = threading.Lock()
+        # Track which threads actually entered the build phase
+        build_threads: set[int] = set()
+        num_threads = 5
+
+        def mock_builder() -> CommandHierarchy:
+            nonlocal build_calls
+            with build_lock:
+                build_calls += 1
+                build_threads.add(threading.get_ident())
+                # Simulate expensive operation to increase race condition likelihood
+                time.sleep(0.01)
+            return {"qiime": {"builtins": []}}
+
+        provider = make_cached_hierarchy_provider(mock_builder)
+
+        # Barrier to synchronize all threads to start at the same time
+        barrier = threading.Barrier(num_threads)
+        results: list[CommandHierarchy] = []
+
+        def worker() -> None:
+            # Wait for all threads to be ready
+            barrier.wait()
+            # Then all threads call provider simultaneously
+            result = provider()
+            results.append(result)
+
+        # Start all threads
+        threads = [
+            threading.Thread(target=worker, daemon=True) for _ in range(num_threads)
+        ]
+        for t in threads:
+            t.start()
+        # Join with timeout to prevent deadlocks in test failures
+        for t in threads:
+            t.join(timeout=5.0)
+            assert not t.is_alive(), f"Thread {t.name} timed out (potential deadlock)"
+
+        # Verify exactly one build occurred
+        assert build_calls == 1, (
+            f"Expected builder to be called exactly once, but was called {build_calls} "
+            f"times by threads {build_threads}"
+        )
+        # Verify all threads got a result
+        assert len(results) == num_threads
+        # Verify all results are the same instance
+        for result in results[1:]:
+            assert result is results[0], (
+                "All threads should get the same cached instance"
+            )
+
+    def test_sequential_calls_still_cached(self) -> None:
+        """Sequential calls from different threads still use cache after first build."""
+        build_calls = 0
+
+        def mock_builder() -> CommandHierarchy:
+            nonlocal build_calls
+            build_calls += 1
+            return {"qiime": {"builtins": []}}
+
+        provider = make_cached_hierarchy_provider(mock_builder)
+
+        # Call from different threads sequentially
+        results: list[CommandHierarchy] = []
+
+        def worker() -> None:
+            result = provider()
+            results.append(result)
+
+        threads = [threading.Thread(target=worker, daemon=True) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+
+        # All calls should use the same cached result
+        assert build_calls == 1
+        assert len(results) == 3
+        for result in results[1:]:
+            assert result is results[0]
