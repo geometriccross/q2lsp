@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Callable, TypeAlias
 
+from q2lsp.logging import get_logger
 from q2lsp.qiime.types import CommandHierarchy
 
 HierarchyBuilder: TypeAlias = Callable[[], CommandHierarchy]
@@ -18,23 +19,27 @@ __all__ = [
 
 def build_qiime_hierarchy() -> CommandHierarchy:
     """Build QIIME2 command hierarchy from q2cli (expensive operation)."""
-    from q2cli.commands import RootCommand
+    from q2lsp.qiime.q2cli_gateway import build_qiime_hierarchy_via_gateway
 
-    from q2lsp.qiime.command_hierarchy import build_command_hierarchy
-
-    root = RootCommand()
-    return build_command_hierarchy(root)
+    return build_qiime_hierarchy_via_gateway()
 
 
 def make_cached_hierarchy_provider(builder: HierarchyBuilder) -> HierarchyProvider:
-    """Create a cached provider that calls builder once and caches result."""
+    """Create a cached provider that calls builder once and caches result.
+
+    Logs cache misses (first call) and cache hits (subsequent calls).
+    """
 
     cache: CommandHierarchy | None = None
+    _logger = get_logger("qiime.hierarchy_provider")
 
     def provider() -> CommandHierarchy:
         nonlocal cache
         if cache is None:
+            _logger.debug("Hierarchy cache miss - building hierarchy")
             cache = builder()
+        else:
+            _logger.debug("Hierarchy cache hit - using cached hierarchy")
         return cache
 
     return provider
