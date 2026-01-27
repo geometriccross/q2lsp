@@ -2,6 +2,9 @@
 .pixi/*
 !.pixi/config.toml
 
+# typesctipt
+node_modules
+
 # cache
 __pycache__
 .pytest_cache
