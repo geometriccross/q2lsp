@@ -11,6 +11,7 @@ from typing import Literal
 from q2lsp.logging import configure_logging, get_logger
 from q2lsp.lsp.server import create_server
 from q2lsp.qiime.hierarchy_provider import default_hierarchy_provider
+from q2lsp.qiime.q2cli_gateway import create_qiime_help_provider
 
 
 @dataclasses.dataclass(frozen=True)
@@ -124,8 +125,14 @@ def run(argv: Sequence[str] | None = None) -> int:
         # Build hierarchy provider
         get_hierarchy = default_hierarchy_provider()
 
+        # Build help provider
+        get_help = create_qiime_help_provider(max_content_width=80, color=False)
+
         # Create server
-        server = create_server(get_hierarchy=get_hierarchy)
+        server = create_server(
+            get_hierarchy=get_hierarchy,
+            get_help=get_help,
+        )
 
         # Start appropriate transport
         if args.transport == "stdio":

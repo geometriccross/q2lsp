@@ -41,3 +41,10 @@ class TestCreateServer:
         fm = server.protocol.fm
         completion_options = fm.feature_options[types.TEXT_DOCUMENT_COMPLETION]
         assert completion_options.trigger_characters == [" ", "-"]
+
+    def test_registers_hover_feature(self, mock_hierarchy: CommandHierarchy) -> None:
+        """TEXT_DOCUMENT_HOVER is registered."""
+        get_hierarchy = lambda: mock_hierarchy
+        server = server_mod.create_server(get_hierarchy=get_hierarchy)
+        fm = server.protocol.fm
+        assert types.TEXT_DOCUMENT_HOVER in fm.features

@@ -6,6 +6,7 @@ Provides completion support for QIIME2 CLI commands in shell scripts.
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 from lsprotocol import types
 from pygls.lsp.server import LanguageServer
@@ -17,6 +18,7 @@ from q2lsp.lsp.adapter import (
 )
 from q2lsp.lsp.completions import get_completions
 from q2lsp.lsp.error_handling import wrap_handler
+from q2lsp.lsp.hover import get_hover_help
 from q2lsp.lsp.parser import get_completion_context
 from q2lsp.qiime.hierarchy_provider import HierarchyProvider
 
@@ -24,6 +26,7 @@ from q2lsp.qiime.hierarchy_provider import HierarchyProvider
 def create_server(
     *,
     get_hierarchy: HierarchyProvider,
+    get_help: Callable[[list[str]], str | None] | None = None,
     logger: logging.Logger | None = None,
 ) -> LanguageServer:
     """
@@ -31,6 +34,7 @@ def create_server(
 
     Args:
         get_hierarchy: Provider function for QIIME2 command hierarchy.
+        get_help: Provider function for hover help text (takes command path).
         logger: Optional logger instance. If None, uses default q2lsp.lsp logger.
 
     Returns:
@@ -87,6 +91,42 @@ def create_server(
         return types.CompletionList(
             is_incomplete=False,
             items=lsp_items,
+        )
+
+    def _default_hover() -> types.Hover | None:
+        return None
+
+    @server.feature(types.TEXT_DOCUMENT_HOVER)
+    @wrap_handler(
+        logger=logger,
+        feature_name="textDocument/hover",
+        default_factory=_default_hover,
+    )
+    def hover(params: types.HoverParams) -> types.Hover | None:  # type: ignore[misc]
+        """
+        Handle textDocument/hover requests.
+
+        Provides hover help for QIIME2 CLI commands.
+        """
+        logger.debug("Hover request at %s", params.position)
+
+        document = server.workspace.get_text_document(params.text_document.uri)
+
+        # Calculate document offset from line/character position
+        offset = _position_to_offset(document, params.position)
+
+        # Get hover help text
+        help_text = get_hover_help(document.source, offset, get_help=get_help)
+
+        if help_text is None:
+            return None
+
+        logger.debug("Hover help: %s", help_text[:100])
+        return types.Hover(
+            contents=types.MarkupContent(
+                kind=types.MarkupKind.Markdown,
+                value=f"```\n{help_text}\n```",
+            ),
         )
 
     return server
