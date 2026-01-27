@@ -25,6 +25,9 @@ lineLength = 120
 [tool.pyright]
 typeCheckingMode = "standard"
 reportUndefinedVariable = true
+pythonVersion = "3.10"
+venvPath = ".pixi/envs"
+venv = "dev"
 reportUnusedImport = true
 reportUnusedVariable = true
 reportUnusedFunction = false
