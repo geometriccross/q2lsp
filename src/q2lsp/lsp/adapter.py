@@ -10,6 +10,7 @@ from q2lsp.lsp.types import CompletionKind
 
 __all__ = [
     "completion_kind_to_lsp",
+    "offset_to_position",
     "position_to_offset",
     "to_lsp_completion_item",
 ]
@@ -43,6 +44,37 @@ def position_to_offset(document: TextDocument, position: types.Position) -> int:
         offset += min(position.character, len(lines[position.line]))
 
     return offset
+
+
+def offset_to_position(document: TextDocument, offset: int) -> types.Position:
+    """
+    Convert document offset to LSP Position (line, character).
+
+    Args:
+        document: The text document
+        offset: 0-based offset in the document
+
+    Returns:
+        LSP Position with 0-based line and character
+    """
+    lines = document.lines
+    current_offset = 0
+    line = 0
+    character = 0
+
+    for i, line_text in enumerate(lines):
+        line_end = current_offset + len(line_text)
+        if offset < line_end:
+            line = i
+            character = offset - current_offset
+            break
+        current_offset = line_end
+    else:
+        # Offset is beyond the last line
+        line = len(lines) - 1 if lines else 0
+        character = len(lines[line]) if lines else 0
+
+    return types.Position(line=line, character=character)
 
 
 def completion_kind_to_lsp(kind: CompletionKind) -> types.CompletionItemKind:
