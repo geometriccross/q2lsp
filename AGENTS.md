@@ -84,13 +84,30 @@ The library used for QIIME 2 as a CLI is called `click`. QIIME 2 is built upon t
 click ref: https://click.palletsprojects.com/en/stable/
 
 ## Project Structure (generated)
-Snapshot for navigation only; do not edit between the markers. Regenerate a tree and paste it between the markers (for example, `tree -L 4 -a -I ".git|__pycache__|.venv|node_modules|.pixi|.pytest_cache|.mypy_cache|.ruff_cache|src/q2lsp.egg-info"`).
+Snapshot for navigation only; do not edit between the markers. Regenerate using `python scripts/gen_project_structure.py` (or `python scripts/gen_project_structure.py --check`).
 <!-- BEGIN GENERATED: PROJECT_STRUCTURE -->
 ```
 <Project Root>
 ├── .beads/
 ├── extensions/
 │   └── vscode-q2lsp/
+│       ├── .gitignore
+│       ├── .npmrc
+│       ├── .vscode-test.mjs
+│       ├── .vscodeignore
+│       ├── CHANGELOG.md
+│       ├── eslint.config.mjs
+│       ├── package.json
+│       ├── pnpm-lock.yaml
+│       ├── README.md
+│       ├── src/
+│       │   ├── extension.ts
+│       │   ├── helpers.ts
+│       │   └── test/
+│       │       └── extension.test.ts
+│       ├── temp.sh
+│       ├── tsconfig.json
+│       └── vsc-extension-quickstart.md
 ├── src/
 │   └── q2lsp/
 │       ├── __main__.py
@@ -99,6 +116,7 @@ Snapshot for navigation only; do not edit between the markers. Regenerate a tree
 │       ├── lsp/
 │       └── qiime/
 ├── tests/
+│   ├── __init__.py
 │   ├── helpers/
 │   ├── lsp/
 │   ├── qiime/
