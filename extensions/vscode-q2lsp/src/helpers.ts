@@ -8,6 +8,7 @@ export type InterpreterCandidate = {
 };
 
 export const DEFAULT_PATH_CANDIDATES = ['python3', 'python'] as const;
+export const REQUIRED_PYTHON_MODULES = ['q2lsp', 'q2cli'] as const;
 
 const normalizePath = (value: string | undefined): string | undefined => {
 	const trimmed = value?.trim();
@@ -69,12 +70,53 @@ export const buildMissingInterpreterMessage = (): string => {
 	return 'Unable to resolve a Python interpreter for q2lsp. Set q2lsp.interpreterPath, install the VS Code Python extension, or ensure python3/python is on PATH.';
 };
 
-export const buildInterpreterValidationMessage = (interpreterPath: string, stderr: string | undefined): string => {
-	const detail = stderr?.trim();
-	if (!detail) {
-		return `Failed to import q2lsp using ${interpreterPath}. Ensure q2lsp is installed in that environment.`;
+
+export const buildInterpreterValidationSnippet = (
+	modules: readonly string[] = REQUIRED_PYTHON_MODULES
+): string => {
+	const moduleList = JSON.stringify(modules);
+	return [
+		'import json',
+		'import importlib.util',
+		`modules = ${moduleList}`,
+		'missing = []',
+		'for name in modules:',
+		'    if importlib.util.find_spec(name) is None:',
+		'        missing.append(name)',
+		'print(json.dumps({"missing": missing}))',
+	].join('\n');
+};
+
+export const parseInterpreterValidationStdout = (stdout: string | undefined): string[] | null => {
+	const trimmed = stdout?.trim();
+	if (!trimmed) {
+		return [];
 	}
-	return `Failed to import q2lsp using ${interpreterPath}. stderr: ${detail}`;
+
+	try {
+		const parsed = JSON.parse(trimmed) as { missing?: unknown };
+		if (!Array.isArray(parsed.missing)) {
+			return null;
+		}
+		return parsed.missing.filter((entry): entry is string => typeof entry === 'string');
+	} catch {
+		return null;
+	}
+};
+
+export const buildInterpreterValidationMessage = (
+	interpreterPath: string,
+	missingModules: readonly string[] | undefined,
+	stderr: string | undefined
+): string => {
+	const detail = stderr?.trim();
+	const missingDetail =
+		missingModules && missingModules.length > 0 ? ` Missing modules: ${missingModules.join(', ')}.` : '';
+	const fixHint = ' Fix: install missing modules in that environment, or set q2lsp.interpreterPath.';
+	if (!detail) {
+		return `Failed to validate q2lsp using ${interpreterPath}.${missingDetail}${fixHint}`;
+	}
+	return `Failed to validate q2lsp using ${interpreterPath}.${missingDetail}${fixHint} stderr: ${detail}`;
 };
 
 export const isAbsolutePath = (value: string): boolean => {

@@ -2,6 +2,9 @@ import * as assert from 'assert';
 import {
 	buildInterpreterCandidates,
 	buildInterpreterPathNotAbsoluteMessage,
+	buildInterpreterValidationMessage,
+	buildInterpreterValidationSnippet,
+	parseInterpreterValidationStdout,
 	buildServerCommand,
 	DEFAULT_PATH_CANDIDATES,
 	getUnsupportedPlatformMessage,
@@ -49,5 +52,29 @@ suite('q2lsp helper tests', () => {
 		const message = buildInterpreterPathNotAbsoluteMessage('python3');
 		assert.ok(message.includes('python3'));
 		assert.ok(message.includes('absolute'));
+	});
+
+	test('validation snippet checks for q2lsp and q2cli', () => {
+		const snippet = buildInterpreterValidationSnippet();
+		assert.ok(snippet.includes('q2lsp'));
+		assert.ok(snippet.includes('q2cli'));
+		assert.ok(snippet.includes('find_spec'));
+	});
+
+	test('validation message includes missing modules', () => {
+		const message = buildInterpreterValidationMessage('/opt/python', ['q2lsp', 'q2cli'], undefined);
+		assert.ok(message.includes('q2lsp'));
+		assert.ok(message.includes('q2cli'));
+		assert.ok(message.includes('/opt/python'));
+	});
+
+	test('validation stdout parse returns missing modules', () => {
+		assert.deepStrictEqual(parseInterpreterValidationStdout('{"missing":["q2lsp"]}'), ['q2lsp']);
+		assert.deepStrictEqual(parseInterpreterValidationStdout('{"missing":[]}'), []);
+	});
+
+	test('validation stdout parse fails on unexpected output', () => {
+		assert.strictEqual(parseInterpreterValidationStdout('WARNING: something'), null);
+		assert.deepStrictEqual(parseInterpreterValidationStdout(''), []);
 	});
 });

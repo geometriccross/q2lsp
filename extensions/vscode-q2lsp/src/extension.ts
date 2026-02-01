@@ -7,11 +7,13 @@ import {
 	buildInterpreterCandidates,
 	buildInterpreterPathNotAbsoluteMessage,
 	buildInterpreterValidationMessage,
+	buildInterpreterValidationSnippet,
 	buildMissingInterpreterMessage,
 	buildServerCommand,
 	getUnsupportedPlatformMessage,
 	isAbsolutePath,
 	mergeEnv,
+	parseInterpreterValidationStdout,
 	shouldRestartOnConfigChange,
 	type InterpreterCandidate,
 } from './helpers';
@@ -20,6 +22,7 @@ type ValidationResult = {
 	ok: boolean;
 	stderr?: string;
 	errorMessage?: string;
+	missingModules?: string[];
 };
 
 const validationTimeoutMs = 2000;
@@ -114,11 +117,8 @@ const startClient = async (context: vscode.ExtensionContext): Promise<void> => {
 		return;
 	}
 
-	const resolvedInterpreter = await resolveValidInterpreter(candidates);
+	const resolvedInterpreter = await resolveValidInterpreter(context, candidates);
 	if (!resolvedInterpreter) {
-		if (!normalizedInterpreter) {
-			showError(buildMissingInterpreterMessage());
-		}
 		return;
 	}
 
@@ -145,23 +145,36 @@ const startClient = async (context: vscode.ExtensionContext): Promise<void> => {
 };
 
 const resolveValidInterpreter = async (
+	context: vscode.ExtensionContext,
 	candidates: InterpreterCandidate[]
 ): Promise<InterpreterCandidate | undefined> => {
+	let lastFailure: { candidate: InterpreterCandidate; validation: ValidationResult } | undefined;
 	for (const candidate of candidates) {
 		const validation = await validateInterpreter(execFileForValidation, candidate.path, validationTimeoutMs);
 		if (validation.ok) {
 			return candidate;
 		}
+		lastFailure = { candidate, validation };
 
 		const message = buildInterpreterValidationMessage(
 			candidate.path,
+			validation.missingModules,
 			validation.stderr ?? validation.errorMessage
 		);
 		outputChannel?.appendLine(message);
 		if (candidate.source === 'config') {
-			showError(message);
+			await showValidationError(context, message);
 			return undefined;
 		}
+	}
+
+	if (lastFailure) {
+		const message = buildInterpreterValidationMessage(
+			lastFailure.candidate.path,
+			lastFailure.validation.missingModules,
+			lastFailure.validation.stderr ?? lastFailure.validation.errorMessage
+		);
+		await showValidationError(context, message);
 	}
 
 	return undefined;
@@ -179,12 +192,6 @@ const resolvePythonExtensionInterpreter = async (): Promise<string | undefined> 
 		outputChannel?.appendLine(`Failed to activate Python extension: ${String(error)}`);
 	}
 
-	const pythonConfig = vscode.workspace.getConfiguration('python');
-	const configured = pythonConfig.get<string>('defaultInterpreterPath');
-	if (configured && configured.trim()) {
-		return configured.trim();
-	}
-
 	try {
 		const interpreter = await vscode.commands.executeCommand<string>('python.interpreterPath');
 		if (interpreter && interpreter.trim()) {
@@ -192,6 +199,12 @@ const resolvePythonExtensionInterpreter = async (): Promise<string | undefined> 
 		}
 	} catch (error) {
 		outputChannel?.appendLine(`Failed to query Python interpreter path: ${String(error)}`);
+	}
+
+	const pythonConfig = vscode.workspace.getConfiguration('python');
+	const configured = pythonConfig.get<string>('defaultInterpreterPath');
+	if (configured && configured.trim()) {
+		return configured.trim();
 	}
 
 	return undefined;
@@ -237,11 +250,30 @@ const validateInterpreter = (
 		};
 		execFileFn(
 			interpreterPath,
-			['-c', 'import q2lsp'],
+			['-c', buildInterpreterValidationSnippet()],
 			execOptions,
-			(error, _stdout, stderr) => {
+			(error, stdout, stderr) => {
 				if (error) {
 					resolve({ ok: false, stderr, errorMessage: error.message });
+					return;
+				}
+				const missingModules = parseInterpreterValidationStdout(stdout);
+				if (missingModules === null) {
+					const trimmed = stdout?.trim() ?? '';
+					const snippet = trimmed.length > 200 ? `${trimmed.slice(0, 200)}...` : trimmed;
+					resolve({
+						ok: false,
+						stderr,
+						errorMessage: `Unexpected validation output (expected JSON). stdout: ${snippet}`,
+					});
+					return;
+				}
+				if (missingModules.length > 0) {
+					resolve({ ok: false, stderr, missingModules });
+					return;
+				}
+				if (!stdout?.trim()) {
+					resolve({ ok: false, stderr, errorMessage: 'No validation output received.' });
 					return;
 				}
 				resolve({ ok: true });
@@ -268,4 +300,49 @@ const sanitizeServerEnvOverrides = (value: unknown): Record<string, string> => {
 const showError = (message: string): void => {
 	outputChannel?.appendLine(message);
 	vscode.window.showErrorMessage(message);
+};
+
+const showValidationError = async (context: vscode.ExtensionContext, message: string): Promise<void> => {
+	const selection = await vscode.window.showErrorMessage(
+		message,
+		'Select Python Interpreter',
+		'Open Settings',
+		'Open README'
+	);
+	if (!selection) {
+		return;
+	}
+
+	switch (selection) {
+		case 'Select Python Interpreter':
+			await selectPythonInterpreter();
+			return;
+		case 'Open Settings':
+			await vscode.commands.executeCommand('workbench.action.openSettings', 'q2lsp.interpreterPath');
+			return;
+		case 'Open README': {
+			const readmeUri = vscode.Uri.joinPath(context.extensionUri, 'README.md');
+			const document = await vscode.workspace.openTextDocument(readmeUri);
+			await vscode.window.showTextDocument(document, { preview: false });
+			return;
+		}
+		default:
+			return;
+	}
+};
+
+const selectPythonInterpreter = async (): Promise<void> => {
+	const pythonExtension = vscode.extensions.getExtension('ms-python.python');
+	if (!pythonExtension) {
+		vscode.window.showErrorMessage('Install the VS Code Python extension to select a Python interpreter.');
+		return;
+	}
+
+	try {
+		await vscode.commands.executeCommand('python.setInterpreter');
+	} catch (error) {
+		vscode.window.showErrorMessage(
+			`Unable to open Python interpreter selection. Ensure the Python extension is installed. (${String(error)})`
+		);
+	}
 };

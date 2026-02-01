@@ -12,16 +12,16 @@ Native Windows is not supported. Use WSL or a remote Linux/macOS environment.
 
 ## Setup
 
-1) Create or choose a Python environment that has `q2lsp` installed.
-2) Set `q2lsp.interpreterPath` to the absolute path of that interpreter.
+1) Create or choose a Python environment that has `q2lsp` and `q2cli` installed.
+2) (Optional) Set `q2lsp.interpreterPath` to the absolute path of that interpreter.
 3) Open a shell script to activate the extension.
 
-The Python extension is optional. If it is installed, its interpreter can be used as a fallback when `q2lsp.interpreterPath` is not set.
+The Python extension is optional. If it is installed and `q2lsp.interpreterPath` is not set, the extension will use the active Python interpreter (falling back to `python3`/`python` on PATH).
 The language server inherits the VS Code extension-host environment by default (including PATH). If you rely on an activated environment, launch VS Code from that environment or set `q2lsp.interpreterPath` explicitly.
 
 ## Settings
 
-- `q2lsp.interpreterPath` (string, required): Absolute path to the Python interpreter used to launch q2lsp.
+- `q2lsp.interpreterPath` (string, optional): Absolute path to the Python interpreter used to launch q2lsp.
 - `q2lsp.serverEnv` (object): Environment variable overrides applied to the language server process. These values override the inherited extension-host environment; they do not replace it.
 
 Example:
