@@ -9,15 +9,41 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:shellscript"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "qiime-language-server.helloWorld",
-        "title": "Hello World"
+        "command": "q2lsp.restartServer",
+        "title": "Restart q2lsp Server",
+        "category": "q2lsp"
+      },
+      {
+        "command": "q2lsp.showServerLog",
+        "title": "Show q2lsp Server Log",
+        "category": "q2lsp"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "q2lsp",
+      "type": "object",
+      "properties": {
+        "q2lsp.interpreterPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the Python interpreter to launch q2lsp. This setting has the highest priority.",
+          "scope": "resource"
+        },
+        "q2lsp.serverEnv": {
+          "type": "object",
+          "default": {},
+          "description": "Environment variable overrides for the q2lsp server (map of string to string).",
+          "scope": "resource"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run compile",
@@ -36,5 +62,8 @@
     "typescript": "^5.9.3",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   }
 }
