@@ -1,0 +1,15 @@
+{
+  "folders": [
+    {
+      "name": "q2lsp",
+      "path": "."
+    },
+    {
+      "name": "vscode-q2lsp",
+      "path": "extensions/vscode-q2lsp"
+    }
+  ],
+  "settings": {
+    "q2lsp.interpreterPath": "/Users/geometriccross/ghq/github.com/geometriccross/q2lsp/.pixi/envs/dev/bin/python"
+  }
+}
