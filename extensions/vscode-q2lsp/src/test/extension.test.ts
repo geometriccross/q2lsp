@@ -1,15 +1,53 @@
 import * as assert from 'assert';
+import {
+	buildInterpreterCandidates,
+	buildInterpreterPathNotAbsoluteMessage,
+	buildServerCommand,
+	DEFAULT_PATH_CANDIDATES,
+	getUnsupportedPlatformMessage,
+	isAbsolutePath,
+	mergeEnv,
+} from '../helpers';
 
-// You can import and use all API from the 'vscode' module
-// as well as import your extension to test it
-import * as vscode from 'vscode';
-// import * as myExtension from '../../extension';
+suite('q2lsp helper tests', () => {
+	test('interpreterPath overrides everything', () => {
+		const candidates = buildInterpreterCandidates('/opt/python', '/opt/python-ext', DEFAULT_PATH_CANDIDATES);
+		assert.deepStrictEqual(candidates, [{ path: '/opt/python', source: 'config' }]);
+	});
 
-suite('Extension Test Suite', () => {
-	vscode.window.showInformationMessage('Start all tests.');
+	test('path fallback order prefers python3 then python', () => {
+		const candidates = buildInterpreterCandidates(undefined, undefined, DEFAULT_PATH_CANDIDATES);
+		assert.deepStrictEqual(candidates, [
+			{ path: 'python3', source: 'path' },
+			{ path: 'python', source: 'path' },
+		]);
+	});
 
-	test('Sample test', () => {
-		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
-		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
+	test('env merge prefers overrides', () => {
+		const merged = mergeEnv({ FOO: 'base', BAR: 'base' }, { BAR: 'override', BAZ: 'override' });
+		assert.deepStrictEqual(merged, { FOO: 'base', BAR: 'override', BAZ: 'override' });
+	});
+
+	test('windows platform is blocked', () => {
+		assert.ok(getUnsupportedPlatformMessage('win32'));
+		assert.strictEqual(getUnsupportedPlatformMessage('linux'), undefined);
+	});
+
+	test('server command uses q2lsp stdio', () => {
+		assert.deepStrictEqual(buildServerCommand('/opt/python'), {
+			command: '/opt/python',
+			args: ['-m', 'q2lsp', '--transport', 'stdio'],
+		});
+	});
+
+	test('absolute path detection', () => {
+		assert.strictEqual(isAbsolutePath('/usr/bin/python3'), true);
+		assert.strictEqual(isAbsolutePath('python3'), false);
+	});
+
+	test('non-absolute interpreter message is actionable', () => {
+		const message = buildInterpreterPathNotAbsoluteMessage('python3');
+		assert.ok(message.includes('python3'));
+		assert.ok(message.includes('absolute'));
 	});
 });
