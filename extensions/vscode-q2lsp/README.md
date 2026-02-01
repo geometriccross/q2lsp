@@ -1,71 +1,52 @@
-# qiime-language-server README
+# q2lsp VS Code Extension
 
-This is the README for your extension "qiime-language-server". After writing up a brief description, we recommend including the following sections.
+This extension launches the q2lsp language server via `python -m q2lsp --transport stdio` when you open shell scripts.
 
-## Features
+## Supported platforms
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- Linux
+- macOS
+- WSL (via VS Code Remote - WSL)
 
-For example if there is an image subfolder under your extension project workspace:
+Native Windows is not supported. Use WSL or a remote Linux/macOS environment.
 
-\!\[feature X\]\(images/feature-x.png\)
+## Setup
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+1) Create or choose a Python environment that has `q2lsp` installed.
+2) Set `q2lsp.interpreterPath` to the absolute path of that interpreter.
+3) Open a shell script to activate the extension.
 
-## Requirements
+The Python extension is optional. If it is installed, its interpreter can be used as a fallback when `q2lsp.interpreterPath` is not set.
+The language server inherits the VS Code extension-host environment by default (including PATH). If you rely on an activated environment, launch VS Code from that environment or set `q2lsp.interpreterPath` explicitly.
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+## Settings
 
-## Extension Settings
+- `q2lsp.interpreterPath` (string, required): Absolute path to the Python interpreter used to launch q2lsp.
+- `q2lsp.serverEnv` (object): Environment variable overrides applied to the language server process. These values override the inherited extension-host environment; they do not replace it.
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+Example:
 
-For example:
+```jsonc
+{
+  "q2lsp.interpreterPath": "/opt/qiime2/bin/python",
+  "q2lsp.serverEnv": {
+    "QIIME2_USER_ENV": "1"
+  }
+}
+```
 
-This extension contributes the following settings:
+## Troubleshooting
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+If you see errors about importing `q2lsp`, verify the interpreter directly:
 
-## Known Issues
+```bash
+/path/to/python -c "import q2lsp"
+```
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+If that fails, install `q2lsp` into that environment and confirm the same command succeeds.
 
-## Release Notes
+## WSL notes
 
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+- Run VS Code in WSL (Remote - WSL).
+- Set `q2lsp.interpreterPath` to the Linux path inside WSL (for example `/usr/bin/python3`).
+- Do not use Windows paths; the extension host runs in the WSL environment.
