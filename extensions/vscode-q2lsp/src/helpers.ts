@@ -10,6 +10,12 @@ export type InterpreterCandidate = {
 export const DEFAULT_PATH_CANDIDATES = ['python3', 'python'] as const;
 export const REQUIRED_PYTHON_MODULES = ['q2lsp', 'q2cli'] as const;
 
+export type InterpreterValidationDetails = {
+	missing: string[];
+	executable: string;
+	version: string;
+};
+
 const normalizePath = (value: string | undefined): string | undefined => {
 	const trimmed = value?.trim();
 	if (!trimmed) {
@@ -77,28 +83,44 @@ export const buildInterpreterValidationSnippet = (
 	const moduleList = JSON.stringify(modules);
 	return [
 		'import json',
+		'import sys',
 		'import importlib.util',
 		`modules = ${moduleList}`,
 		'missing = []',
 		'for name in modules:',
 		'    if importlib.util.find_spec(name) is None:',
 		'        missing.append(name)',
-		'print(json.dumps({"missing": missing}))',
+		'print(json.dumps({"missing": missing, "executable": sys.executable, "version": sys.version}))',
 	].join('\n');
 };
 
-export const parseInterpreterValidationStdout = (stdout: string | undefined): string[] | null => {
+export const parseInterpreterValidationStdout = (
+	stdout: string | undefined
+): InterpreterValidationDetails | null => {
 	const trimmed = stdout?.trim();
 	if (!trimmed) {
-		return [];
+		return null;
 	}
 
 	try {
-		const parsed = JSON.parse(trimmed) as { missing?: unknown };
+		const parsed = JSON.parse(trimmed) as {
+			missing?: unknown;
+			executable?: unknown;
+			version?: unknown;
+		};
 		if (!Array.isArray(parsed.missing)) {
 			return null;
 		}
-		return parsed.missing.filter((entry): entry is string => typeof entry === 'string');
+		const executable = typeof parsed.executable === 'string' ? parsed.executable : undefined;
+		const version = typeof parsed.version === 'string' ? parsed.version : undefined;
+		if (!executable || !version) {
+			return null;
+		}
+		return {
+			missing: parsed.missing.filter((entry): entry is string => typeof entry === 'string'),
+			executable,
+			version,
+		};
 	} catch {
 		return null;
 	}
@@ -113,10 +135,13 @@ export const buildInterpreterValidationMessage = (
 	const missingDetail =
 		missingModules && missingModules.length > 0 ? ` Missing modules: ${missingModules.join(', ')}.` : '';
 	const fixHint = ' Fix: install missing modules in that environment, or set q2lsp.interpreterPath.';
+	const q2cliHint = missingModules?.includes('q2cli')
+		? ' Note: q2cli is typically installed with QIIME 2 via conda/pixi; see the extension README.'
+		: '';
 	if (!detail) {
-		return `Failed to validate q2lsp using ${interpreterPath}.${missingDetail}${fixHint}`;
+		return `Failed to validate q2lsp using ${interpreterPath}.${missingDetail}${fixHint}${q2cliHint}`;
 	}
-	return `Failed to validate q2lsp using ${interpreterPath}.${missingDetail}${fixHint} stderr: ${detail}`;
+	return `Failed to validate q2lsp using ${interpreterPath}.${missingDetail}${fixHint}${q2cliHint} stderr: ${detail}`;
 };
 
 export const isAbsolutePath = (value: string): boolean => {

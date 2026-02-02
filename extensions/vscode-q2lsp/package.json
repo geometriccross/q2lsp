@@ -24,6 +24,11 @@
         "command": "q2lsp.showServerLog",
         "title": "Show q2lsp Server Log",
         "category": "q2lsp"
+      },
+      {
+        "command": "q2lsp.diagnoseEnvironment",
+        "title": "Setup / Diagnose Environment",
+        "category": "q2lsp"
       }
     ],
     "configuration": {

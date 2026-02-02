@@ -58,6 +58,7 @@ suite('q2lsp helper tests', () => {
 		const snippet = buildInterpreterValidationSnippet();
 		assert.ok(snippet.includes('q2lsp'));
 		assert.ok(snippet.includes('q2cli'));
+		assert.ok(snippet.includes('executable'));
 		assert.ok(snippet.includes('find_spec'));
 	});
 
@@ -66,15 +67,19 @@ suite('q2lsp helper tests', () => {
 		assert.ok(message.includes('q2lsp'));
 		assert.ok(message.includes('q2cli'));
 		assert.ok(message.includes('/opt/python'));
+		assert.ok(message.includes('conda/pixi'));
 	});
 
-	test('validation stdout parse returns missing modules', () => {
-		assert.deepStrictEqual(parseInterpreterValidationStdout('{"missing":["q2lsp"]}'), ['q2lsp']);
-		assert.deepStrictEqual(parseInterpreterValidationStdout('{"missing":[]}'), []);
+	test('validation stdout parse returns missing modules and executable', () => {
+		const parsed = parseInterpreterValidationStdout(
+			'{"missing":["q2lsp"],"executable":"/opt/python","version":"3.11.0"}'
+		);
+		assert.deepStrictEqual(parsed?.missing, ['q2lsp']);
+		assert.strictEqual(parsed?.executable, '/opt/python');
 	});
 
 	test('validation stdout parse fails on unexpected output', () => {
 		assert.strictEqual(parseInterpreterValidationStdout('WARNING: something'), null);
-		assert.deepStrictEqual(parseInterpreterValidationStdout(''), []);
+		assert.strictEqual(parseInterpreterValidationStdout(''), null);
 	});
 });

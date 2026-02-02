@@ -37,6 +37,8 @@ Example:
 
 ## Troubleshooting
 
+Run the `q2lsp: Setup / Diagnose Environment` command from the Command Palette to validate your Python environment. The command reports details in the `q2lsp` output channel and suggests next steps if modules are missing.
+
 If you see errors about importing `q2lsp`, verify the interpreter directly:
 
 ```bash
