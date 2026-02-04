@@ -90,6 +90,10 @@ default = { features = ["qiime2-tiny"], solve-group = "default" }
 dev = { features = ["qiime2-tiny", "dev"], solve-group = "default" }
 prod = { features = ["qiime2-tiny"], solve-group = "default" }
 
+[tool.pixi.tasks]
+agents-structure = "python scripts/gen_project_structure.py"
+agents-structure-check = "python scripts/gen_project_structure.py --check"
+
 [tool.pixi.feature.qiime2-tiny.dependencies]
 _r-mutex = "==1.0.1"
 annotated-types = "==0.7.0"
