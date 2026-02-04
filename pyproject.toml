@@ -93,6 +93,7 @@ prod = { features = ["qiime2-tiny"], solve-group = "default" }
 [tool.pixi.tasks]
 agents-structure = "python scripts/gen_project_structure.py"
 agents-structure-check = "python scripts/gen_project_structure.py --check"
+git-hooks-install = "python scripts/install_git_hooks.py"
 
 [tool.pixi.feature.qiime2-tiny.dependencies]
 _r-mutex = "==1.0.1"
