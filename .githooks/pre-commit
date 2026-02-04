@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Keep AGENTS.md generated structure up to date.
+
+run_generator() {
+  if command -v pixi >/dev/null 2>&1; then
+    pixi run -e dev agents-structure
+    return
+  fi
+
+  if command -v python >/dev/null 2>&1; then
+    python scripts/gen_project_structure.py
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 scripts/gen_project_structure.py
+    return
+  fi
+
+  echo "error: neither pixi nor python is available to update AGENTS.md" >&2
+  return 1
+}
+
+run_generator
+
+# If AGENTS.md changed, stage it so the commit includes it.
+if ! git diff --quiet -- AGENTS.md; then
+  git add AGENTS.md
+fi

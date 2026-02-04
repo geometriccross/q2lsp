@@ -25,6 +25,7 @@ pixi run -e dev pytest
 pixi run -e dev ruff check .
 pixi run -e dev ruff format .
 pixi run -e dev pyright
+pixi run -e dev git-hooks-install
 ```
 
 ## Working Agreements
