@@ -105,7 +105,6 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 │       │   ├── helpers.ts
 │       │   └── test/
 │       │       └── extension.test.ts
-│       ├── temp.sh
 │       ├── tsconfig.json
 │       └── vsc-extension-quickstart.md
 ├── src/
