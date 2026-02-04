@@ -84,7 +84,7 @@ The library used for QIIME 2 as a CLI is called `click`. QIIME 2 is built upon t
 click ref: https://click.palletsprojects.com/en/stable/
 
 ## Project Structure (generated)
-Snapshot for navigation only; do not edit between the markers. Regenerate using `python scripts/gen_project_structure.py` (or `python scripts/gen_project_structure.py --check`).
+Snapshot for navigation only; do not edit between the markers. Regenerate using `pixi run -e dev agents-structure` (or `pixi run -e dev agents-structure-check`). Fallback: `python scripts/gen_project_structure.py` (or `python scripts/gen_project_structure.py --check`).
 <!-- BEGIN GENERATED: PROJECT_STRUCTURE -->
 ```
 <Project Root>
