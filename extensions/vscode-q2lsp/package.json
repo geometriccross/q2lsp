@@ -44,7 +44,7 @@
         "q2lsp.serverEnv": {
           "type": "object",
           "default": {},
-          "description": "Environment variable overrides for the q2lsp server (map of string to string).",
+          "description": "Environment variable overrides for the q2lsp server (map of string to string). Changing this setting restarts the q2lsp server.",
           "scope": "resource"
         }
       }

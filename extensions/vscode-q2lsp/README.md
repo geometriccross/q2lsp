@@ -22,7 +22,7 @@ The language server inherits the VS Code extension-host environment by default (
 ## Settings
 
 - `q2lsp.interpreterPath` (string, optional): Absolute path to the Python interpreter used to launch q2lsp.
-- `q2lsp.serverEnv` (object): Environment variable overrides applied to the language server process. These values override the inherited extension-host environment; they do not replace it.
+- `q2lsp.serverEnv` (object): Environment variable overrides applied to the language server process. These values override the inherited extension-host environment; they do not replace it. Changing this setting restarts the q2lsp server.
 
 Example:
 
@@ -30,7 +30,7 @@ Example:
 {
   "q2lsp.interpreterPath": "/opt/qiime2/bin/python",
   "q2lsp.serverEnv": {
-    "QIIME2_USER_ENV": "1"
+    "PATH": "/opt/qiime2/bin:${env:PATH}"
   }
 }
 ```
