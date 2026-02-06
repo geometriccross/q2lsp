@@ -1,0 +1,32 @@
+name: quality-gate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pixi
+        uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          cache: true
+
+      - name: Ruff
+        run: pixi run -e dev ruff check .
+
+      - name: Ruff Format Check
+        run: pixi run -e dev ruff format --check .
+
+      - name: Pyright
+        run: pixi run -e dev pyright
+
+      - name: Pytest
+        run: pixi run -e dev pytest
