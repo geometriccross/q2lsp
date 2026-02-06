@@ -152,10 +152,21 @@ jobs:
           name: vscode-q2lsp-vsix-${{ github.ref_name }}
           path: dist/
 
+      - name: Validate AZURE_ACCESS_TOKEN secret
+        shell: bash
+        env:
+          AZURE_ACCESS_TOKEN: ${{ secrets.AZURE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${AZURE_ACCESS_TOKEN}" ]]; then
+            echo "ERROR: Required secret AZURE_ACCESS_TOKEN is missing or empty; cannot publish to VS Code Marketplace." >&2
+            exit 1
+          fi
+
       - name: Publish to VS Code Marketplace
         shell: bash
         env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          VSCE_PAT: ${{ secrets.AZURE_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -172,7 +183,7 @@ jobs:
             prerelease_flag=(--pre-release)
           fi
 
-          pnpm dlx @vscode/vsce@3.7.1 publish --packagePath "${vsix_files[0]}" --pat "${VSCE_PAT}" "${prerelease_flag[@]}"
+          pnpm dlx @vscode/vsce@3.7.1 publish --packagePath "${vsix_files[0]}" "${prerelease_flag[@]}"
 
   publish-openvsx:
     runs-on: ubuntu-latest
@@ -198,10 +209,21 @@ jobs:
           name: vscode-q2lsp-vsix-${{ github.ref_name }}
           path: dist/
 
+      - name: Validate OVSX_ACCESS_TOKEN secret
+        shell: bash
+        env:
+          OVSX_ACCESS_TOKEN: ${{ secrets.OVSX_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${OVSX_ACCESS_TOKEN}" ]]; then
+            echo "ERROR: Required secret OVSX_ACCESS_TOKEN is missing or empty; cannot publish to Open VSX." >&2
+            exit 1
+          fi
+
       - name: Publish to Open VSX
         shell: bash
         env:
-          OPENVSX_PAT: ${{ secrets.OPENVSX_PAT }}
+          OVSX_PAT: ${{ secrets.OVSX_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -212,4 +234,4 @@ jobs:
             exit 1
           fi
 
-          pnpm dlx ovsx@0.10.9 publish "${vsix_files[0]}" --pat "${OPENVSX_PAT}"
+          pnpm dlx ovsx@0.10.9 publish "${vsix_files[0]}"
