@@ -102,7 +102,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f ./*.vsix
-          pnpm dlx @vscode/vsce@3.7.1 package
+          pnpm dlx @vscode/vsce@3.7.1 package --no-dependencies
 
           shopt -s nullglob
           vsix_files=(./*.vsix)
