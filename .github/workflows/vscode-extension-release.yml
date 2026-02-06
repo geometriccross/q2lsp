@@ -42,7 +42,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22"
+          node-version: "22.13.1"
           cache: pnpm
           cache-dependency-path: extensions/vscode-q2lsp/pnpm-lock.yaml
 
@@ -102,7 +102,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f ./*.vsix
-          pnpm dlx @vscode/vsce package
+          pnpm dlx @vscode/vsce@3.7.1 package
 
           shopt -s nullglob
           vsix_files=(./*.vsix)
@@ -135,7 +135,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22"
+          node-version: "22.13.1"
+          cache: pnpm
+          cache-dependency-path: extensions/vscode-q2lsp/pnpm-lock.yaml
 
       - name: Download VSIX artifact
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
@@ -163,7 +165,7 @@ jobs:
             prerelease_flag=(--pre-release)
           fi
 
-          pnpm dlx @vscode/vsce publish --packagePath "${vsix_files[0]}" --pat "${VSCE_PAT}" "${prerelease_flag[@]}"
+          pnpm dlx @vscode/vsce@3.7.1 publish --packagePath "${vsix_files[0]}" --pat "${VSCE_PAT}" "${prerelease_flag[@]}"
 
   publish-openvsx:
     runs-on: ubuntu-latest
@@ -181,7 +183,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22"
+          node-version: "22.13.1"
+          cache: pnpm
+          cache-dependency-path: extensions/vscode-q2lsp/pnpm-lock.yaml
 
       - name: Download VSIX artifact
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
@@ -203,4 +207,4 @@ jobs:
             exit 1
           fi
 
-          pnpm dlx ovsx publish "${vsix_files[0]}" --pat "${OPENVSX_PAT}"
+          pnpm dlx ovsx@0.10.9 publish "${vsix_files[0]}" --pat "${OPENVSX_PAT}"

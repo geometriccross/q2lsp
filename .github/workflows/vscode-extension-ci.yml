@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           if command -v xvfb-run >/dev/null 2>&1; then
-            xvfb-run -a pnpm run test
+            xvfb-run -a pnpm exec vscode-test
           else
-            pnpm run test
+            pnpm exec vscode-test
           fi
