@@ -127,7 +127,7 @@ jobs:
       name: testpypi
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: ${{ needs.build.outputs.artifact-name }}
           path: dist/
@@ -151,7 +151,7 @@ jobs:
       name: pypi
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: ${{ needs.build.outputs.artifact-name }}
           path: dist/
