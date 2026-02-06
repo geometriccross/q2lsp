@@ -6531,8 +6531,8 @@ packages:
   timestamp: 1762302213846
 - pypi: ./
   name: q2lsp
-  version: 0.2.0b2
-  sha256: daefdb4944ad3c99ba1c007b290a4840e3300d83fb0c9c4c21e7a8c483ad7d4c
+  version: 0.2.0b3
+  sha256: 97b036dc860fabb8df70fb603ffb60046d376f23e2a9b0c15f9ca4337d36d7f7
   requires_dist:
   - returns>=0.26.0,<0.27
   - pygls>=2.0.0,<3
