@@ -136,8 +136,6 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22.13.1"
-          cache: pnpm
-          cache-dependency-path: extensions/vscode-q2lsp/pnpm-lock.yaml
 
       - name: Download VSIX artifact
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
@@ -184,8 +182,6 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22.13.1"
-          cache: pnpm
-          cache-dependency-path: extensions/vscode-q2lsp/pnpm-lock.yaml
 
       - name: Download VSIX artifact
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
