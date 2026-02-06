@@ -3,7 +3,7 @@ name: release-publish
 on:
   push:
     tags:
-      - "v*"
+      - "q2lsp-v*"
 
 permissions:
   contents: read
@@ -44,7 +44,12 @@ jobs:
           set -euo pipefail
 
           tag="${GITHUB_REF_NAME}"
-          tag_version="${tag#v}"
+          if [[ "${tag}" != q2lsp-v* ]]; then
+            echo "Release tag '${tag}' must start with 'q2lsp-v'." >&2
+            exit 1
+          fi
+
+          tag_version="${tag#q2lsp-v}"
 
           project_version="$(python - <<'PY'
           import re
@@ -73,7 +78,7 @@ jobs:
           if [[ "${tag_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             prerelease="false"
             stable="true"
-          elif [[ "${tag_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)[0-9]+$ ]]; then
+          elif [[ "${tag_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(a|b)[0-9]+$ ]]; then
             prerelease="true"
             stable="false"
           else
