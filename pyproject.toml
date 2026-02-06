@@ -6,11 +6,38 @@ build-backend = "setuptools.build_meta"
 name = "q2lsp"
 version = "0.1.0"
 description = "A language server protocol implementation for qiime2."
+authors = [
+    { name = "q2lsp contributors" },
+]
+maintainers = [
+    { name = "q2lsp maintainers" },
+]
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = [
+    "qiime2",
+    "lsp",
+    "language-server",
+    "bioinformatics",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Text Editors :: Integrated Development Environments (IDE)",
+]
 requires-python = ">=3.10"
 dependencies = [
     "returns>=0.26.0,<0.27", "pygls>=2.0.0,<3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/geometriccross/q2lsp"
+Repository = "https://github.com/geometriccross/q2lsp"
+Issues = "https://github.com/geometriccross/q2lsp/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
