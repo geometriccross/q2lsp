@@ -59,8 +59,7 @@ class TestDiagnosticsIntegration:
         self, mock_hierarchy: CommandHierarchy
     ) -> LanguageServer:
         """Create server with diagnostics enabled."""
-        get_hierarchy = lambda: mock_hierarchy
-        return server_mod.create_server(get_hierarchy=get_hierarchy)
+        return server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
 
     @pytest.mark.asyncio
     async def test_typo_produces_diagnostic(

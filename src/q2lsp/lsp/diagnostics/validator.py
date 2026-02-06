@@ -45,6 +45,7 @@ def validate_command(
 
     # Validate token 1 (plugin/builtin) when len(tokens) >= 2
     token1_valid = True
+    token1_for_action: str | None = None
     if len(command.tokens) >= 2:
         token1 = command.tokens[1]
         # Skip if token starts with '-' (option-like)
@@ -53,17 +54,24 @@ def validate_command(
             if issue1 is not None:
                 issues.append(issue1)
                 token1_valid = False
+                valid_plugins, valid_builtins = _get_valid_plugins_and_builtins(
+                    root_node
+                )
+                token1_for_action = _get_unique_prefix_match(
+                    token1.text, valid_plugins | valid_builtins
+                )
+            else:
+                token1_for_action = token1.text
 
     # Validate token 2 (action) when len(tokens) >= 3 and token1 is valid
     # If token1 is invalid, we don't validate token2 to avoid noise
     # (action candidates are unknown when the plugin/builtin is invalid)
     token2_valid = True
-    if token1_valid and len(command.tokens) >= 3:
+    if (token1_valid or token1_for_action is not None) and len(command.tokens) >= 3:
         token2 = command.tokens[2]
         # Skip if token starts with '-' (option-like)
         if not token2.text.startswith("-"):
-            token1 = command.tokens[1]
-            plugin_name = token1.text
+            plugin_name = token1_for_action or command.tokens[1].text
             issue2 = _validate_action(token2, root_node, plugin_name)
             if issue2 is not None:
                 issues.append(issue2)
@@ -329,12 +337,30 @@ def _get_suggestions(
 
     # Add close matches that aren't already in suggestions
     for match in close_matches:
+        if match.lower() == token_lower:
+            continue
         if match not in seen:
             suggestions.append(match)
             seen.add(match)
 
     # Limit to the requested number of suggestions
     return suggestions[:limit]
+
+
+def _get_unique_prefix_match(
+    token_text: str, candidates: list[str] | set[str]
+) -> str | None:
+    """Return a unique case-insensitive prefix match, if one exists."""
+    token_lower = token_text.lower()
+    matches = [
+        candidate
+        for candidate in candidates
+        if candidate.lower().startswith(token_lower)
+        and candidate.lower() != token_lower
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def _get_close_matches(

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from q2lsp.qiime.options import (
     format_qiime_option_label,
     option_label_matches_prefix,
