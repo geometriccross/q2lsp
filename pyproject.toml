@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "q2lsp"
-version = "0.2.0b1"
+version = "0.2.0b2"
 description = "A language server protocol implementation for qiime2."
 authors = [
     { name = "q2lsp contributors" },
