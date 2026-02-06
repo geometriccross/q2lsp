@@ -2,7 +2,7 @@
   "name": "qiime-language-server",
   "displayName": "vscode-q2lsp",
   "description": "The language server for qiime",
-  "version": "0.2.0-beta.8",
+  "version": "0.2.0-beta.9",
   "engines": {
     "vscode": "^1.108.1"
   },
