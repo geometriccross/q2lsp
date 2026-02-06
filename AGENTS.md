@@ -121,7 +121,8 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 │   ├── lsp/
 │   ├── qiime/
 │   ├── test_cli.py
-│   └── test_logging.py
+│   ├── test_logging.py
+│   └── test_workflow_hardening.py
 └── pyproject.toml
 ```
 <!-- END GENERATED: PROJECT_STRUCTURE -->

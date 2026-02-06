@@ -1,0 +1,7 @@
+* @geometriccross
+
+# Protect release and workflow controls.
+.github/workflows/** @geometriccross
+pyproject.toml @geometriccross
+doc/prompts/RELEASE_POLICY.md @geometriccross
+doc/prompts/** @geometriccross
