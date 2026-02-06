@@ -1,0 +1,206 @@
+name: vscode-extension-release
+
+on:
+  push:
+    tags:
+      - "vscode-q2lsp-v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run mode (build/package only; skip publish jobs)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-extension-release-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'tag' }}
+  cancel-in-progress: true
+
+jobs:
+  build-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: extensions/vscode-q2lsp
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061
+        with:
+          version: 9.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: extensions/vscode-q2lsp/pnpm-lock.yaml
+
+      - name: Verify release tag matches extension version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" != refs/tags/* ]]; then
+            echo "Non-tag run detected; skipping strict tag/version check."
+            exit 0
+          fi
+
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${tag}" != vscode-q2lsp-v* ]]; then
+            echo "Release tag '${tag}' must start with 'vscode-q2lsp-v'." >&2
+            exit 1
+          fi
+
+          tag_version="${tag#vscode-q2lsp-v}"
+          package_version="$(node -p \"require('./package.json').version\")"
+
+          if [[ "${tag_version}" != "${package_version}" ]]; then
+            echo "Release tag (${tag_version}) does not match extension package version (${package_version})." >&2
+            exit 1
+          fi
+
+      - name: Dry-run note
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Release publish is handled by downstream publish jobs in this workflow."
+          echo "Current run mode: dry_run=${DRY_RUN}"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Compile
+        run: pnpm run compile
+
+      - name: Test
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v xvfb-run >/dev/null 2>&1; then
+            xvfb-run -a pnpm run test
+          else
+            pnpm run test
+          fi
+
+      - name: Package extension (.vsix)
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f ./*.vsix
+          pnpm dlx @vscode/vsce package
+
+          shopt -s nullglob
+          vsix_files=(./*.vsix)
+          if [[ "${#vsix_files[@]}" -ne 1 ]]; then
+            echo "Expected exactly one .vsix file, found ${#vsix_files[@]}." >&2
+            exit 1
+          fi
+
+          echo "vsix_path=${vsix_files[0]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: vscode-q2lsp-vsix-${{ github.ref_name }}
+          path: extensions/vscode-q2lsp/${{ steps.package.outputs.vsix_path }}
+
+  publish-vscode-marketplace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build-package
+    if: ${{ startsWith(github.ref, 'refs/tags/vscode-q2lsp-v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')) }}
+    environment:
+      name: vscode-marketplace
+    steps:
+      - name: Setup pnpm
+        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061
+        with:
+          version: 9.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: vscode-q2lsp-vsix-${{ github.ref_name }}
+          path: dist/
+
+      - name: Publish to VS Code Marketplace
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          vsix_files=(dist/*.vsix)
+          if [[ "${#vsix_files[@]}" -ne 1 ]]; then
+            echo "Expected exactly one .vsix file, found ${#vsix_files[@]}." >&2
+            exit 1
+          fi
+
+          tag_version="${GITHUB_REF_NAME#vscode-q2lsp-v}"
+          prerelease_flag=()
+          if [[ "${tag_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)[0-9]+$ ]]; then
+            prerelease_flag=(--pre-release)
+          fi
+
+          pnpm dlx @vscode/vsce publish --packagePath "${vsix_files[0]}" --pat "${VSCE_PAT}" "${prerelease_flag[@]}"
+
+  publish-openvsx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build-package
+    if: ${{ startsWith(github.ref, 'refs/tags/vscode-q2lsp-v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')) }}
+    environment:
+      name: openvsx
+    steps:
+      - name: Setup pnpm
+        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061
+        with:
+          version: 9.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: vscode-q2lsp-vsix-${{ github.ref_name }}
+          path: dist/
+
+      - name: Publish to Open VSX
+        shell: bash
+        env:
+          OPENVSX_PAT: ${{ secrets.OPENVSX_PAT }}
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          vsix_files=(dist/*.vsix)
+          if [[ "${#vsix_files[@]}" -ne 1 ]]; then
+            echo "Expected exactly one .vsix file, found ${#vsix_files[@]}." >&2
+            exit 1
+          fi
+
+          pnpm dlx ovsx publish "${vsix_files[0]}" --pat "${OPENVSX_PAT}"

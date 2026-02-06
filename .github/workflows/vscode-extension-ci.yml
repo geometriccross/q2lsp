@@ -1,0 +1,58 @@
+name: vscode-extension-ci
+
+on:
+  pull_request:
+    paths:
+      - "extensions/vscode-q2lsp/**"
+      - ".github/workflows/vscode-extension-ci.yml"
+  push:
+    paths:
+      - "extensions/vscode-q2lsp/**"
+      - ".github/workflows/vscode-extension-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  extension-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: extensions/vscode-q2lsp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061
+        with:
+          version: 9.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: extensions/vscode-q2lsp/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Compile
+        run: pnpm run compile
+
+      - name: Test
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v xvfb-run >/dev/null 2>&1; then
+            xvfb-run -a pnpm run test
+          else
+            pnpm run test
+          fi
