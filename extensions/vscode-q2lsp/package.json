@@ -1,8 +1,9 @@
 {
   "name": "qiime-language-server",
+  "publisher": "geometriccross",
   "displayName": "vscode-q2lsp",
   "description": "The language server for qiime",
-  "version": "0.2.0-beta.9",
+  "version": "0.2.0-beta.10",
   "engines": {
     "vscode": "^1.108.1"
   },
