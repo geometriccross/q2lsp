@@ -111,7 +111,7 @@ jobs:
             exit 1
           fi
 
-          echo "vsix_path=${vsix_files[0]}" >> "${GITHUB_OUTPUT}"
+          echo "vsix_path=${vsix_files[0]#./}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
