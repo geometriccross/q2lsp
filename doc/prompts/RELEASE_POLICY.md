@@ -2,6 +2,9 @@
 
 This document defines the release policy for automated package publishing.
 
+Operational runbooks for executing releases and handling incidents are in
+`doc/prompts/RELEASING.md`.
+
 ## 1) Publish targets
 
 - Publish to both `TestPyPI` and `PyPI`.
