@@ -1,9 +1,12 @@
 # Release Policy
 
-This document defines the release policy for automated package publishing.
+This document defines the release policy for automated Python package publishing.
 
 Operational runbooks for executing releases and handling incidents are in
 `doc/prompts/RELEASING.md`.
+
+VS Code extension publish operations are documented in `doc/prompts/RELEASING.md`
+under the `vscode-extension-release` workflow runbook.
 
 ## 1) Publish targets
 
@@ -14,16 +17,16 @@ Operational runbooks for executing releases and handling incidents are in
 ## 2) Trigger and tag policy
 
 - Releases are tag-driven.
-- Stable release tags MUST match `vX.Y.Z` (for example: `v0.4.2`).
-- Prerelease tags MUST use PEP 440 prerelease versions encoded in the tag (for example: `v0.5.0rc1`, `v0.5.0b1`, `v0.5.0a1`).
+- Python stable release tags MUST match `q2lsp-vX.Y.Z` (for example: `q2lsp-v0.4.2`).
+- Python prerelease tags MUST match `q2lsp-vX.Y.ZaN` or `q2lsp-vX.Y.ZbN` (for example: `q2lsp-v0.5.0a1`, `q2lsp-v0.5.0b1`).
 - Tag behavior:
-  - `vX.Y.Z`: publish to TestPyPI, then promote to PyPI after approval.
-  - `vX.Y.ZaN` / `vX.Y.ZbN` / `vX.Y.ZrcN`: publish to TestPyPI only by default; do not auto-publish prereleases to PyPI.
+  - `q2lsp-vX.Y.Z`: publish to TestPyPI, then promote to PyPI after approval.
+  - `q2lsp-vX.Y.ZaN` / `q2lsp-vX.Y.ZbN`: publish to TestPyPI only by default; do not auto-publish prereleases to PyPI.
 
 ## 3) Version source of truth
 
 - The package version declared in `pyproject.toml` is the single source of truth.
-- The release tag version MUST exactly match the package version (without the leading `v`).
+- The release tag version MUST exactly match the package version (without the leading `q2lsp-v`).
 - If the tag and package version differ, release MUST fail.
 
 ## 4) Promotion and approval policy

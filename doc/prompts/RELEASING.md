@@ -1,19 +1,25 @@
 # Releasing Runbook
 
-This runbook describes how to operate the `release-publish` workflow.
+This runbook describes how to operate the release pipelines:
+
+- Python package workflow: `release-publish`
+- VS Code extension workflow: `vscode-extension-release`
+
 Policy rules remain in `doc/prompts/RELEASE_POLICY.md`.
 
 ## 1) Prerequisites and setup checklist
 
 Before pushing a release tag, confirm all of the following:
 
-- GitHub workflow: `.github/workflows/release-publish.yml` exists on the release commit.
+- GitHub workflows exist on the release commit:
+  - `.github/workflows/release-publish.yml` (Python package)
+  - `.github/workflows/vscode-extension-release.yml` (VS Code extension)
 - GitHub environments exist: `testpypi` and `pypi`.
 - Environment protections are configured (reviewers/approval gates as required).
 - Trusted Publisher is registered on both indexes for this repo/workflow/environment pair:
   - TestPyPI project -> Publishing (`testpypi` environment)
   - PyPI project -> Publishing (`pypi` environment)
-- `pyproject.toml` version is final and exactly matches the intended tag without `v`.
+- `pyproject.toml` version is final and exactly matches the intended Python tag without `q2lsp-v`.
 - Local quality/build checks pass:
   - `pixi run -e dev ruff check .`
   - `pixi run -e dev ruff format --check .`
@@ -22,12 +28,12 @@ Before pushing a release tag, confirm all of the following:
   - `python -m build`
   - `twine check dist/*`
 
-## 2) Stable release procedure (`vX.Y.Z`)
+## 2) Python stable release procedure (`q2lsp-vX.Y.Z`)
 
 1. Update `pyproject.toml` to `X.Y.Z` and merge to the release branch.
 2. Create and push the annotated tag:
-   - `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
-   - `git push origin vX.Y.Z`
+   - `git tag -a q2lsp-vX.Y.Z -m "Python release q2lsp-vX.Y.Z"`
+   - `git push origin q2lsp-vX.Y.Z`
 3. Monitor GitHub Actions `release-publish` run.
 
 Expected behavior:
@@ -36,10 +42,10 @@ Expected behavior:
 - `publish-testpypi` publishes that artifact bundle to TestPyPI (`testpypi` environment).
 - `publish-pypi` waits for `build` + `publish-testpypi`, then publishes the same artifact bundle to PyPI (`pypi` environment) after environment approval.
 
-## 3) Prerelease procedure (`vX.Y.ZaN`, `vX.Y.ZbN`, `vX.Y.ZrcN`)
+## 3) Python prerelease procedure (`q2lsp-vX.Y.ZaN` / `q2lsp-vX.Y.ZbN`)
 
 1. Update `pyproject.toml` to the prerelease version (PEP 440 form).
-2. Create and push the tag (for example `v1.2.0rc1`).
+2. Create and push the tag (for example `q2lsp-v1.2.0a1` or `q2lsp-v1.2.0b1`).
 3. Monitor `release-publish`.
 
 Expected routing:
@@ -48,7 +54,23 @@ Expected routing:
 - `publish-testpypi` runs.
 - `publish-pypi` is skipped automatically (`if: needs.build.outputs.stable == 'true'`).
 
-## 4) Post-publish verification
+## 4) VS Code extension release procedure (`vscode-q2lsp-vX.Y.Z`)
+
+1. Update `extensions/vscode-q2lsp/package.json` version to `X.Y.Z`.
+2. Create and push the annotated tag:
+   - `git tag -a vscode-q2lsp-vX.Y.Z -m "VS Code extension release vscode-q2lsp-vX.Y.Z"`
+   - `git push origin vscode-q2lsp-vX.Y.Z`
+3. Monitor GitHub Actions `vscode-extension-release` run.
+
+Expected routing:
+
+- `build-package` validates tag/version and builds a `.vsix` artifact.
+- `publish-vscode-marketplace` runs in environment `vscode-marketplace` when publish is enabled.
+- `publish-openvsx` runs in environment `openvsx` when publish is enabled.
+- `workflow_dispatch` with `dry_run=true` keeps this as build/package only (both publish jobs are skipped).
+- Prerelease tags (for example `vscode-q2lsp-v1.2.0rc1`) publish with `--pre-release` to VS Code Marketplace; OpenVSX publishes the same `.vsix` via `ovsx publish`.
+
+## 5) Post-publish verification
 
 After the workflow completes:
 
@@ -63,8 +85,9 @@ After the workflow completes:
      - `python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ q2lsp==X.Y.Z...`
    - PyPI stable check:
      - `python -m pip install q2lsp==X.Y.Z`
+6. For extension tags, confirm the `vscode-extension-release` run uploaded one `.vsix` artifact and (when publish is enabled) completed both publish jobs.
 
-## 5) Failure handling playbooks
+## 6) Failure handling playbooks
 
 ### A) TestPyPI publish failure
 
@@ -73,8 +96,8 @@ Symptoms: `publish-testpypi` fails; `publish-pypi` will not run.
 1. Check failure cause in workflow logs (OIDC permissions, environment gate, index outage, package metadata).
 2. Fix root cause on branch (do not retag old commit).
 3. Re-run with a new version and new tag:
-   - stable: bump patch (`X.Y.(Z+1)`)
-   - prerelease: bump prerelease counter (`rcN+1`, `bN+1`, or `aN+1`)
+    - stable: bump patch (`X.Y.(Z+1)`)
+    - prerelease: bump prerelease counter (`aN+1` or `bN+1`, keeping the intended phase)
 4. Push the new tag and verify full run.
 
 ### B) PyPI publish or approval failure
@@ -83,7 +106,7 @@ Symptoms: `publish-testpypi` succeeds but `publish-pypi` is waiting for approval
 
 1. If waiting: complete `pypi` environment approval in GitHub.
 2. If failed after approval: inspect `publish-pypi` logs and PyPI project publishing settings.
-3. Apply fix and issue a new patch release tag (`vX.Y.(Z+1)`).
+3. Apply fix and issue a new patch release tag (`q2lsp-vX.Y.(Z+1)`).
 4. Verify new run publishes to both indexes as expected for stable.
 
 ### C) Bad release rollback (already on PyPI)
@@ -95,7 +118,7 @@ Use yank + patch release; do not delete artifacts.
 3. Tag and publish the patch release via normal stable flow.
 4. Announce remediation in release notes (impact + fixed version).
 
-## 6) Hotfix process
+## 7) Hotfix process
 
 Use this for urgent production issues in the latest stable line.
 
@@ -103,10 +126,10 @@ Use this for urgent production issues in the latest stable line.
 2. Implement minimal fix and run full local checks.
 3. Bump patch version only.
 4. Merge with required reviews.
-5. Tag `vX.Y.(Z+1)` and publish via normal stable workflow.
+5. Tag `q2lsp-vX.Y.(Z+1)` and publish via normal stable workflow.
 6. Verify both indexes and publish short operator notes.
 
-## 7) Audit and release-notes checklist
+## 8) Audit and release-notes checklist
 
 For each release, capture:
 

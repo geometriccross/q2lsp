@@ -3,6 +3,10 @@
 This document defines the required repository and account setup before implementing
 the release publish workflow.
 
+Scope: this document is only for Python package publishing (`q2lsp`) via
+`release-publish`. It does not apply to VS Code extension tags
+(`vscode-q2lsp-v...`) or the `vscode-extension-release` workflow.
+
 ## 1) GitHub environments
 
 Create these environments in repository settings:
@@ -32,7 +36,7 @@ For each registration, provide:
 
 1. GitHub owner: `geometriccross`
 2. Repository: `q2lsp`
-3. Workflow filename: the release workflow file to be added in task `q2lsp-yh7`
+3. Workflow filename: `.github/workflows/release-publish.yml`
 4. Environment name: `testpypi` or `pypi` (must match GitHub job `environment` exactly)
 
 Release jobs will require `permissions: { id-token: write, contents: read }` so the index can validate
@@ -43,8 +47,9 @@ GitHub OIDC identity.
 Before enabling publishing, enforce:
 
 1. Protected default branch (for example `main`) with required reviews and status checks.
-2. Restrict who can push to release tags (for example `v*`).
-3. Require pull request reviews for workflow and packaging metadata changes.
+2. Restrict who can push to Python release tags (for example `q2lsp-v*`).
+3. (Optional) Configure separate protection for extension tags (`vscode-q2lsp-v*`) under extension release policy.
+4. Require pull request reviews for workflow and packaging metadata changes.
 
 `CODEOWNERS` in this repository is used to require review from `@geometriccross` for release-related files.
 
