@@ -78,7 +78,7 @@ jobs:
           echo "Current run mode: dry_run=${DRY_RUN}"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --config.node-linker=hoisted
 
       - name: Lint
         run: pnpm run lint
