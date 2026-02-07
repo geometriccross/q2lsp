@@ -3,7 +3,7 @@
   "publisher": "geometriccross",
   "displayName": "vscode-q2lsp",
   "description": "The language server for qiime",
-  "version": "0.2.0-beta.10",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.108.1"
   },

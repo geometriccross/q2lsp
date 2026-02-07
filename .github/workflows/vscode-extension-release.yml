@@ -189,7 +189,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: build-package
-    if: ${{ startsWith(github.ref, 'refs/tags/vscode-q2lsp-v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')) }}
+    # Temporary: OpenVSX publishing is disabled; re-enable by restoring the original condition below.
+    # Original condition: ${{ startsWith(github.ref, 'refs/tags/vscode-q2lsp-v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')) }}
+    if: ${{ false }}
     environment:
       name: openvsx
     steps:
