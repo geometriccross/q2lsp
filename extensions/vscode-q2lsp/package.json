@@ -3,7 +3,13 @@
   "publisher": "geometriccross",
   "displayName": "vscode-q2lsp",
   "description": "The language server for qiime",
-  "version": "1.0.0",
+  "version": "1.0.1",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/geometriccross/q2lsp.git",
+    "directory": "extensions/vscode-q2lsp"
+  },
   "engines": {
     "vscode": "^1.108.1"
   },

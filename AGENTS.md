@@ -98,6 +98,7 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 │       ├── .vscodeignore
 │       ├── CHANGELOG.md
 │       ├── eslint.config.mjs
+│       ├── LICENSE
 │       ├── package.json
 │       ├── pnpm-lock.yaml
 │       ├── README.md
