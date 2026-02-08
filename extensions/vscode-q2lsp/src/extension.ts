@@ -4,6 +4,7 @@ import { execFile, type ExecFileException, type ExecFileOptionsWithStringEncodin
 import { LanguageClient, type LanguageClientOptions, type ServerOptions } from 'vscode-languageclient/node';
 import {
 	DEFAULT_PATH_CANDIDATES,
+	QIIME2_QUICKSTART_URL,
 	Q2CLI_MISSING_QIIME_HINT,
 	buildInterpreterCandidates,
 	buildInterpreterPathNotAbsoluteMessage,
@@ -339,7 +340,13 @@ const selectInterpreterCandidate = async (
 };
 
 const buildRepairActions = (missingModules: readonly string[] | undefined): string[] => {
-	const actions = ['Select Python Interpreter', 'Open Settings', 'Open README', 'Show q2lsp Log'];
+	const hasMissingQ2cli = missingModules?.includes('q2cli') ?? false;
+	const actions = [
+		'Select Python Interpreter',
+		'Open Settings',
+		hasMissingQ2cli ? 'Open QIIME 2 Quickstart' : 'Open README',
+		'Show q2lsp Log',
+	];
 	if (missingModules?.includes('q2lsp')) {
 		return ['Install q2lsp', ...actions];
 	}
@@ -368,16 +375,19 @@ const handleRepairSelection = async (
 	selection: string,
 	interpreterPath: string | undefined
 ): Promise<void> => {
-	switch (selection) {
-		case 'Select Python Interpreter':
-			await selectPythonInterpreter();
-			return;
-		case 'Open Settings':
-			await vscode.commands.executeCommand('workbench.action.openSettings', 'q2lsp.interpreterPath');
-			return;
-		case 'Open README':
-			await openReadme(context);
-			return;
+		switch (selection) {
+			case 'Select Python Interpreter':
+				await selectPythonInterpreter();
+				return;
+			case 'Open Settings':
+				await vscode.commands.executeCommand('workbench.action.openSettings', 'q2lsp.interpreterPath');
+				return;
+			case 'Open QIIME 2 Quickstart':
+				await vscode.env.openExternal(vscode.Uri.parse(QIIME2_QUICKSTART_URL));
+				return;
+			case 'Open README':
+				await openReadme(context);
+				return;
 		case 'Show q2lsp Log':
 			outputChannel?.show(true);
 			return;

@@ -9,8 +9,9 @@ export type InterpreterCandidate = {
 
 export const DEFAULT_PATH_CANDIDATES = ['python3', 'python'] as const;
 export const REQUIRED_PYTHON_MODULES = ['q2lsp', 'q2cli'] as const;
+export const QIIME2_QUICKSTART_URL = 'https://library.qiime2.org/quickstart/amplicon';
 export const Q2CLI_MISSING_QIIME_HINT =
-	' QIIME 2 is not installed in this Python environment (missing q2cli). Install QIIME 2 via conda/pixi; see the extension README.';
+	` QIIME 2 is not installed in this Python environment (missing q2cli). Install QIIME 2: ${QIIME2_QUICKSTART_URL}.`;
 
 export type InterpreterValidationDetails = {
 	missing: string[];

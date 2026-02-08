@@ -7,6 +7,8 @@ import {
 	parseInterpreterValidationStdout,
 	buildServerCommand,
 	DEFAULT_PATH_CANDIDATES,
+	Q2CLI_MISSING_QIIME_HINT,
+	QIIME2_QUICKSTART_URL,
 	getUnsupportedPlatformMessage,
 	isAbsolutePath,
 	mergeEnv,
@@ -70,7 +72,13 @@ suite('q2lsp helper tests', () => {
 		assert.ok(message.includes('q2cli'));
 		assert.ok(message.includes('Required modules missing'));
 		assert.ok(message.includes('QIIME 2 is not installed in this Python environment'));
-		assert.ok(message.includes('conda/pixi'));
+		assert.ok(message.includes(QIIME2_QUICKSTART_URL));
+		assert.ok(!message.includes('README'));
+	});
+
+	test('q2cli hint points to QIIME 2 quickstart', () => {
+		assert.ok(Q2CLI_MISSING_QIIME_HINT.includes(QIIME2_QUICKSTART_URL));
+		assert.ok(!Q2CLI_MISSING_QIIME_HINT.includes('README'));
 	});
 
 	test('validation stdout parse returns missing modules and executable', () => {
