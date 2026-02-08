@@ -1,3 +1,4 @@
+
 # q2lsp
 [![quality-gate](https://github.com/geometriccross/q2lsp/actions/workflows/quality-gate.yml/badge.svg)](https://github.com/geometriccross/q2lsp/actions/workflows/quality-gate.yml)
 [![vscode-extension-ci](https://github.com/geometriccross/q2lsp/actions/workflows/vscode-extension-ci.yml/badge.svg)](https://github.com/geometriccross/q2lsp/actions/workflows/vscode-extension-ci.yml)
@@ -5,7 +6,7 @@
 
 `q2lsp` is a language server protocol (LSP) implementation for QIIME 2 workflows.
 
-![Image](https://github.com/user-attachments/assets/d628fb44-31a0-4437-b8f5-d9013480adaa)
+![Image](https://raw.githubusercontent.com/geometriccross/q2lsp/refs/heads/images/props/demo_window_captured.gif)
 
 ## Getting Started
 ### Requirements
