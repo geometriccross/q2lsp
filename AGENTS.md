@@ -2,6 +2,7 @@
 
 ## Overview
 This file is the onboarding index and working agreement for this repo. Keep it concise and aligned with current behavior.
+Use beads to track and manage issue/tasks
 
 ## Canonical Sources
 - `src/q2lsp/` core implementation.
