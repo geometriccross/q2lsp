@@ -50,8 +50,10 @@ suite('q2lsp helper tests', () => {
 
 	test('non-absolute interpreter message is actionable', () => {
 		const message = buildInterpreterPathNotAbsoluteMessage('python3');
-		assert.ok(message.includes('python3'));
-		assert.ok(message.includes('absolute'));
+		assert.strictEqual(
+			message,
+			'q2lsp.interpreterPath must be absolute (e.g., /usr/bin/python3).'
+		);
 	});
 
 	test('validation snippet checks for q2lsp and q2cli', () => {
@@ -66,7 +68,8 @@ suite('q2lsp helper tests', () => {
 		const message = buildInterpreterValidationMessage('/opt/python', ['q2lsp', 'q2cli'], undefined);
 		assert.ok(message.includes('q2lsp'));
 		assert.ok(message.includes('q2cli'));
-		assert.ok(message.includes('/opt/python'));
+		assert.ok(message.includes('Required modules missing'));
+		assert.ok(message.includes('QIIME 2 is not installed in this Python environment'));
 		assert.ok(message.includes('conda/pixi'));
 	});
 

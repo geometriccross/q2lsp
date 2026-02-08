@@ -4,6 +4,7 @@ import { execFile, type ExecFileException, type ExecFileOptionsWithStringEncodin
 import { LanguageClient, type LanguageClientOptions, type ServerOptions } from 'vscode-languageclient/node';
 import {
 	DEFAULT_PATH_CANDIDATES,
+	Q2CLI_MISSING_QIIME_HINT,
 	buildInterpreterCandidates,
 	buildInterpreterPathNotAbsoluteMessage,
 	buildInterpreterValidationMessage,
@@ -171,6 +172,10 @@ const resolveValidInterpreter = async (
 			validation.stderr ?? validation.errorMessage
 		);
 		outputChannel?.appendLine(message);
+		const detail = validation.stderr ?? validation.errorMessage;
+		if (detail?.trim()) {
+			outputChannel?.appendLine(`Validation detail for ${candidate.path}: ${formatOutputSnippet(detail)}`);
+		}
 		if (candidate.source === 'config') {
 			await showValidationError(context, message, validation, candidate.path);
 			return undefined;
@@ -389,7 +394,7 @@ const handleRepairSelection = async (
 const confirmAndInstallQ2lsp = async (interpreterPath: string): Promise<void> => {
 	const command = `"${interpreterPath}" -m pip install -U q2lsp`;
 	const selection = await vscode.window.showWarningMessage(
-		`Install q2lsp using ${interpreterPath}? This will run: ${command}`,
+		'Install q2lsp in this interpreter now?',
 		{ modal: true },
 		'Install q2lsp'
 	);
@@ -400,7 +405,7 @@ const confirmAndInstallQ2lsp = async (interpreterPath: string): Promise<void> =>
 	const hasPip = await checkPipAvailable(interpreterPath);
 	if (!hasPip) {
 		vscode.window.showErrorMessage(
-			`pip is not available in ${interpreterPath}. Install pip for this interpreter and retry.`
+			'pip is not available for this interpreter. Install pip, then retry.'
 		);
 		return;
 	}
@@ -432,7 +437,7 @@ const checkPipAvailable = async (interpreterPath: string): Promise<boolean> => {
 const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<void> => {
 	if (!vscode.workspace.isTrusted) {
 		const selection = await vscode.window.showWarningMessage(
-			'Setup / Diagnose Environment runs a Python process. Trust this workspace to continue.',
+			'Environment check runs Python code. Trust this workspace to continue.',
 			'Manage Workspace Trust',
 			'Open README'
 		);
@@ -486,7 +491,7 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 	if (validation.ok && validation.details) {
 		await showDiagnoseMessage(
 			context,
-			`q2lsp environment OK. Python: ${validation.details.executable}`,
+			'Environment is ready. q2lsp checks passed.',
 			validation,
 			candidate.path,
 			true
@@ -496,11 +501,11 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 
 	if (validation.missingModules?.length) {
 		const q2cliHint = validation.missingModules.includes('q2cli')
-			? ' q2cli is typically installed with QIIME 2 via conda/pixi; see README.'
+			? Q2CLI_MISSING_QIIME_HINT
 			: '';
 		await showDiagnoseMessage(
 			context,
-			`q2lsp environment missing modules: ${validation.missingModules.join(', ')}.${q2cliHint}`,
+			`Required modules missing: ${validation.missingModules.join(', ')}.${q2cliHint}`,
 			validation,
 			candidate.path,
 			false
@@ -510,7 +515,7 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 
 	await showDiagnoseMessage(
 		context,
-		'Unable to validate q2lsp environment. See q2lsp log for details.',
+		"q2lsp couldn't validate this interpreter. See q2lsp log for details.",
 		validation,
 		candidate.path,
 		false

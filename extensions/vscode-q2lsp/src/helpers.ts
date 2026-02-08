@@ -9,6 +9,8 @@ export type InterpreterCandidate = {
 
 export const DEFAULT_PATH_CANDIDATES = ['python3', 'python'] as const;
 export const REQUIRED_PYTHON_MODULES = ['q2lsp', 'q2cli'] as const;
+export const Q2CLI_MISSING_QIIME_HINT =
+	' QIIME 2 is not installed in this Python environment (missing q2cli). Install QIIME 2 via conda/pixi; see the extension README.';
 
 export type InterpreterValidationDetails = {
 	missing: string[];
@@ -69,11 +71,11 @@ export const getUnsupportedPlatformMessage = (platform: NodeJS.Platform): string
 		return undefined;
 	}
 
-	return 'q2lsp does not support native Windows. Use WSL or a remote Linux/macOS environment, then set q2lsp.interpreterPath.';
+	return "q2lsp doesn't run on native Windows. Use WSL or Remote Linux/macOS.";
 };
 
 export const buildMissingInterpreterMessage = (): string => {
-	return 'Unable to resolve a Python interpreter for q2lsp. Set q2lsp.interpreterPath, install the VS Code Python extension, or ensure python3/python is on PATH.';
+	return 'Python interpreter not found for q2lsp. Set q2lsp.interpreterPath or install Python extension.';
 };
 
 
@@ -129,27 +131,25 @@ export const parseInterpreterValidationStdout = (
 export const buildInterpreterValidationMessage = (
 	interpreterPath: string,
 	missingModules: readonly string[] | undefined,
-	stderr: string | undefined
+	_stderr: string | undefined
 ): string => {
-	const detail = stderr?.trim();
 	const missingDetail =
-		missingModules && missingModules.length > 0 ? ` Missing modules: ${missingModules.join(', ')}.` : '';
-	const fixHint = ' Fix: install missing modules in that environment, or set q2lsp.interpreterPath.';
+		missingModules && missingModules.length > 0 ? `Required modules missing: ${missingModules.join(', ')}.` : undefined;
 	const q2cliHint = missingModules?.includes('q2cli')
-		? ' Note: q2cli is typically installed with QIIME 2 via conda/pixi; see the extension README.'
+		? Q2CLI_MISSING_QIIME_HINT
 		: '';
-	if (!detail) {
-		return `Failed to validate q2lsp using ${interpreterPath}.${missingDetail}${fixHint}${q2cliHint}`;
+	if (missingDetail) {
+		return `${missingDetail}${q2cliHint}`;
 	}
-	return `Failed to validate q2lsp using ${interpreterPath}.${missingDetail}${fixHint}${q2cliHint} stderr: ${detail}`;
+	return `q2lsp couldn't validate interpreter ${interpreterPath}. See q2lsp log for details.`;
 };
 
 export const isAbsolutePath = (value: string): boolean => {
 	return path.isAbsolute(value);
 };
 
-export const buildInterpreterPathNotAbsoluteMessage = (interpreterPath: string): string => {
-	return `q2lsp.interpreterPath must be an absolute path. Received "${interpreterPath}". Set it to an absolute path like /usr/bin/python3.`;
+export const buildInterpreterPathNotAbsoluteMessage = (_interpreterPath: string): string => {
+	return 'q2lsp.interpreterPath must be absolute (e.g., /usr/bin/python3).';
 };
 
 export const shouldRestartOnConfigChange = (affectsConfiguration: (section: string) => boolean): boolean => {
