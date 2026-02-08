@@ -1,5 +1,4 @@
 # AGENTS.md
-
 ## Overview
 This file is the onboarding index and working agreement for this repo. Keep it concise and aligned with current behavior.
 Use beads to track and manage issue/tasks
@@ -70,17 +69,13 @@ QIIME 2 commands are typically VERY heavy processes, except for help commands. A
 
 ## References
 ### pygls
-In this repository, pygls is available for LSP implementation.
-
-https://pygls.readthedocs.io/en/latest/
+In this repository, pygls is available for LSP implementation.  
+pygls ref: https://pygls.readthedocs.io/en/latest/
 
 ### qiime2
 QIIME 2 is a framework for bioinformatics written in Python. While QIIME 2 is commonly used via the CLI, an API is also provided in Python, allowing native handling of its commands.
-
+The library used for QIIME 2 as a CLI is called `click`. QIIME 2 is built upon the foundation of `click`.  
 qiime2 ref: https://amplicon-docs.qiime2.org/en/stable/
-
-The library used for QIIME 2 as a CLI is called `click`. QIIME 2 is built upon the foundation of `click`.
-
 
 ### click
 click ref: https://click.palletsprojects.com/en/stable/
