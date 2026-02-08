@@ -42,6 +42,9 @@ Issues = "https://github.com/geometriccross/q2lsp/issues"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[project.scripts]
+q2lsp = "q2lsp.cli:run"
+
 # --- Tool Configurations ---
 
 [tool.pylsp.plugins.ruff]
