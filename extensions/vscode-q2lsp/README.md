@@ -2,6 +2,8 @@
 
 This extension launches the q2lsp language server via `python -m q2lsp --transport stdio` when you open shell scripts.
 
+![Image](https://raw.githubusercontent.com/geometriccross/q2lsp/refs/heads/images/props/demo_window_captured.gif)
+
 ## Supported platforms
 
 - Linux
