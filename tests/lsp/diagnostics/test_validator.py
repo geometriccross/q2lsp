@@ -665,6 +665,32 @@ class TestValidateRequiredOptions:
 
         assert issues == []
 
+    def test_unknown_option_with_same_param_name_suppresses_missing_required(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--table", 30, 37),
+            TokenSpan("table.qza", 38, 47),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=47)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        unknown_option_issues = [
+            issue for issue in issues if issue.code == "q2lsp-dni/unknown-option"
+        ]
+        missing_required_issues = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+
+        assert len(unknown_option_issues) == 1
+        assert "--table" in unknown_option_issues[0].message
+        assert missing_required_issues == []
+
     def test_case_insensitive_option_satisfies_required(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from q2lsp.qiime.options import (
     format_qiime_option_label,
+    normalize_option_to_param_name,
     option_label_matches_prefix,
     param_is_required,
     qiime_option_prefix,
@@ -137,6 +138,41 @@ class TestFormatQiimeOptionLabel:
     def test_single_underscore(self) -> None:
         """Single underscore converted to dash."""
         assert format_qiime_option_label("m", "input") == "--m-input"
+
+
+class TestNormalizeOptionToParamName:
+    def test_standard_option(self) -> None:
+        assert normalize_option_to_param_name("--i-table") == "table"
+
+    def test_option_with_value(self) -> None:
+        assert (
+            normalize_option_to_param_name("--p-sampling-depth=100") == "sampling_depth"
+        )
+
+    def test_non_option(self) -> None:
+        assert normalize_option_to_param_name("value.qza") is None
+
+    def test_single_dash(self) -> None:
+        assert normalize_option_to_param_name("-h") is None
+
+    def test_no_prefix(self) -> None:
+        """Option without QIIME prefix (e.g., --verbose)."""
+        assert normalize_option_to_param_name("--verbose") == "verbose"
+
+    def test_output_prefix(self) -> None:
+        assert normalize_option_to_param_name("--o-visualization") == "visualization"
+
+    def test_metadata_prefix(self) -> None:
+        assert normalize_option_to_param_name("--m-metadata-file") == "metadata_file"
+
+    def test_parameter_prefix(self) -> None:
+        assert normalize_option_to_param_name("--p-n-jobs") == "n_jobs"
+
+    def test_help_option(self) -> None:
+        assert normalize_option_to_param_name("--help") == "help"
+
+    def test_case_insensitive_option(self) -> None:
+        assert normalize_option_to_param_name("--I-TABLE") == "table"
 
 
 class TestOptionLabelMatchesPrefix:

@@ -17,9 +17,13 @@ from q2lsp.qiime.hierarchy_keys import (
     COMMAND_METADATA_KEYS,
     ROOT_METADATA_KEYS,
 )
+from q2lsp.qiime.options import (
+    format_qiime_option_label,
+    normalize_option_to_param_name,
+    param_is_required,
+)
 from q2lsp.qiime.signature_params import (
     get_all_option_labels,
-    get_required_option_labels,
     iter_signature_params,
 )
 from q2lsp.qiime.types import ActionSignatureParameter, CommandHierarchy, JsonObject
@@ -480,18 +484,22 @@ def _validate_required_options(
         if token_name in ("--help", "-h"):
             return issues
 
-    present_options: set[str] = set()
+    present_param_names: set[str] = set()
     for token in option_tokens:
-        if not token.text.startswith("--"):
+        param_name = normalize_option_to_param_name(token.text)
+        if param_name is None:
             continue
-        token_name = token.text.split("=", 1)[0]
-        present_options.add(token_name.lower())
+        present_param_names.add(param_name.lower())
 
-    required_options = _get_required_options(action_node)
-    missing_options = {
-        option.lower(): option
-        for option in required_options
-        if option.lower() not in present_options
+    required_param_options = {
+        name.lower(): format_qiime_option_label(option_prefix, name)
+        for name, option_prefix, param in iter_signature_params(action_node)
+        if param_is_required(param)
+    }
+    missing_param_options = {
+        param_name: option_label
+        for param_name, option_label in required_param_options.items()
+        if param_name not in present_param_names
     }
 
     suppressed_missing: set[str] = set()
@@ -499,13 +507,16 @@ def _validate_required_options(
         suggestion = _extract_single_suggestion(unknown_issue.message)
         if suggestion is None:
             continue
-        suggestion_lower = suggestion.lower()
-        if suggestion_lower in missing_options:
-            suppressed_missing.add(suggestion_lower)
+        suggestion_param_name = normalize_option_to_param_name(suggestion)
+        if suggestion_param_name is None:
+            continue
+        suggestion_param_name_lower = suggestion_param_name.lower()
+        if suggestion_param_name_lower in missing_param_options:
+            suppressed_missing.add(suggestion_param_name_lower)
 
     action_token = tokens[2]
-    for missing_option_lower, missing_option in missing_options.items():
-        if missing_option_lower in suppressed_missing:
+    for missing_param_name, missing_option in missing_param_options.items():
+        if missing_param_name in suppressed_missing:
             continue
         issues.append(
             DiagnosticIssue(
@@ -564,7 +575,11 @@ def _get_valid_options(action_node: JsonObject) -> list[str]:
 
 def _get_required_options(action_node: JsonObject) -> list[str]:
     """Extract required option labels from action node signature."""
-    return get_required_option_labels(action_node)
+    return [
+        format_qiime_option_label(option_prefix, name)
+        for name, option_prefix, param in iter_signature_params(action_node)
+        if param_is_required(param)
+    ]
 
 
 def _iter_signature_params(

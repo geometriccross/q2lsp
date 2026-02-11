@@ -12,6 +12,7 @@ from q2lsp.lsp.types import CompletionContext, CompletionKind, CompletionMode
 from q2lsp.qiime.hierarchy_keys import COMMAND_METADATA_KEYS, ROOT_METADATA_KEYS
 from q2lsp.qiime.options import (
     format_qiime_option_label,
+    normalize_option_to_param_name,
     option_label_matches_prefix,
     param_is_required,
 )
@@ -100,18 +101,9 @@ def _get_used_parameters(ctx: CompletionContext) -> set[str]:
 
     # Parameters start at token index 3
     for token in ctx.command.tokens[3:]:
-        text = token.text
-        if text.startswith("--"):
-            # Strip leading dashes and any value after =
-            param = text.lstrip("-").split("=")[0].replace("-", "_")
-            used.add(param)
-
-            # Normalize prefixed options: add base name for prefixed params
-            # If param matches pattern <prefix>_<rest> where prefix in {"i","o","p","m"}
-            parts = param.split("_", 1)
-            if len(parts) == 2 and parts[0] in {"i", "o", "p", "m"}:
-                base_name = parts[1]
-                used.add(base_name)
+        param_name = normalize_option_to_param_name(token.text)
+        if param_name is not None:
+            used.add(param_name)
 
     return used
 

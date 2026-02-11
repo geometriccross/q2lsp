@@ -5,6 +5,7 @@ from q2lsp.qiime.types import ActionSignatureParameter
 _QIIME_PREFIXES = ("input", "output", "parameter", "metadata")
 _PREFIX_MAP = {"input": "i", "output": "o", "parameter": "p", "metadata": "m"}
 Q2_SIGNATURE_KINDS = frozenset({"input", "output", "parameter", "metadata", "artifact"})
+_QIIME_OPTION_PREFIXES = frozenset({"i", "o", "p", "m"})
 
 
 def qiime_signature_kind(param: ActionSignatureParameter) -> str | None:
@@ -63,3 +64,18 @@ def option_label_matches_prefix(option_name: str, prefix_filter: str) -> bool:
     if len(opt) >= 2 and opt[0] in {"i", "o", "p", "m"} and opt[1] == "-":
         opt = opt[2:]
     return opt.startswith(pref)
+
+
+def normalize_option_to_param_name(token_text: str) -> str | None:
+    """Normalize an option token to its canonical signature param name."""
+    if not token_text.startswith("--"):
+        return None
+
+    option_name = token_text[2:].split("=", 1)[0].lower()
+    param_name = option_name.replace("-", "_")
+
+    parts = param_name.split("_", 1)
+    if len(parts) == 2 and parts[0] in _QIIME_OPTION_PREFIXES:
+        return parts[1]
+
+    return param_name
