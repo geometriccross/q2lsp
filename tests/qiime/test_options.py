@@ -5,6 +5,7 @@ from __future__ import annotations
 from q2lsp.qiime.options import (
     format_qiime_option_label,
     option_label_matches_prefix,
+    param_is_required,
     qiime_option_prefix,
 )
 from q2lsp.qiime.types import JsonObject
@@ -211,3 +212,47 @@ class TestOptionLabelMatchesPrefix:
         """Handles single character options."""
         assert option_label_matches_prefix("-t", "t")
         assert option_label_matches_prefix("--i-t", "t")
+
+
+class TestParamIsRequired:
+    """Tests for param_is_required function."""
+
+    def test_explicit_required_true(self) -> None:
+        """Explicit required=True returns True."""
+        param: JsonObject = {"required": True}
+        assert param_is_required(param)
+
+    def test_explicit_required_false(self) -> None:
+        """Explicit required=False returns False."""
+        param: JsonObject = {"required": False}
+        assert not param_is_required(param)
+
+    def test_explicit_required_true_with_default(self) -> None:
+        """Explicit required flag takes precedence over default."""
+        param: JsonObject = {"required": True, "default": "foo"}
+        assert param_is_required(param)
+
+    def test_explicit_required_false_with_signature_type(self) -> None:
+        """Explicit required flag takes precedence over signature_type heuristic."""
+        param: JsonObject = {"required": False, "signature_type": "input"}
+        assert not param_is_required(param)
+
+    def test_fallback_signature_type_no_default(self) -> None:
+        """Fallback heuristic returns True when signature_type exists and default absent."""
+        param: JsonObject = {"signature_type": "input"}
+        assert param_is_required(param)
+
+    def test_fallback_signature_type_with_default(self) -> None:
+        """Fallback heuristic returns False when default key is present."""
+        param: JsonObject = {"signature_type": "input", "default": None}
+        assert not param_is_required(param)
+
+    def test_no_flags_returns_false(self) -> None:
+        """Missing required and signature_type returns False."""
+        param: JsonObject = {"name": "verbose", "type": "boolean"}
+        assert not param_is_required(param)
+
+    def test_empty_dict_returns_false(self) -> None:
+        """Empty parameter object returns False."""
+        param: JsonObject = {}
+        assert not param_is_required(param)
