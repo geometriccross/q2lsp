@@ -41,11 +41,10 @@ def param_is_required(param: JsonObject) -> bool:
 
 
 def qiime_option_prefix(param: dict[str, JsonValue]) -> str:
-    prefix_source = param.get("signature_type") or param.get("type")
-    if isinstance(prefix_source, str):
-        lower = prefix_source.lower()
+    kind = qiime_signature_kind(param)
+    if kind is not None:
         for key in _QIIME_PREFIXES:
-            if lower.startswith(key):
+            if kind.startswith(key):
                 return _PREFIX_MAP[key]
     return ""
 

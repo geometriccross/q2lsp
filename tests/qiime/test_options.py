@@ -62,8 +62,8 @@ class TestQiimeOptionPrefix:
             assert qiime_option_prefix(param) == expected_prefix
 
     def test_partial_match(self) -> None:
-        """Partial match works for type field."""
-        param: JsonObject = {"type": "input_data"}
+        """Partial match works for signature_type field."""
+        param: JsonObject = {"signature_type": "input_data"}
         assert qiime_option_prefix(param) == "i"
 
     def test_unknown_type(self) -> None:
