@@ -16,6 +16,7 @@ class ActionSignatureParameter(TypedDict, total=False):
     ast: dict[str, JsonValue]
     description: Required[str]
     default: JsonValue
+    required: bool
     metavar: str
     multiple: str | None
     is_bool_flag: bool

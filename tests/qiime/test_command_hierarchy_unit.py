@@ -197,6 +197,24 @@ class TestClickOptionToSignatureParam:
         result = _click_option_to_signature_param(opt)
         assert "default" not in result
 
+    def test_required_option_includes_required_flag(self) -> None:
+        """Required option includes required=True."""
+        opt = click.Option(["--input"], required=True)
+        result = _click_option_to_signature_param(opt)
+        assert result.get("required") is True
+
+    def test_optional_option_omits_required_flag(self) -> None:
+        """Optional option does not include required key."""
+        opt = click.Option(["--input"], default="value")
+        result = _click_option_to_signature_param(opt)
+        assert "required" not in result
+
+    def test_optional_none_default_omits_required_flag(self) -> None:
+        """Optional option with default=None does not include required key."""
+        opt = click.Option(["--input"], default=None)
+        result = _click_option_to_signature_param(opt)
+        assert "required" not in result
+
     def test_callable_default_omits_default(self) -> None:
         """Callable default doesn't include default field."""
         opt = click.Option(["--input"], default=lambda: "value")

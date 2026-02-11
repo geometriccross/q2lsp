@@ -49,6 +49,9 @@ def _click_option_to_signature_param(opt: click.Option) -> ActionSignatureParame
     if default_value is not None:
         entry["default"] = cast(JsonValue, default_value)
 
+    if opt.required:
+        entry["required"] = True
+
     if opt.metavar is not None:
         entry["metavar"] = opt.metavar
 
