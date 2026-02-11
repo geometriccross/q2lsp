@@ -29,15 +29,14 @@ def param_is_required(param: JsonObject) -> bool:
     """Determine if a parameter is required.
 
     Checks explicit ``required`` flag first (used by builtin commands).
-    Falls back to the Phase 1 heuristic for plugin actions: ``signature_type``
-    present as a string AND ``default`` key absent.
+    Falls back to checking for a known QIIME 2 signature kind
+    (via ``signature_type`` or ``type``) with no ``default`` key.
     """
     explicit = param.get("required")
     if isinstance(explicit, bool):
         return explicit
 
-    signature_type = param.get("signature_type")
-    return isinstance(signature_type, str) and "default" not in param
+    return qiime_signature_kind(param) is not None and "default" not in param
 
 
 def qiime_option_prefix(param: dict[str, JsonValue]) -> str:

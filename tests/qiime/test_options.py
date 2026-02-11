@@ -248,6 +248,16 @@ class TestParamIsRequired:
         param: JsonObject = {"signature_type": "input", "default": None}
         assert not param_is_required(param)
 
+    def test_fallback_type_field_no_default(self) -> None:
+        """type field with SDK kind and no default is required."""
+        param: JsonObject = {"name": "input", "type": "parameter"}
+        assert param_is_required(param)
+
+    def test_fallback_type_field_click_native_not_required(self) -> None:
+        """type field with click-native value is not required even without default."""
+        param: JsonObject = {"name": "verbose", "type": "text"}
+        assert not param_is_required(param)
+
     def test_no_flags_returns_false(self) -> None:
         """Missing required and signature_type returns False."""
         param: JsonObject = {"name": "verbose", "type": "boolean"}

@@ -39,14 +39,12 @@ class TestDiagnosticsIntegration:
                         "signature": [
                             {
                                 "name": "table",
-                                "type": "FeatureTable[Frequency]",
-                                "signature_type": "input",
+                                "type": "input",
                             },
                             {
                                 "name": "obs_metadata",
-                                "type": "MetadataColumn[Categorical]",
+                                "type": "parameter",
                                 "default": None,
-                                "signature_type": "parameter",
                             },
                         ],
                     },
@@ -97,7 +95,7 @@ class TestDiagnosticsIntegration:
         from q2lsp.lsp.diagnostics import validate_command
 
         class MockDocument:
-            source = "qiime feature-table summarize"
+            source = "qiime feature-table summarize --i-table table.qza"
 
         merged_text, _ = merge_line_continuations(MockDocument.source)
         commands = find_qiime_commands(merged_text)

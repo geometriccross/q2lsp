@@ -82,15 +82,17 @@ def validate_command(
                 issues.append(issue2)
                 token2_valid = False
 
-    # Validate options when len(tokens) >= 4 and both token1 and token2 are valid
-    if token1_valid and token2_valid and len(command.tokens) >= 4:
+    # Validate options and required options when token1/token2 are valid.
+    if token1_valid and token2_valid and len(command.tokens) >= 3:
         token1 = command.tokens[1]
         token2 = command.tokens[2]
         plugin_name = token1.text
         action_name = token2.text
-        option_issues = _validate_options(
-            command.tokens[3:], root_node, plugin_name, action_name
-        )
+        option_issues: list[DiagnosticIssue] = []
+        if len(command.tokens) >= 4:
+            option_issues = _validate_options(
+                command.tokens[3:], root_node, plugin_name, action_name
+            )
         issues.extend(option_issues)
         required_option_issues = _validate_required_options(
             command.tokens,

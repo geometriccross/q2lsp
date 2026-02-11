@@ -21,7 +21,7 @@ def hierarchy_with_plugins_and_builtins() -> dict:
             "name": "qiime",
             "help": "QIIME 2 command-line interface",
             "short_help": "QIIME 2 CLI",
-            "builtins": ["info", "tools", "dev", "metadata"],
+            "builtins": ["info", "tools", "dev"],
             "info": {
                 "name": "info",
                 "short_help": "Display information",
@@ -55,7 +55,6 @@ def hierarchy_with_plugins_and_builtins() -> dict:
             "metadata": {
                 "name": "metadata",
                 "short_help": "Metadata operations",
-                "type": "builtin",
                 "tabulate": {
                     "id": "tabulate",
                     "name": "tabulate",
@@ -63,13 +62,11 @@ def hierarchy_with_plugins_and_builtins() -> dict:
                     "signature": [
                         {
                             "name": "metadata",
-                            "type": "Metadata",
-                            "signature_type": "input",
+                            "type": "input",
                         },
                         {
                             "name": "output_path",
-                            "type": "FilePath",
-                            "signature_type": "parameter",
+                            "type": "parameter",
                         },
                     ],
                 },
@@ -85,14 +82,12 @@ def hierarchy_with_plugins_and_builtins() -> dict:
                     "signature": [
                         {
                             "name": "table",
-                            "type": "FeatureTable[Frequency]",
-                            "signature_type": "input",
+                            "type": "input",
                         },
                         {
                             "name": "obs_metadata",
-                            "type": "MetadataColumn[Categorical]",
+                            "type": "parameter",
                             "default": None,
-                            "signature_type": "parameter",
                         },
                     ],
                 },
@@ -103,30 +98,25 @@ def hierarchy_with_plugins_and_builtins() -> dict:
                     "signature": [
                         {
                             "name": "table",
-                            "type": "FeatureTable[Frequency]",
-                            "signature_type": "input",
+                            "type": "input",
                         },
                         {
                             "name": "metadata",
-                            "type": "Metadata",
-                            "signature_type": "input",
+                            "type": "input",
                         },
                         {
                             "name": "filtered_table",
-                            "type": "FeatureTable[Frequency]",
-                            "signature_type": "output",
+                            "type": "output",
                         },
                         {
                             "name": "where",
-                            "type": "Str",
+                            "type": "parameter",
                             "default": None,
-                            "signature_type": "parameter",
                         },
                         {
                             "name": "exclude_ids",
-                            "type": "Bool",
+                            "type": "parameter",
                             "default": False,
-                            "signature_type": "parameter",
                         },
                     ],
                 },
@@ -237,8 +227,10 @@ class TestValidateCommand:
             TokenSpan("qiime", 0, 5),
             TokenSpan("feature-table", 6, 19),
             TokenSpan("summarize", 20, 29),
+            TokenSpan("--i-table", 30, 39),
+            TokenSpan("table.qza", 40, 49),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=29)
+        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
         issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
@@ -328,10 +320,10 @@ class TestValidateCommand:
         assert "Did you mean" in issues[0].message
         assert "Did you mean" in issues[1].message
 
-    def test_builtin_subcommand_prefix_emits_issue(
+    def test_plugin_action_prefix_emits_issue(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:
-        # Builtin subcommand prefix should emit issue with suggestion
+        # Plugin action prefix should emit issue with suggestion
         tokens = [
             TokenSpan("qiime", 0, 5),
             TokenSpan("metadata", 6, 14),
@@ -342,7 +334,7 @@ class TestValidateCommand:
         assert len(issues) == 1
         assert "tabul" in issues[0].message
         assert "'tabulate'" in issues[0].message
-        assert issues[0].code == "q2lsp-dni/unknown-subcommand"
+        assert issues[0].code == "q2lsp-dni/unknown-action"
 
     def test_insufficient_tokens_no_validation(
         self, hierarchy_with_plugins_and_builtins: dict
@@ -525,6 +517,49 @@ class TestValidateOptions:
 
 
 class TestValidateRequiredOptions:
+    def test_plugin_action_without_signature_type_detects_required(self) -> None:
+        """Plugin action params using 'type' field (not 'signature_type') are detected as required."""
+        hierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "builtins": [],
+                "metadata": {
+                    "name": "metadata",
+                    "tabulate": {
+                        "name": "tabulate",
+                        "signature": [
+                            {
+                                "name": "input",
+                                "type": "parameter",
+                                "description": "The metadata to tabulate.",
+                            },
+                            {
+                                "name": "page_size",
+                                "type": "parameter",
+                                "description": "Page size",
+                                "default": 100,
+                            },
+                        ],
+                    },
+                },
+            }
+        }
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("metadata", 6, 14),
+            TokenSpan("tabulate", 15, 23),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=23)
+        issues = validate_command(cmd, hierarchy)
+
+        missing = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+        assert len(missing) == 1
+        assert "--p-input" in missing[0].message
+
     def test_missing_required_option_emits_diagnostic(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:
@@ -780,9 +815,33 @@ class TestValidateRequiredOptions:
         ]
         assert missing == []
 
-    def test_builtin_with_signature_type_uses_fallback_heuristic(
-        self, hierarchy_with_plugins_and_builtins: dict
-    ) -> None:
+    def test_builtin_with_signature_type_uses_fallback_heuristic(self) -> None:
+        hierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "builtins": ["metadata"],
+                "metadata": {
+                    "name": "metadata",
+                    "type": "builtin",
+                    "tabulate": {
+                        "name": "tabulate",
+                        "type": "builtin_action",
+                        "signature": [
+                            {
+                                "name": "metadata",
+                                "type": "Metadata",
+                                "signature_type": "input",
+                            },
+                            {
+                                "name": "output_path",
+                                "type": "FilePath",
+                                "signature_type": "parameter",
+                            },
+                        ],
+                    },
+                },
+            }
+        }
         tokens = [
             TokenSpan("qiime", 0, 5),
             TokenSpan("metadata", 6, 14),
@@ -791,7 +850,7 @@ class TestValidateRequiredOptions:
             TokenSpan("foo", 37, 40),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=40)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command(cmd, hierarchy)
 
         missing = [
             issue
