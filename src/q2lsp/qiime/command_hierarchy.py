@@ -83,13 +83,6 @@ def _extract_signature_from_click_command(
     return signature
 
 
-def _build_click_signature(
-    command: click.BaseCommand,
-) -> list[ActionSignatureParameter]:
-    """Extract signature parameters from a click command."""
-    return _extract_signature_from_click_command(command)
-
-
 def _build_builtin_command_node(
     builtin_name: str, builtin_command: click.Command
 ) -> JsonObject:
@@ -102,6 +95,8 @@ def _build_builtin_command_node(
     }
     if isinstance(builtin_command, click.MultiCommand):
         builtin_ctx = click.Context(builtin_command)
+        # JsonObject is needed at this point because we mix fixed metadata keys
+        # with dynamically discovered subcommand keys.
         builtin_node: JsonObject = cast(JsonObject, builtin_properties)
         for subcommand_name in builtin_command.list_commands(builtin_ctx):
             subcommand = builtin_command.get_command(builtin_ctx, subcommand_name)
@@ -109,16 +104,14 @@ def _build_builtin_command_node(
                 continue
             if not isinstance(subcommand, click.Command):
                 continue
-            builtin_node[subcommand_name] = cast(
-                JsonObject,
-                {
-                    "name": subcommand_name,
-                    "help": getattr(subcommand, "help", None),
-                    "short_help": getattr(subcommand, "short_help", None),
-                    "type": "builtin_action",
-                    "signature": _build_click_signature(subcommand),
-                },
-            )
+            subcommand_properties: BuiltinCommandProperties = {
+                "name": subcommand_name,
+                "help": getattr(subcommand, "help", None),
+                "short_help": getattr(subcommand, "short_help", None),
+                "type": "builtin_action",
+                "signature": _extract_signature_from_click_command(subcommand),
+            }
+            builtin_node[subcommand_name] = cast(JsonObject, subcommand_properties)
         return builtin_node
     return cast(JsonObject, builtin_properties)
 
@@ -133,6 +126,7 @@ def _build_builtin_nodes(root: RootCommand) -> dict[str, JsonObject]:
 
 def _build_plugin_nodes(root: RootCommand, ctx: click.Context) -> dict[str, JsonObject]:
     """Build all plugin command nodes."""
+    # RootCommand stores this on a private attribute without useful static typing.
     plugin_lookup = cast(Mapping[str, PluginCommandProperties], root._plugin_lookup)
     nodes: dict[str, JsonObject] = {}
     for plugin_name, plugin_data in plugin_lookup.items():
@@ -141,8 +135,10 @@ def _build_plugin_nodes(root: RootCommand, ctx: click.Context) -> dict[str, Json
             plugin_command._action_lookup
         )
         action_lookup.update(getattr(plugin_command, "_hidden_actions", {}))
+        # JsonObject is needed because we append dynamic action-name keys.
         plugin_node: JsonObject = cast(JsonObject, dict(plugin_data))
         for action_name, action_data in action_lookup.items():
+            # Each action entry is inserted into the dynamic JsonObject map.
             plugin_node[action_name] = cast(JsonObject, dict(action_data))
         nodes[plugin_name] = plugin_node
     return nodes
@@ -154,6 +150,7 @@ def build_command_hierarchy(root: RootCommand) -> CommandHierarchy:
         "name": root_name,
         "help": root.help,
         "short_help": root.short_help,
+        # JsonObject values require JsonValue; sorted() returns list[str].
         "builtins": cast(list[JsonValue], sorted(root._builtin_commands.keys())),
     }
 
