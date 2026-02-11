@@ -12,6 +12,11 @@ from typing import NamedTuple
 
 from q2lsp.lsp.diagnostics import codes
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
+from q2lsp.qiime.hierarchy_keys import (
+    BUILTIN_NODE_METADATA_KEYS,
+    COMMAND_METADATA_KEYS,
+    ROOT_METADATA_KEYS,
+)
 from q2lsp.qiime.signature_params import (
     get_all_option_labels,
     get_required_option_labels,
@@ -128,22 +133,8 @@ def _is_builtin_leaf(node: JsonObject) -> bool:
     if node.get("type") == "builtin":
         # A builtin is a leaf if it has no action/subcommand keys
         # Actions are keys that are not metadata
-        metadata_keys = {
-            "id",
-            "name",
-            "version",
-            "website",
-            "user_support_text",
-            "description",
-            "short_description",
-            "short_help",
-            "help",
-            "actions",
-            "type",
-            "builtins",
-        }
         for key, value in node.items():
-            if key not in metadata_keys and isinstance(value, dict):
+            if key not in BUILTIN_NODE_METADATA_KEYS and isinstance(value, dict):
                 return False
         return True
     return False
@@ -230,14 +221,6 @@ def _validate_action(
 
 def _get_valid_plugins_and_builtins(root_node: JsonObject) -> tuple[set[str], set[str]]:
     """Extract valid plugin and builtin names from root node."""
-    # Metadata keys to skip
-    metadata_keys = {
-        "name",
-        "help",
-        "short_help",
-        "builtins",
-    }
-
     # Get builtins
     builtins_data = root_node.get("builtins", [])
     valid_builtins = set()
@@ -251,7 +234,7 @@ def _get_valid_plugins_and_builtins(root_node: JsonObject) -> tuple[set[str], se
     for key, value in root_node.items():
         if not key:
             continue
-        if key in metadata_keys:
+        if key in ROOT_METADATA_KEYS:
             continue
         if key in valid_builtins:
             continue
@@ -264,26 +247,11 @@ def _get_valid_plugins_and_builtins(root_node: JsonObject) -> tuple[set[str], se
 
 def _get_valid_actions(plugin_node: JsonObject) -> list[str]:
     """Extract valid action names from plugin node."""
-    # Metadata keys to skip
-    metadata_keys = {
-        "id",
-        "name",
-        "version",
-        "website",
-        "user_support_text",
-        "description",
-        "short_description",
-        "short_help",
-        "help",
-        "actions",
-        "type",
-    }
-
     valid_actions = []
     for key, value in plugin_node.items():
         if not key:
             continue
-        if key in metadata_keys:
+        if key in COMMAND_METADATA_KEYS:
             continue
         if not isinstance(value, dict):
             continue

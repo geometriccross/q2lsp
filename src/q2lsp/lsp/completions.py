@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from q2lsp.lsp.types import CompletionContext, CompletionKind, CompletionMode
+from q2lsp.qiime.hierarchy_keys import COMMAND_METADATA_KEYS, ROOT_METADATA_KEYS
 from q2lsp.qiime.options import (
     format_qiime_option_label,
     option_label_matches_prefix,
@@ -16,25 +17,6 @@ from q2lsp.qiime.options import (
 )
 from q2lsp.qiime.signature_params import iter_signature_params
 from q2lsp.qiime.types import CommandHierarchy, JsonObject
-
-# Metadata keys to skip when looking for commands/actions
-_ROOT_METADATA_KEYS = frozenset({"name", "help", "short_help", "builtins"})
-
-_COMMAND_METADATA_KEYS = frozenset(
-    {
-        "id",
-        "name",
-        "version",
-        "website",
-        "user_support_text",
-        "description",
-        "short_description",
-        "short_help",
-        "help",
-        "actions",
-        "type",
-    }
-)
 
 
 class CompletionItem(NamedTuple):
@@ -173,7 +155,7 @@ def _complete_root(root_node: JsonObject, prefix: str) -> list[CompletionItem]:
     for key, value in root_node.items():
         if not key:  # Skip empty keys
             continue
-        if key in _ROOT_METADATA_KEYS:
+        if key in ROOT_METADATA_KEYS:
             continue
         if key in (builtins if isinstance(builtins, list) else []):
             continue  # Already added as builtin
@@ -228,7 +210,7 @@ def _complete_plugin(
     for key, value in command_node.items():
         if not key:  # Skip empty keys
             continue
-        if key in _COMMAND_METADATA_KEYS:
+        if key in COMMAND_METADATA_KEYS:
             continue
         if not key.startswith(prefix):
             continue
