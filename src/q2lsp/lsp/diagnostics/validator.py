@@ -22,7 +22,7 @@ from q2lsp.qiime.signature_params import (
     get_required_option_labels,
     iter_signature_params,
 )
-from q2lsp.qiime.types import CommandHierarchy, JsonObject
+from q2lsp.qiime.types import ActionSignatureParameter, CommandHierarchy, JsonObject
 
 
 class DiagnosticIssue(NamedTuple):
@@ -569,7 +569,7 @@ def _get_required_options(action_node: JsonObject) -> list[str]:
 
 def _iter_signature_params(
     action_node: JsonObject,
-) -> Iterator[tuple[str, str, JsonObject]]:
+) -> Iterator[tuple[str, str, ActionSignatureParameter]]:
     """
     Iterate over signature parameters from an action node.
 

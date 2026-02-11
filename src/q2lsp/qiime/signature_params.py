@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import cast
 
 from q2lsp.qiime.options import (
     format_qiime_option_label,
     param_is_required,
     qiime_option_prefix,
 )
-from q2lsp.qiime.types import JsonObject
+from q2lsp.qiime.types import ActionSignatureParameter, JsonObject
 
 
 def get_all_option_labels(action_node: JsonObject) -> list[str]:
@@ -43,7 +44,7 @@ def get_required_option_labels(action_node: JsonObject) -> list[str]:
 
 def iter_signature_params(
     action_node: JsonObject,
-) -> Iterator[tuple[str, str, JsonObject]]:
+) -> Iterator[tuple[str, str, ActionSignatureParameter]]:
     """
     Iterate over signature parameters from an action node.
 
@@ -64,13 +65,14 @@ def iter_signature_params(
         for param in signature:
             if not isinstance(param, dict):
                 continue
+            typed_param = cast(ActionSignatureParameter, param)
 
-            param_name = param.get("name")
+            param_name = typed_param.get("name")
             if not isinstance(param_name, str) or not param_name:
                 continue
 
-            prefix = qiime_option_prefix(param)
-            yield (param_name, prefix, param)
+            prefix = qiime_option_prefix(typed_param)
+            yield (param_name, prefix, typed_param)
         return
 
     if isinstance(signature, dict):
@@ -82,10 +84,11 @@ def iter_signature_params(
             for param in params:
                 if not isinstance(param, dict):
                     continue
+                typed_param = cast(ActionSignatureParameter, param)
 
-                param_name = param.get("name")
+                param_name = typed_param.get("name")
                 if not isinstance(param_name, str) or not param_name:
                     continue
 
-                prefix = qiime_option_prefix(param)
-                yield (param_name, prefix, param)
+                prefix = qiime_option_prefix(typed_param)
+                yield (param_name, prefix, typed_param)
