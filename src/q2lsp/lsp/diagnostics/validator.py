@@ -11,7 +11,11 @@ from collections.abc import Iterator
 from typing import NamedTuple
 
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
-from q2lsp.qiime.options import format_qiime_option_label, qiime_option_prefix
+from q2lsp.qiime.options import (
+    format_qiime_option_label,
+    param_is_required,
+    qiime_option_prefix,
+)
 from q2lsp.qiime.types import CommandHierarchy, JsonObject
 
 
@@ -594,25 +598,10 @@ def _get_required_options(action_node: JsonObject) -> list[str]:
     """Extract required option labels from action node signature."""
     required_options: list[str] = []
     for param_name, prefix, param in _iter_signature_params(action_node):
-        if _param_is_required(param):
+        if param_is_required(param):
             required_options.append(format_qiime_option_label(prefix, param_name))
 
     return required_options
-
-
-def _param_is_required(param: JsonObject) -> bool:
-    """Determine if a parameter is required.
-
-    Checks explicit ``required`` flag first (used by builtin commands).
-    Falls back to the Phase 1 heuristic for plugin actions: ``signature_type``
-    present as a string AND ``default`` key absent.
-    """
-    explicit = param.get("required")
-    if isinstance(explicit, bool):
-        return explicit
-
-    signature_type = param.get("signature_type")
-    return isinstance(signature_type, str) and "default" not in param
 
 
 def _iter_signature_params(
