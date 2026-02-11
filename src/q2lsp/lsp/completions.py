@@ -13,8 +13,8 @@ from q2lsp.qiime.options import (
     format_qiime_option_label,
     option_label_matches_prefix,
     param_is_required,
-    qiime_option_prefix,
 )
+from q2lsp.qiime.signature_params import iter_signature_params
 from q2lsp.qiime.types import CommandHierarchy, JsonObject
 
 # Metadata keys to skip when looking for commands/actions
@@ -302,32 +302,19 @@ def _complete_parameters(
     if not isinstance(action_node, dict):
         return items
 
-    # Get signature (list of parameters)
+    # Check if signature exists for builtin fallback
     signature = action_node.get("signature", [])
-    if not isinstance(signature, list):
+    if not isinstance(signature, list) or not signature:
         if is_builtin:
             return _complete_builtin_options(prefix_filter)
         return items
 
-    if not signature:
-        if is_builtin:
-            return _complete_builtin_options(prefix_filter)
-        return items
-
-    for param in signature:
-        if not isinstance(param, dict):
-            continue
-
-        name = param.get("name", "")
-        if not isinstance(name, str) or not name:
-            continue
-
+    for name, option_prefix, param in iter_signature_params(action_node):
         # Skip already used parameters
         if name in used_params:
             continue
 
-        # Derive prefix and format option name
-        option_prefix = qiime_option_prefix(param)
+        # Derive option name
         option_name = format_qiime_option_label(option_prefix, name)
         if not _option_matches_prefix(option_name, prefix_filter):
             continue
