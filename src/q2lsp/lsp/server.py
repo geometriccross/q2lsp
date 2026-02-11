@@ -30,6 +30,11 @@ from q2lsp.lsp.parser import (
 from q2lsp.qiime.hierarchy_provider import HierarchyProvider
 
 
+_DIAGNOSTIC_SEVERITY: dict[str, types.DiagnosticSeverity] = {
+    "q2lsp-dni/missing-required-option": types.DiagnosticSeverity.Error,
+}
+
+
 def _map_merged_offset_to_original(merged_offset: int, offset_map: list[int]) -> int:
     """
     Map a merged offset back to the original offset.
@@ -210,7 +215,9 @@ def create_server(
                         types.Diagnostic(
                             range=types.Range(start=start_pos, end=end_pos),
                             message=issue.message,
-                            severity=types.DiagnosticSeverity.Warning,
+                            severity=_DIAGNOSTIC_SEVERITY.get(
+                                issue.code, types.DiagnosticSeverity.Warning
+                            ),
                             source="q2lsp",
                             code=issue.code,
                         )
