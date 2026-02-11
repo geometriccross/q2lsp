@@ -6,24 +6,20 @@ and returns issues with spans and suggestions.
 
 from __future__ import annotations
 
-from typing import NamedTuple
-
+from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
 from q2lsp.lsp.diagnostics.hierarchy import (
     _get_root_node,
     _get_valid_plugins_and_builtins,
 )
 from q2lsp.lsp.diagnostics.matching import _get_unique_prefix_match
+from q2lsp.lsp.diagnostics.stages import (
+    _validate_action,
+    _validate_options,
+    _validate_plugin_or_builtin,
+    _validate_required_options,
+)
 from q2lsp.lsp.types import ParsedCommand
 from q2lsp.qiime.types import CommandHierarchy
-
-
-class DiagnosticIssue(NamedTuple):
-    """A diagnostic issue for a command."""
-
-    message: str  # The diagnostic message
-    start: int  # Start offset in the document
-    end: int  # End offset in the document (exclusive)
-    code: str  # Diagnostic code (e.g., "q2lsp-dni/unknown-root")
 
 
 def validate_command(
@@ -39,13 +35,6 @@ def validate_command(
     Returns:
         List of DiagnosticIssue for any problems found.
     """
-    from q2lsp.lsp.diagnostics.stages import (
-        _validate_action,
-        _validate_options,
-        _validate_plugin_or_builtin,
-        _validate_required_options,
-    )
-
     issues: list[DiagnosticIssue] = []
 
     # Get the root node (usually "qiime")

@@ -9,7 +9,7 @@ from q2lsp.lsp.diagnostics.matching import (
     _get_suggestions,
     _extract_single_suggestion,
 )
-from q2lsp.lsp.diagnostics.validator import DiagnosticIssue
+from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
 from q2lsp.lsp.types import TokenSpan
 from q2lsp.qiime.options import (
     format_qiime_option_label,
