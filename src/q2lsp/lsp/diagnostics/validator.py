@@ -7,6 +7,7 @@ and returns issues with spans and suggestions.
 from __future__ import annotations
 
 import difflib
+from collections.abc import Iterator
 from typing import NamedTuple
 
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
@@ -480,14 +481,31 @@ def _get_valid_options(action_node: JsonObject) -> list[str]:
     Returns:
         List of valid option labels (e.g., ['--i-table', '--m-metadata-file']).
     """
-    valid_options: list[str] = []
+    return [
+        format_qiime_option_label(prefix, param_name)
+        for param_name, prefix, _param in _iter_signature_params(action_node)
+    ]
 
-    # Get signature
+
+def _iter_signature_params(
+    action_node: JsonObject,
+) -> Iterator[tuple[str, str, JsonObject]]:
+    """
+    Iterate over signature parameters from an action node.
+
+    Yields (param_name, option_prefix, param_dict) tuples.
+    Handles both list format (with signature_type) and legacy dict format.
+
+    Args:
+        action_node: The action node containing a signature.
+
+    Yields:
+        Tuples of (param_name, option_prefix, param_dict).
+    """
     signature = action_node.get("signature")
     if signature is None:
-        return valid_options
+        return
 
-    # Handle real format: list of parameter dicts with signature_type
     if isinstance(signature, list):
         for param in signature:
             if not isinstance(param, dict):
@@ -497,16 +515,10 @@ def _get_valid_options(action_node: JsonObject) -> list[str]:
             if not isinstance(param_name, str):
                 continue
 
-            # Get the option prefix (e.g., 'i' for inputs)
             prefix = qiime_option_prefix(param)
+            yield (param_name, prefix, param)
+        return
 
-            # Format the option label
-            option_label = format_qiime_option_label(prefix, param_name)
-            valid_options.append(option_label)
-
-        return valid_options
-
-    # Handle legacy format: dict with grouped arrays (backward compatibility)
     if isinstance(signature, dict):
         for param_type in ["inputs", "outputs", "parameters", "metadata"]:
             params = signature.get(param_type)
@@ -521,11 +533,5 @@ def _get_valid_options(action_node: JsonObject) -> list[str]:
                 if not isinstance(param_name, str):
                     continue
 
-                # Get the option prefix (e.g., 'i' for inputs)
                 prefix = qiime_option_prefix(param)
-
-                # Format the option label
-                option_label = format_qiime_option_label(prefix, param_name)
-                valid_options.append(option_label)
-
-    return valid_options
+                yield (param_name, prefix, param)
