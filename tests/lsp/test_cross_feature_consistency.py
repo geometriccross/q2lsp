@@ -11,11 +11,11 @@ from q2lsp.lsp.completions import (
     _complete_root,
 )
 from q2lsp.lsp.diagnostics.codes import UNKNOWN_ACTION
-from q2lsp.lsp.diagnostics.validator import (
+from q2lsp.lsp.diagnostics.hierarchy import (
     _get_valid_actions,
     _get_valid_plugins_and_builtins,
-    validate_command,
 )
+from q2lsp.lsp.diagnostics.validator import validate_command
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
 from q2lsp.qiime.signature_params import (
     get_all_option_labels,

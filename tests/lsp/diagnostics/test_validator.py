@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from q2lsp.lsp.diagnostics.validator import (
+from q2lsp.lsp.diagnostics.matching import (
     _get_close_matches,
     _get_suggestions,
     _is_exact_match,
-    validate_command,
 )
+from q2lsp.lsp.diagnostics.validator import validate_command
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
 
 
