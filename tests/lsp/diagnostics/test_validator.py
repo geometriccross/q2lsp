@@ -523,6 +523,228 @@ class TestValidateOptions:
         issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
+
+class TestValidateRequiredOptions:
+    def test_missing_required_option_emits_diagnostic(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--p-obs-metadata", 30, 46),
+            TokenSpan("foo", 47, 50),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=50)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        assert len(issues) == 1
+        assert issues[0].code == "q2lsp-dni/missing-required-option"
+        assert "--i-table" in issues[0].message
+        assert issues[0].start == 20
+        assert issues[0].end == 29
+
+    def test_all_required_options_present_no_diagnostic(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--i-table", 30, 39),
+            TokenSpan("table.qza", 40, 49),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        assert issues == []
+
+    def test_only_optional_missing_no_diagnostic(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--i-table", 30, 39),
+            TokenSpan("table.qza", 40, 49),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        assert issues == []
+
+    def test_help_flag_suppresses_required_check(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--help", 30, 36),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=36)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        assert issues == []
+
+    def test_short_help_flag_suppresses_required_check(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("-h", 30, 32),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=32)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        assert issues == []
+
+    def test_help_equals_value_suppresses_required_check(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--help=1", 30, 38),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=38)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        assert issues == []
+
+    def test_option_equals_value_counts_as_present(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--i-table=table.qza", 30, 49),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        assert issues == []
+
+    def test_case_insensitive_option_satisfies_required(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--I-TABLE", 30, 39),
+            TokenSpan("table.qza", 40, 49),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        assert issues == []
+
+    def test_builtin_command_skips_required_check(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("metadata", 6, 14),
+            TokenSpan("tabulate", 15, 23),
+            TokenSpan("--i-metadata", 24, 36),
+            TokenSpan("foo", 37, 40),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=40)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        assert issues == []
+
+    def test_multiple_missing_required_options(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("filter-samples", 20, 34),
+            TokenSpan("--p-where", 35, 44),
+            TokenSpan("some condition", 45, 59),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=59)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        required_issues = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+        assert len(required_issues) == 3
+
+    def test_cascade_typo_suppresses_missing_required(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--i-tabel", 30, 39),
+            TokenSpan("table.qza", 40, 49),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        unknown_option_issues = [
+            issue for issue in issues if issue.code == "q2lsp-dni/unknown-option"
+        ]
+        missing_required_issues = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+
+        assert len(unknown_option_issues) == 1
+        assert missing_required_issues == []
+
+    def test_param_without_signature_type_not_treated_as_required(self) -> None:
+        hierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "short_help": "QIIME 2 CLI",
+                "builtins": [],
+                "example-plugin": {
+                    "id": "example-plugin",
+                    "name": "example-plugin",
+                    "example-action": {
+                        "id": "example-action",
+                        "name": "example-action",
+                        "signature": [
+                            {
+                                "name": "foo",
+                                "type": "Str",
+                            }
+                        ],
+                    },
+                },
+            }
+        }
+
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("example-plugin", 6, 20),
+            TokenSpan("example-action", 21, 35),
+            TokenSpan("--p-foo", 36, 43),
+            TokenSpan("bar", 44, 47),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=47)
+        issues = validate_command(cmd, hierarchy)
+
+        missing_required_issues = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+        assert missing_required_issues == []
+
     def test_unknown_option_when_action_invalid_no_option_diagnostic(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:
@@ -593,10 +815,12 @@ class TestValidateOptions:
             TokenSpan("filter-samples", 20, 34),
             TokenSpan("--i-table", 35, 44),
             TokenSpan("--i-metadata", 45, 58),
-            TokenSpan("--p-where", 59, 67),
-            TokenSpan("--p-exclude-ids", 68, 82),
+            TokenSpan("--o-filtered-table", 59, 76),
+            TokenSpan("filtered.qza", 77, 89),
+            TokenSpan("--p-where", 90, 99),
+            TokenSpan("--p-exclude-ids", 100, 114),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=82)
+        cmd = ParsedCommand(tokens=tokens, start=0, end=114)
         issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
@@ -626,9 +850,11 @@ class TestValidateOptions:
             TokenSpan("qiime", 0, 5),
             TokenSpan("feature-table", 6, 19),
             TokenSpan("summarize", 20, 29),
-            TokenSpan("--xyz123", 30, 38),
+            TokenSpan("--i-table", 30, 39),
+            TokenSpan("table.qza", 40, 49),
+            TokenSpan("--xyz123", 50, 58),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=38)
+        cmd = ParsedCommand(tokens=tokens, start=0, end=58)
         issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "--xyz123" in issues[0].message

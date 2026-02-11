@@ -88,6 +88,14 @@ def validate_command(
             command.tokens[3:], root_node, plugin_name, action_name
         )
         issues.extend(option_issues)
+        required_option_issues = _validate_required_options(
+            command.tokens,
+            root_node,
+            plugin_name,
+            action_name,
+            option_issues,
+        )
+        issues.extend(required_option_issues)
 
     return issues
 
@@ -468,6 +476,105 @@ def _validate_options(
     return issues
 
 
+def _validate_required_options(
+    tokens: list[TokenSpan],
+    root_node: JsonObject,
+    plugin_name: str,
+    action_name: str,
+    unknown_option_issues: list[DiagnosticIssue],
+) -> list[DiagnosticIssue]:
+    """Validate required options for an already valid command path."""
+    issues: list[DiagnosticIssue] = []
+
+    plugin_node = root_node.get(plugin_name)
+    if not isinstance(plugin_node, dict):
+        return issues
+
+    # Phase 1: builtins are skipped.
+    if plugin_node.get("type") == "builtin":
+        return issues
+
+    action_node = plugin_node.get(action_name)
+    if not isinstance(action_node, dict):
+        return issues
+
+    if len(tokens) < 3:
+        return issues
+
+    option_tokens = tokens[3:]
+
+    # Suppress required-option diagnostics for help invocations.
+    for token in option_tokens:
+        token_name = token.text.split("=", 1)[0]
+        if token_name in ("--help", "-h"):
+            return issues
+
+    present_options: set[str] = set()
+    for token in option_tokens:
+        if not token.text.startswith("--"):
+            continue
+        token_name = token.text.split("=", 1)[0]
+        present_options.add(token_name.lower())
+
+    required_options = _get_required_options(action_node)
+    missing_options = {
+        option.lower(): option
+        for option in required_options
+        if option.lower() not in present_options
+    }
+
+    suppressed_missing: set[str] = set()
+    for unknown_issue in unknown_option_issues:
+        suggestion = _extract_single_suggestion(unknown_issue.message)
+        if suggestion is None:
+            continue
+        suggestion_lower = suggestion.lower()
+        if suggestion_lower in missing_options:
+            suppressed_missing.add(suggestion_lower)
+
+    action_token = tokens[2]
+    for missing_option_lower, missing_option in missing_options.items():
+        if missing_option_lower in suppressed_missing:
+            continue
+        issues.append(
+            DiagnosticIssue(
+                message=f"Required option '{missing_option}' is not specified.",
+                start=action_token.start,
+                end=action_token.end,
+                code="q2lsp-dni/missing-required-option",
+            )
+        )
+
+    return issues
+
+
+def _extract_single_suggestion(message: str) -> str | None:
+    """Extract a single suggestion from a diagnostic message, if present."""
+    marker = "Did you mean "
+    marker_index = message.find(marker)
+    if marker_index == -1:
+        return None
+
+    suggestion_text = message[marker_index + len(marker) :].strip()
+    if not suggestion_text.endswith("?"):
+        return None
+
+    suggestion_text = suggestion_text[:-1]
+    if "," in suggestion_text:
+        return None
+
+    suggestion_text = suggestion_text.strip()
+    if not suggestion_text:
+        return None
+
+    if (suggestion_text.startswith("'") and suggestion_text.endswith("'")) or (
+        suggestion_text.startswith('"') and suggestion_text.endswith('"')
+    ):
+        suggestion_text = suggestion_text[1:-1]
+
+    return suggestion_text or None
+
+
 def _get_valid_options(action_node: JsonObject) -> list[str]:
     """
     Extract valid option labels from action node signature.
@@ -485,6 +592,20 @@ def _get_valid_options(action_node: JsonObject) -> list[str]:
         format_qiime_option_label(prefix, param_name)
         for param_name, prefix, _param in _iter_signature_params(action_node)
     ]
+
+
+def _get_required_options(action_node: JsonObject) -> list[str]:
+    """Extract required option labels from action node signature."""
+    required_options: list[str] = []
+    for param_name, prefix, param in _iter_signature_params(action_node):
+        signature_type = param.get("signature_type")
+        if not isinstance(signature_type, str):
+            continue
+        if "default" in param:
+            continue
+        required_options.append(format_qiime_option_label(prefix, param_name))
+
+    return required_options
 
 
 def _iter_signature_params(
