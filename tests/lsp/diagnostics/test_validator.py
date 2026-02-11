@@ -645,7 +645,142 @@ class TestValidateRequiredOptions:
 
         assert issues == []
 
-    def test_builtin_command_skips_required_check(
+    def test_builtin_required_option_missing_emits_diagnostic(self) -> None:
+        """Builtin command with required=True param emits missing-required diagnostic."""
+        hierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "builtins": ["tools"],
+                "tools": {
+                    "name": "tools",
+                    "type": "builtin",
+                    "import": {
+                        "name": "import",
+                        "type": "builtin_action",
+                        "signature": [
+                            {
+                                "name": "input_path",
+                                "type": "path",
+                                "description": "Input",
+                                "required": True,
+                            },
+                            {
+                                "name": "output_path",
+                                "type": "path",
+                                "description": "Output",
+                                "required": True,
+                            },
+                            {
+                                "name": "format",
+                                "type": "text",
+                                "description": "Format",
+                                "default": "auto",
+                            },
+                        ],
+                    },
+                },
+            }
+        }
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("tools", 6, 11),
+            TokenSpan("import", 12, 18),
+            TokenSpan("--format", 19, 27),
+            TokenSpan("csv", 28, 31),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=31)
+        issues = validate_command(cmd, hierarchy)
+
+        missing = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+        assert len(missing) == 2
+        missing_messages = {issue.message for issue in missing}
+        assert any("--input-path" in message for message in missing_messages)
+        assert any("--output-path" in message for message in missing_messages)
+
+    def test_builtin_optional_none_default_no_false_positive(self) -> None:
+        """Builtin param without required flag and no default key is NOT treated as required."""
+        hierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "builtins": ["tools"],
+                "tools": {
+                    "name": "tools",
+                    "type": "builtin",
+                    "import": {
+                        "name": "import",
+                        "type": "builtin_action",
+                        "signature": [
+                            {
+                                "name": "verbose",
+                                "type": "boolean",
+                                "description": "Verbose",
+                            }
+                        ],
+                    },
+                },
+            }
+        }
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("tools", 6, 11),
+            TokenSpan("import", 12, 18),
+            TokenSpan("--verbose", 19, 28),
+            TokenSpan("true", 29, 33),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=33)
+        issues = validate_command(cmd, hierarchy)
+
+        missing = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+        assert missing == []
+
+    def test_explicit_required_false_overrides_fallback(self) -> None:
+        """Param with explicit required=False is not required even if signature_type present and no default."""
+        hierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "builtins": [],
+                "example-plugin": {
+                    "name": "example-plugin",
+                    "example-action": {
+                        "name": "example-action",
+                        "signature": [
+                            {
+                                "name": "table",
+                                "type": "FeatureTable",
+                                "signature_type": "input",
+                                "required": False,
+                            }
+                        ],
+                    },
+                },
+            }
+        }
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("example-plugin", 6, 20),
+            TokenSpan("example-action", 21, 35),
+            TokenSpan("--p-verbose", 36, 47),
+            TokenSpan("true", 48, 52),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=52)
+        issues = validate_command(cmd, hierarchy)
+
+        missing = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+        assert missing == []
+
+    def test_builtin_with_signature_type_uses_fallback_heuristic(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:
         tokens = [
@@ -658,7 +793,13 @@ class TestValidateRequiredOptions:
         cmd = ParsedCommand(tokens=tokens, start=0, end=40)
         issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
 
-        assert issues == []
+        missing = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+        assert len(missing) == 1
+        assert "--p-output-path" in missing[0].message
 
     def test_multiple_missing_required_options(
         self, hierarchy_with_plugins_and_builtins: dict
@@ -799,11 +940,21 @@ class TestValidateRequiredOptions:
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=50)
         issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
-        assert len(issues) == 1
-        assert "--i-metadat" in issues[0].message
-        assert "Did you mean" in issues[0].message
-        assert "'--i-metadata'" in issues[0].message
-        assert issues[0].code == "q2lsp-dni/unknown-option"
+
+        unknown_option_issues = [
+            issue for issue in issues if issue.code == "q2lsp-dni/unknown-option"
+        ]
+        missing_required_issues = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+        assert len(unknown_option_issues) == 1
+        assert "--i-metadat" in unknown_option_issues[0].message
+        assert "Did you mean" in unknown_option_issues[0].message
+        assert "'--i-metadata'" in unknown_option_issues[0].message
+        assert len(missing_required_issues) == 1
+        assert "--p-output-path" in missing_required_issues[0].message
 
     def test_valid_options_no_issues(
         self, hierarchy_with_plugins_and_builtins: dict

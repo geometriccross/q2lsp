@@ -490,10 +490,6 @@ def _validate_required_options(
     if not isinstance(plugin_node, dict):
         return issues
 
-    # Phase 1: builtins are skipped.
-    if plugin_node.get("type") == "builtin":
-        return issues
-
     action_node = plugin_node.get(action_name)
     if not isinstance(action_node, dict):
         return issues
@@ -598,14 +594,25 @@ def _get_required_options(action_node: JsonObject) -> list[str]:
     """Extract required option labels from action node signature."""
     required_options: list[str] = []
     for param_name, prefix, param in _iter_signature_params(action_node):
-        signature_type = param.get("signature_type")
-        if not isinstance(signature_type, str):
-            continue
-        if "default" in param:
-            continue
-        required_options.append(format_qiime_option_label(prefix, param_name))
+        if _param_is_required(param):
+            required_options.append(format_qiime_option_label(prefix, param_name))
 
     return required_options
+
+
+def _param_is_required(param: JsonObject) -> bool:
+    """Determine if a parameter is required.
+
+    Checks explicit ``required`` flag first (used by builtin commands).
+    Falls back to the Phase 1 heuristic for plugin actions: ``signature_type``
+    present as a string AND ``default`` key absent.
+    """
+    explicit = param.get("required")
+    if isinstance(explicit, bool):
+        return explicit
+
+    signature_type = param.get("signature_type")
+    return isinstance(signature_type, str) and "default" not in param
 
 
 def _iter_signature_params(
