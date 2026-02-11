@@ -689,3 +689,75 @@ class TestGetCompletions:
         )
         items = get_completions(ctx, full_mock_hierarchy)
         assert "--i-table" in labels(items)
+
+    def test_mode_parameter_explicit_required_false_not_marked_required(self) -> None:
+        hierarchy = {
+            "qiime": {
+                "builtins": [],
+                "tools": {
+                    "inspect": {
+                        "signature": [
+                            {
+                                "name": "level",
+                                "type": "String",
+                                "description": "Inspection level",
+                                "required": False,
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("tools", 6, 11),
+            TokenSpan("inspect", 12, 19),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=20)
+        ctx = CompletionContext(
+            mode=CompletionMode.PARAMETER,
+            command=cmd,
+            current_token=None,
+            token_index=3,
+            prefix="--",
+        )
+
+        items = get_completions(ctx, hierarchy)
+        level_item = next(item for item in items if item.label == "--level")
+        assert "(required)" not in level_item.detail
+
+    def test_mode_parameter_explicit_required_true_marked_required(self) -> None:
+        hierarchy = {
+            "qiime": {
+                "builtins": [],
+                "tools": {
+                    "inspect": {
+                        "signature": [
+                            {
+                                "name": "level",
+                                "type": "String",
+                                "description": "Inspection level",
+                                "required": True,
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("tools", 6, 11),
+            TokenSpan("inspect", 12, 19),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=20)
+        ctx = CompletionContext(
+            mode=CompletionMode.PARAMETER,
+            command=cmd,
+            current_token=None,
+            token_index=3,
+            prefix="--",
+        )
+
+        items = get_completions(ctx, hierarchy)
+        level_item = next(item for item in items if item.label == "--level")
+        assert "(required)" in level_item.detail

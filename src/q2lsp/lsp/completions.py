@@ -12,6 +12,7 @@ from q2lsp.lsp.types import CompletionContext, CompletionKind, CompletionMode
 from q2lsp.qiime.options import (
     format_qiime_option_label,
     option_label_matches_prefix,
+    param_is_required,
     qiime_option_prefix,
 )
 from q2lsp.qiime.types import CommandHierarchy, JsonObject
@@ -340,8 +341,7 @@ def _complete_parameters(
         if description:
             detail_parts.append(str(description))
 
-        # Check if required (no default)
-        is_required = "default" not in param
+        is_required = param_is_required(param)
         if is_required:
             detail_parts.insert(0, "(required)")
 
