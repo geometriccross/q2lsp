@@ -19,6 +19,7 @@ from q2lsp.lsp.adapter import (
 )
 from q2lsp.lsp.completions import get_completions
 from q2lsp.lsp.diagnostics import validate_command
+from q2lsp.lsp.diagnostics.codes import DIAGNOSTIC_SEVERITY, DEFAULT_SEVERITY
 from q2lsp.lsp.diagnostics.debounce import DebounceManager
 from q2lsp.lsp.error_handling import wrap_handler, wrap_async_handler
 from q2lsp.lsp.hover import get_hover_help
@@ -28,11 +29,6 @@ from q2lsp.lsp.parser import (
     merge_line_continuations,
 )
 from q2lsp.qiime.hierarchy_provider import HierarchyProvider
-
-
-_DIAGNOSTIC_SEVERITY: dict[str, types.DiagnosticSeverity] = {
-    "q2lsp-dni/missing-required-option": types.DiagnosticSeverity.Error,
-}
 
 
 def _map_merged_offset_to_original(merged_offset: int, offset_map: list[int]) -> int:
@@ -215,8 +211,8 @@ def create_server(
                         types.Diagnostic(
                             range=types.Range(start=start_pos, end=end_pos),
                             message=issue.message,
-                            severity=_DIAGNOSTIC_SEVERITY.get(
-                                issue.code, types.DiagnosticSeverity.Warning
+                            severity=DIAGNOSTIC_SEVERITY.get(
+                                issue.code, DEFAULT_SEVERITY
                             ),
                             source="q2lsp",
                             code=issue.code,

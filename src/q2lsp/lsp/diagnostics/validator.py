@@ -10,6 +10,7 @@ import difflib
 from collections.abc import Iterator
 from typing import NamedTuple
 
+from q2lsp.lsp.diagnostics import codes
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
 from q2lsp.qiime.signature_params import (
     get_all_option_labels,
@@ -177,7 +178,7 @@ def _validate_plugin_or_builtin(
         message=message,
         start=token.start,
         end=token.end,
-        code="q2lsp-dni/unknown-root",
+        code=codes.UNKNOWN_ROOT,
     )
 
 
@@ -210,7 +211,7 @@ def _validate_action(
 
     # Determine code based on whether parent is a builtin or plugin
     is_builtin = plugin_node.get("type") == "builtin"
-    code = "q2lsp-dni/unknown-subcommand" if is_builtin else "q2lsp-dni/unknown-action"
+    code = codes.UNKNOWN_SUBCOMMAND if is_builtin else codes.UNKNOWN_ACTION
 
     # Get suggestions (prefix matches + difflib)
     suggestions = _get_suggestions(token_text, valid_actions, limit=3)
@@ -475,7 +476,7 @@ def _validate_options(
                     message=message,
                     start=token.start,
                     end=token.end,
-                    code="q2lsp-dni/unknown-option",
+                    code=codes.UNKNOWN_OPTION,
                 )
             )
 
@@ -543,7 +544,7 @@ def _validate_required_options(
                 message=f"Required option '{missing_option}' is not specified.",
                 start=action_token.start,
                 end=action_token.end,
-                code="q2lsp-dni/missing-required-option",
+                code=codes.MISSING_REQUIRED_OPTION,
             )
         )
 
