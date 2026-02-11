@@ -4,6 +4,25 @@ from q2lsp.qiime.types import JsonObject, JsonValue
 
 _QIIME_PREFIXES = ("input", "output", "parameter", "metadata")
 _PREFIX_MAP = {"input": "i", "output": "o", "parameter": "p", "metadata": "m"}
+Q2_SIGNATURE_KINDS = frozenset({"input", "output", "parameter", "metadata", "artifact"})
+
+
+def qiime_signature_kind(param: JsonObject) -> str | None:
+    """Return the QIIME 2 signature kind for a parameter, or None.
+
+    Resolution order:
+    1. ``signature_type`` field if present and string.
+    2. ``type`` field if present and its lowercase value is a known
+       QIIME 2 SDK signature kind.
+    3. ``None`` otherwise (e.g. click-native params with type "text"/"path").
+    """
+    sig = param.get("signature_type")
+    if isinstance(sig, str):
+        return sig.lower()
+    typ = param.get("type")
+    if isinstance(typ, str) and typ.lower() in Q2_SIGNATURE_KINDS:
+        return typ.lower()
+    return None
 
 
 def param_is_required(param: JsonObject) -> bool:

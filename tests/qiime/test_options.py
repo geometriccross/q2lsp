@@ -7,6 +7,7 @@ from q2lsp.qiime.options import (
     option_label_matches_prefix,
     param_is_required,
     qiime_option_prefix,
+    qiime_signature_kind,
 )
 from q2lsp.qiime.types import JsonObject
 
@@ -256,3 +257,33 @@ class TestParamIsRequired:
         """Empty parameter object returns False."""
         param: JsonObject = {}
         assert not param_is_required(param)
+
+
+class TestQiimeSignatureKind:
+    """Tests for qiime_signature_kind function."""
+
+    def test_signature_type_takes_precedence(self) -> None:
+        """signature_type is preferred over type when both exist."""
+        param: JsonObject = {"signature_type": "input", "type": "parameter"}
+        assert qiime_signature_kind(param) == "input"
+
+    def test_type_field_recognized_for_sdk_kinds(self) -> None:
+        """Known QIIME SDK kinds in type are recognized."""
+        for kind in {"input", "output", "parameter", "metadata", "artifact"}:
+            param: JsonObject = {"type": kind}
+            assert qiime_signature_kind(param) == kind
+
+    def test_type_field_click_native_returns_none(self) -> None:
+        """Click-native types are not treated as QIIME signature kinds."""
+        assert qiime_signature_kind({"type": "text"}) is None
+        assert qiime_signature_kind({"type": "path"}) is None
+        assert qiime_signature_kind({"type": "boolean"}) is None
+
+    def test_empty_dict_returns_none(self) -> None:
+        """Missing signature fields returns None."""
+        assert qiime_signature_kind({}) is None
+
+    def test_case_insensitive(self) -> None:
+        """Both source fields are matched case-insensitively."""
+        assert qiime_signature_kind({"type": "Input"}) == "input"
+        assert qiime_signature_kind({"signature_type": "OUTPUT"}) == "output"
