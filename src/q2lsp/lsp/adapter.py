@@ -5,8 +5,14 @@ from __future__ import annotations
 from lsprotocol import types
 from pygls.workspace import TextDocument
 
-from q2lsp.lsp.completions import CompletionItem as InternalCompletionItem
-from q2lsp.lsp.types import CompletionKind
+from q2lsp.core.types import (
+    COMPLETION_KIND_ACTION,
+    COMPLETION_KIND_BUILTIN,
+    COMPLETION_KIND_PARAMETER,
+    COMPLETION_KIND_PLUGIN,
+    CompletionItem as InternalCompletionItem,
+    CompletionKind,
+)
 
 __all__ = [
     "completion_kind_to_lsp",
@@ -15,11 +21,11 @@ __all__ = [
     "to_lsp_completion_item",
 ]
 
-_COMPLETION_KIND_TO_LSP: dict[CompletionKind, types.CompletionItemKind] = {
-    CompletionKind.PLUGIN: types.CompletionItemKind.Module,
-    CompletionKind.ACTION: types.CompletionItemKind.Function,
-    CompletionKind.PARAMETER: types.CompletionItemKind.Field,
-    CompletionKind.BUILTIN: types.CompletionItemKind.Class,
+_COMPLETION_KIND_TO_LSP: dict[str, types.CompletionItemKind] = {
+    COMPLETION_KIND_PLUGIN: types.CompletionItemKind.Module,
+    COMPLETION_KIND_ACTION: types.CompletionItemKind.Function,
+    COMPLETION_KIND_PARAMETER: types.CompletionItemKind.Field,
+    COMPLETION_KIND_BUILTIN: types.CompletionItemKind.Class,
 }
 
 
@@ -77,17 +83,17 @@ def offset_to_position(document: TextDocument, offset: int) -> types.Position:
     return types.Position(line=line, character=character)
 
 
-def completion_kind_to_lsp(kind: CompletionKind) -> types.CompletionItemKind:
+def completion_kind_to_lsp(kind: CompletionKind | str) -> types.CompletionItemKind:
     """
     Map internal CompletionKind to LSP CompletionItemKind.
 
     Args:
-        kind: Internal completion kind enum
+        kind: Internal completion kind value
 
     Returns:
         LSP CompletionItemKind enum value
     """
-    return _COMPLETION_KIND_TO_LSP.get(kind, types.CompletionItemKind.Text)
+    return _COMPLETION_KIND_TO_LSP.get(str(kind), types.CompletionItemKind.Text)
 
 
 def to_lsp_completion_item(

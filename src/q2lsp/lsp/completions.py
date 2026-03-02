@@ -1,174 +1,58 @@
-"""Completion logic for QIIME2 CLI commands.
-
-Routes completion requests based on CompletionContext mode and
-generates completion items from the CommandHierarchy.
-"""
+"""LSP-facing wrappers for completion logic."""
 
 from __future__ import annotations
 
-from typing import NamedTuple
-
-from q2lsp.lsp.types import CompletionContext, CompletionKind, CompletionMode
-from q2lsp.qiime.hierarchy_keys import COMMAND_METADATA_KEYS, ROOT_METADATA_KEYS
-from q2lsp.qiime.options import (
-    format_qiime_option_label,
-    normalize_option_to_param_name,
-    option_label_matches_prefix,
-    param_is_required,
+from q2lsp.adapters.completion_adapter import (
+    get_used_parameters,
+    option_matches_prefix,
+    to_completion_data_from_root,
 )
-from q2lsp.qiime.signature_params import iter_signature_params
+from q2lsp.core.completion_engine import get_completions as get_core_completions
+from q2lsp.core.types import (
+    COMPLETION_MODE_PARAMETER,
+    COMPLETION_MODE_PLUGIN,
+    COMPLETION_MODE_ROOT,
+    CompletionItem,
+    CompletionQuery,
+)
+from q2lsp.lsp.types import CompletionContext
 from q2lsp.qiime.types import CommandHierarchy, JsonObject
-
-
-class CompletionItem(NamedTuple):
-    """A completion suggestion."""
-
-    label: str  # Display text
-    detail: str  # Additional info (e.g., description)
-    kind: CompletionKind  # "plugin", "action", "parameter", "builtin"
-    insert_text: str | None = None  # Text to insert (if different from label)
+from q2lsp.usecases.get_completions_usecase import (
+    CompletionRequest,
+    get_completions as get_usecase_completions,
+)
 
 
 def get_completions(
     ctx: CompletionContext,
     hierarchy: CommandHierarchy,
 ) -> list[CompletionItem]:
-    """
-    Get completion items based on the completion context.
-
-    Routes to appropriate handler based on mode:
-    - "root": Complete plugin names and builtin commands
-    - "plugin": Complete action names within a plugin
-    - "parameter": Complete parameter names for an action
-    - "none": Return empty list
-
-    Args:
-        ctx: The completion context from the parser
-        hierarchy: The QIIME2 command hierarchy
-
-    Returns:
-        List of CompletionItem matching the prefix
-    """
-    if ctx.mode == CompletionMode.NONE or ctx.command is None:
-        return []
-
-    # Get the root node (usually "qiime")
-    root_node = _get_root_node(hierarchy)
-    if root_node is None:
-        return []
-
-    prefix = ctx.prefix
-
-    if ctx.mode == CompletionMode.ROOT:
-        return _complete_root(root_node, prefix)
-    elif ctx.mode == CompletionMode.PLUGIN:
-        # Get plugin name from token 1
-        plugin_name = _get_token_text(ctx, 1)
-        return _complete_plugin(root_node, plugin_name, prefix)
-    elif ctx.mode == CompletionMode.PARAMETER:
-        # Get plugin name from token 1, action name from token 2
-        plugin_name = _get_token_text(ctx, 1)
-        action_name = _get_token_text(ctx, 2)
-        # Get already used parameters
-        used_params = _get_used_parameters(ctx)
-        return _complete_parameters(
-            root_node, plugin_name, action_name, prefix, used_params
-        )
-
-    return []
-
-
-def _get_root_node(hierarchy: CommandHierarchy) -> JsonObject | None:
-    """Get the root node from hierarchy (usually 'qiime')."""
-    if not hierarchy:
-        return None
-    # Return the first (and usually only) root
-    return next(iter(hierarchy.values()), None)
-
-
-def _get_token_text(ctx: CompletionContext, index: int) -> str:
-    """Get token text at index, or empty string if not available."""
-    if ctx.command is None or index >= len(ctx.command.tokens):
-        return ""
-    return ctx.command.tokens[index].text
+    """Get completion items based on LSP completion context."""
+    command_tokens: tuple[str, ...] = ()
+    if ctx.command is not None:
+        command_tokens = tuple(token.text for token in ctx.command.tokens)
+    request = CompletionRequest(
+        mode=str(ctx.mode),
+        prefix=ctx.prefix,
+        command_tokens=command_tokens,
+    )
+    return get_usecase_completions(request, hierarchy)
 
 
 def _get_used_parameters(ctx: CompletionContext) -> set[str]:
-    """Get set of parameter names already used in the command."""
-    used: set[str] = set()
     if ctx.command is None:
-        return used
-
-    # Parameters start at token index 3
-    for token in ctx.command.tokens[3:]:
-        param_name = normalize_option_to_param_name(token.text)
-        if param_name is not None:
-            used.add(param_name)
-
-    return used
+        return set()
+    return get_used_parameters(tuple(token.text for token in ctx.command.tokens))
 
 
 def _option_matches_prefix(option_name: str, prefix_filter: str) -> bool:
-    """Wrapper for option_label_matches_prefix to keep exported name for tests."""
-    return option_label_matches_prefix(option_name, prefix_filter)
+    return option_matches_prefix(option_name, prefix_filter)
 
 
 def _complete_root(root_node: JsonObject, prefix: str) -> list[CompletionItem]:
-    """
-    Complete plugin names and builtin commands at root level.
-
-    Root node contains:
-    - "builtins": list of builtin command names
-    - Other keys: plugin names (excluding "name", "help", "short_help")
-    """
-    items: list[CompletionItem] = []
-
-    # Get builtin commands
-    builtins = root_node.get("builtins", [])
-    if isinstance(builtins, list):
-        for name in builtins:
-            if isinstance(name, str) and name.startswith(prefix):
-                # Get builtin details
-                builtin_data = root_node.get(name, {})
-                detail = ""
-                if isinstance(builtin_data, dict):
-                    detail = str(builtin_data.get("short_help", "")) or str(
-                        builtin_data.get("help", "")
-                    )
-                items.append(
-                    CompletionItem(
-                        label=name,
-                        detail=detail or "Built-in command",
-                        kind=CompletionKind.BUILTIN,
-                    )
-                )
-
-    # Get plugin names (keys that are not metadata)
-    for key, value in root_node.items():
-        if not key:  # Skip empty keys
-            continue
-        if key in ROOT_METADATA_KEYS:
-            continue
-        if key in (builtins if isinstance(builtins, list) else []):
-            continue  # Already added as builtin
-        if not key.startswith(prefix):
-            continue
-        if not isinstance(value, dict):
-            continue
-
-        # It's a plugin
-        detail = str(value.get("short_description", "")) or str(
-            value.get("description", "")
-        )
-        items.append(
-            CompletionItem(
-                label=key,
-                detail=detail or "Plugin",
-                kind=CompletionKind.PLUGIN,
-            )
-        )
-
-    return items
+    data = to_completion_data_from_root(root_node)
+    query = CompletionQuery(mode=COMPLETION_MODE_ROOT, prefix=prefix)
+    return get_core_completions(query, data)
 
 
 def _complete_plugin(
@@ -176,72 +60,13 @@ def _complete_plugin(
     plugin_name: str,
     prefix: str,
 ) -> list[CompletionItem]:
-    """
-    Complete action names within a plugin or builtin command.
-
-    Plugin/builtin node contains:
-    - Metadata: "id", "name", "version", "website", "type", "short_help", etc.
-    - Action keys: action names with their properties
-
-    Note: Actions are expected as direct keys under the command node,
-    not nested in an "actions" array. The "actions" key in metadata_keys
-    is included to skip any summary metadata that might use this name.
-    """
-    items: list[CompletionItem] = []
-
-    # Get builtin list for reference
-    builtins = root_node.get("builtins", [])
-    is_builtin = isinstance(builtins, list) and plugin_name in builtins
-
-    # Get the command node (works for both plugins and builtins)
-    command_node = root_node.get(plugin_name)
-    if not isinstance(command_node, dict):
-        return items
-
-    # Look for actions in the command node
-    for key, value in command_node.items():
-        if not key:  # Skip empty keys
-            continue
-        if key in COMMAND_METADATA_KEYS:
-            continue
-        if not key.startswith(prefix):
-            continue
-        if not isinstance(value, dict):
-            continue
-
-        # It's an action
-        detail = str(value.get("description", ""))
-        items.append(
-            CompletionItem(
-                label=key,
-                detail=detail or "Action",
-                kind=CompletionKind.ACTION,
-            )
-        )
-
-    # If no actions found and it's a builtin, return help option
-    if not items and is_builtin:
-        return _complete_builtin_options(prefix)
-
-    return items
-
-
-def _complete_builtin_options(prefix: str) -> list[CompletionItem]:
-    """Return common options for builtin commands."""
-    options = [
-        ("--help", "Show help message"),
-    ]
-    items: list[CompletionItem] = []
-    for opt, desc in options:
-        if opt.startswith(prefix):
-            items.append(
-                CompletionItem(
-                    label=opt,
-                    detail=desc,
-                    kind=CompletionKind.PARAMETER,
-                )
-            )
-    return items
+    data = to_completion_data_from_root(root_node)
+    query = CompletionQuery(
+        mode=COMPLETION_MODE_PLUGIN,
+        prefix=prefix,
+        plugin_name=plugin_name,
+    )
+    return get_core_completions(query, data)
 
 
 def _complete_parameters(
@@ -251,77 +76,13 @@ def _complete_parameters(
     prefix: str,
     used_params: set[str],
 ) -> list[CompletionItem]:
-    """
-    Complete parameter names for an action.
-
-    Action node contains:
-    - "signature": list of parameter definitions
-    """
-    items: list[CompletionItem] = []
-
-    # Preserve the incoming prefix filter to avoid shadowing
-    prefix_filter = prefix
-
-    # Check if it's a builtin command
-    builtins = root_node.get("builtins", [])
-    is_builtin = isinstance(builtins, list) and plugin_name in builtins
-
-    # Get plugin node
-    plugin_node = root_node.get(plugin_name)
-    if not isinstance(plugin_node, dict):
-        return items
-
-    # Get action node
-    action_node = plugin_node.get(action_name)
-    if not isinstance(action_node, dict):
-        return items
-
-    # Check if signature exists for builtin fallback
-    signature = action_node.get("signature", [])
-    if not isinstance(signature, list) or not signature:
-        if is_builtin:
-            return _complete_builtin_options(prefix_filter)
-        return items
-
-    for name, option_prefix, param in iter_signature_params(action_node):
-        # Skip already used parameters
-        if name in used_params:
-            continue
-
-        # Derive option name
-        option_name = format_qiime_option_label(option_prefix, name)
-        if not _option_matches_prefix(option_name, prefix_filter):
-            continue
-
-        # Build detail string
-        detail_parts: list[str] = []
-        param_type = param.get("type", "")
-        if param_type:
-            detail_parts.append(f"[{param_type}]")
-        description = param.get("description", "")
-        if description:
-            detail_parts.append(str(description))
-
-        is_required = param_is_required(param)
-        if is_required:
-            detail_parts.insert(0, "(required)")
-
-        items.append(
-            CompletionItem(
-                label=option_name,
-                detail=" ".join(detail_parts) if detail_parts else "Parameter",
-                kind=CompletionKind.PARAMETER,
-            )
-        )
-
-    # Always add --help
-    if "--help".startswith(prefix_filter) and "help" not in used_params:
-        items.append(
-            CompletionItem(
-                label="--help",
-                detail="Show help message",
-                kind=CompletionKind.PARAMETER,
-            )
-        )
-
-    return items
+    data = to_completion_data_from_root(root_node)
+    query = CompletionQuery(
+        mode=COMPLETION_MODE_PARAMETER,
+        prefix=prefix,
+        normalized_prefix=prefix.lstrip("-"),
+        plugin_name=plugin_name,
+        action_name=action_name,
+        used_parameters=frozenset(used_params),
+    )
+    return get_core_completions(query, data)

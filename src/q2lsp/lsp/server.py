@@ -17,7 +17,6 @@ from q2lsp.lsp.adapter import (
     position_to_offset as _position_to_offset,
     to_lsp_completion_item as _to_lsp_completion_item,
 )
-from q2lsp.lsp.completions import get_completions
 from q2lsp.lsp.diagnostics import validate_command
 from q2lsp.lsp.diagnostics.codes import DIAGNOSTIC_SEVERITY, DEFAULT_SEVERITY
 from q2lsp.lsp.diagnostics.debounce import DebounceManager
@@ -29,6 +28,7 @@ from q2lsp.lsp.parser import (
     merge_line_continuations,
 )
 from q2lsp.qiime.hierarchy_provider import HierarchyProvider
+from q2lsp.usecases.get_completions_usecase import CompletionRequest, get_completions
 
 
 def _map_merged_offset_to_original(merged_offset: int, offset_map: list[int]) -> int:
@@ -108,7 +108,15 @@ def create_server(
 
         # Get completion items
         hierarchy = get_hierarchy()
-        internal_items = get_completions(ctx, hierarchy)
+        command_tokens: tuple[str, ...] = ()
+        if ctx.command is not None:
+            command_tokens = tuple(token.text for token in ctx.command.tokens)
+        request = CompletionRequest(
+            mode=str(ctx.mode),
+            prefix=ctx.prefix,
+            command_tokens=command_tokens,
+        )
+        internal_items = get_completions(request, hierarchy)
 
         # Convert to LSP CompletionItems
         lsp_items = [
