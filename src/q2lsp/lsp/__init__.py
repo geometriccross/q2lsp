@@ -1,7 +1,11 @@
 """LSP types for QIIME 2 language server."""
 
 from q2lsp.core.types import CompletionItem
-from q2lsp.lsp.parser import get_completion_context
+from q2lsp.lsp.document_commands import (
+    AnalyzedDocument,
+    analyze_document,
+    resolve_completion_context,
+)
 from q2lsp.lsp.types import (
     CompletionContext,
     CompletionMode,
@@ -10,10 +14,12 @@ from q2lsp.lsp.types import (
 )
 
 __all__ = [
+    "AnalyzedDocument",
     "CompletionContext",
     "CompletionItem",
     "CompletionMode",
     "ParsedCommand",
     "TokenSpan",
-    "get_completion_context",
+    "analyze_document",
+    "resolve_completion_context",
 ]

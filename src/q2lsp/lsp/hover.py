@@ -7,65 +7,63 @@ from __future__ import annotations
 
 from typing import Callable
 
-from q2lsp.lsp.completion_context import get_completion_context
-from q2lsp.lsp.types import TokenSpan
+from q2lsp.lsp.types import CompletionContext, TokenSpan
 from q2lsp.qiime.types import CommandHierarchy, JsonObject
 
 
 def get_hover_help(
-    text: str,
-    offset: int,
+    context: CompletionContext,
     *,
     hierarchy: CommandHierarchy | None = None,
     get_help: Callable[[list[str]], str | None] | None = None,
 ) -> str | None:
     """
-    Get hover help text at the given cursor position.
+    Get hover help text for the given completion context.
 
     Returns plain text string or None if no help is available.
 
     Args:
-        text: The full document text.
-        offset: Cursor position (0-based offset in original text).
+        context: Pre-resolved completion context from document analysis.
         hierarchy: The QIIME2 command hierarchy (legacy, optional).
         get_help: Callback that takes command path and returns help text (preferred).
 
     Returns:
         Plain text string with help text, or None if no help is available.
     """
-    # Get completion context to understand where we are in the command
-    ctx = get_completion_context(text, offset)
-
     # No hover if not in a qiime command
-    if ctx.command is None:
+    if context.command is None:
         return None
 
     # Check if cursor is on a token
-    if ctx.current_token is None:
+    if context.current_token is None:
         return None
 
     # Use help provider callback if available
     if get_help is not None:
-        return _get_help_via_provider(ctx.command.tokens, ctx.token_index, get_help)
+        return _get_help_via_provider(
+            context.command.tokens, context.token_index, get_help
+        )
 
     # Legacy behavior: use hierarchy
     if hierarchy is None:
         return None
 
     # Determine what to show based on token index
-    token_index = ctx.token_index
+    token_index = context.token_index
 
     if token_index == 0:
         # Hover on "qiime" - show root help
         return _get_root_help(hierarchy)
     elif token_index == 1:
         # Hover on plugin/builtin name - show plugin help
-        plugin_name = ctx.current_token.text
+        plugin_name = context.current_token.text
         return _get_plugin_help(hierarchy, plugin_name)
     elif token_index == 2:
         # Hover on action name - show action help
-        plugin_name = ctx.command.tokens[1].text if len(ctx.command.tokens) > 1 else ""
-        action_name = ctx.current_token.text
+        plugin_name = (
+            context.command.tokens[1].text if len(context.command.tokens) > 1 else ""
+        )
+        action_name = context.current_token.text
         return _get_action_help(hierarchy, plugin_name, action_name)
     else:
         # Hover on parameters or beyond - not implemented

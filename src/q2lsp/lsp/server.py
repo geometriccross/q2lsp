@@ -18,35 +18,17 @@ from q2lsp.lsp.adapter import (
     to_lsp_completion_item as _to_lsp_completion_item,
 )
 from q2lsp.lsp.diagnostics import validate_command
-from q2lsp.lsp.diagnostics.codes import DIAGNOSTIC_SEVERITY, DEFAULT_SEVERITY
+from q2lsp.lsp.diagnostics.codes import DEFAULT_SEVERITY, DIAGNOSTIC_SEVERITY
 from q2lsp.lsp.diagnostics.debounce import DebounceManager
-from q2lsp.lsp.error_handling import wrap_handler, wrap_async_handler
-from q2lsp.lsp.hover import get_hover_help
-from q2lsp.lsp.parser import (
-    find_qiime_commands,
-    get_completion_context,
-    merge_line_continuations,
+from q2lsp.lsp.document_commands import (
+    analyze_document,
+    resolve_completion_context,
+    to_original_offset,
 )
+from q2lsp.lsp.error_handling import wrap_async_handler, wrap_handler
+from q2lsp.lsp.hover import get_hover_help
 from q2lsp.qiime.hierarchy_provider import HierarchyProvider
 from q2lsp.usecases.get_completions_usecase import CompletionRequest, get_completions
-
-
-def _map_merged_offset_to_original(merged_offset: int, offset_map: list[int]) -> int:
-    """
-    Map a merged offset back to the original offset.
-
-    Args:
-        merged_offset: Offset in the merged text.
-        offset_map: Offset map from merge_line_continuations.
-
-    Returns:
-        The corresponding offset in the original text.
-    """
-    if merged_offset < 0:
-        raise ValueError("merged_offset must be non-negative")
-    if merged_offset >= len(offset_map):
-        raise ValueError("merged_offset exceeds offset_map size")
-    return offset_map[merged_offset]
 
 
 def create_server(
@@ -102,8 +84,9 @@ def create_server(
         # Calculate document offset from line/character position
         offset = _position_to_offset(document, params.position)
 
-        # Get completion context from parser
-        ctx = get_completion_context(document.source, offset)
+        # Analyze document and get completion context
+        doc = analyze_document(document.source)
+        ctx = resolve_completion_context(doc, offset)
         logger.debug("Completion context: mode=%s, prefix=%s", ctx.mode, ctx.prefix)
 
         # Get completion items
@@ -152,8 +135,10 @@ def create_server(
         # Calculate document offset from line/character position
         offset = _position_to_offset(document, params.position)
 
-        # Get hover help text
-        help_text = get_hover_help(document.source, offset, get_help=get_help)
+        # Analyze document and get hover help
+        doc = analyze_document(document.source)
+        ctx = resolve_completion_context(doc, offset)
+        help_text = get_hover_help(ctx, get_help=get_help)
 
         if help_text is None:
             return None
@@ -194,22 +179,17 @@ def create_server(
             # Get hierarchy
             hierarchy = get_hierarchy()
 
-            # Merge line continuations
-            merged_text, offset_map = merge_line_continuations(document.source)
-
-            # Find all qiime commands
-            commands = find_qiime_commands(merged_text)
+            # Analyze document
+            doc = analyze_document(document.source)
 
             # Validate each command
             lsp_diagnostics: list[types.Diagnostic] = []
-            for cmd in commands:
+            for cmd in doc.commands:
                 issues = validate_command(cmd, hierarchy)
                 for issue in issues:
                     # Map merged offsets back to original offsets
-                    original_start = _map_merged_offset_to_original(
-                        issue.start, offset_map
-                    )
-                    original_end = _map_merged_offset_to_original(issue.end, offset_map)
+                    original_start = to_original_offset(doc, issue.start)
+                    original_end = to_original_offset(doc, issue.end)
 
                     # Convert offsets to LSP position
                     start_pos = _offset_to_position(document, original_start)
