@@ -5,21 +5,39 @@ from __future__ import annotations
 import pytest
 
 from tests.helpers.cursor import extract_cursor_offset
-
-from q2lsp.lsp.completions import (
-    CompletionItem,
-    get_completions,
-    _complete_root,
-    _complete_plugin,
-    _complete_parameters,
-    _get_used_parameters,
+from tests.helpers.completions import (
+    complete_parameters,
+    complete_plugin,
+    complete_root,
+    ctx_get_used_parameters,
 )
+
+from q2lsp.core.types import CompletionItem
 from q2lsp.lsp.types import (
     CompletionContext,
     CompletionMode,
     ParsedCommand,
     TokenSpan,
 )
+from q2lsp.usecases.get_completions_usecase import (
+    CompletionRequest,
+    get_completions as get_usecase_completions,
+)
+
+
+def _get_completions_via_usecase(
+    ctx: CompletionContext, hierarchy: dict
+) -> list[CompletionItem]:
+    """Call the usecase completion path from a CompletionContext."""
+    command_tokens: tuple[str, ...] = ()
+    if ctx.command is not None:
+        command_tokens = tuple(token.text for token in ctx.command.tokens)
+    request = CompletionRequest(
+        mode=str(ctx.mode),
+        prefix=ctx.prefix,
+        command_tokens=command_tokens,
+    )
+    return get_usecase_completions(request, hierarchy)
 
 
 def labels(items: list[CompletionItem]) -> list[str]:
@@ -370,90 +388,90 @@ def full_mock_hierarchy() -> dict:
 
 class TestCompleteRoot:
     def test_returns_builtins(self, hierarchy_root_builtins: dict) -> None:
-        items = _complete_root(hierarchy_root_builtins["qiime"], "")
+        items = complete_root(hierarchy_root_builtins["qiime"], "")
         assert_labels(items, {"info", "tools", "dev", "metadata", "types"})
 
     def test_returns_plugins(self, hierarchy_with_plugins: dict) -> None:
-        items = _complete_root(hierarchy_with_plugins["qiime"], "")
+        items = complete_root(hierarchy_with_plugins["qiime"], "")
         assert_labels(items, {"info", "feature-table", "diversity"})
 
     def test_filters_by_prefix(self, hierarchy_with_plugins: dict) -> None:
-        items = _complete_root(hierarchy_with_plugins["qiime"], "f")
+        items = complete_root(hierarchy_with_plugins["qiime"], "f")
         assert_labels(items, {"feature-table"})
 
     def test_builtin_kind(self, hierarchy_root_builtins: dict) -> None:
-        items = _complete_root(hierarchy_root_builtins["qiime"], "info")
+        items = complete_root(hierarchy_root_builtins["qiime"], "info")
         assert len(items) == 1
         assert items[0].kind == "builtin"
 
     def test_plugin_kind(self, hierarchy_with_plugins: dict) -> None:
-        items = _complete_root(hierarchy_with_plugins["qiime"], "feature")
+        items = complete_root(hierarchy_with_plugins["qiime"], "feature")
         assert len(items) == 1
         assert items[0].kind == "plugin"
 
     def test_includes_detail(self, hierarchy_root_builtins: dict) -> None:
-        items = _complete_root(hierarchy_root_builtins["qiime"], "info")
+        items = complete_root(hierarchy_root_builtins["qiime"], "info")
         assert items[0].detail != ""
 
 
 class TestCompletePlugin:
     def test_returns_actions(self, hierarchy_with_plugins: dict) -> None:
-        items = _complete_plugin(hierarchy_with_plugins["qiime"], "feature-table", "")
+        items = complete_plugin(hierarchy_with_plugins["qiime"], "feature-table", "")
         assert_labels(items, {"summarize", "filter-samples"})
 
     def test_filters_by_prefix(self, hierarchy_with_plugins: dict) -> None:
-        items = _complete_plugin(hierarchy_with_plugins["qiime"], "feature-table", "s")
+        items = complete_plugin(hierarchy_with_plugins["qiime"], "feature-table", "s")
         assert_labels(items, {"summarize"})
 
     def test_action_kind(self, hierarchy_with_plugins: dict) -> None:
-        items = _complete_plugin(
+        items = complete_plugin(
             hierarchy_with_plugins["qiime"], "feature-table", "summarize"
         )
         assert len(items) == 1
         assert items[0].kind == "action"
 
     def test_unknown_plugin_returns_empty(self, hierarchy_with_plugins: dict) -> None:
-        items = _complete_plugin(hierarchy_with_plugins["qiime"], "nonexistent", "")
+        items = complete_plugin(hierarchy_with_plugins["qiime"], "nonexistent", "")
         assert items == []
 
     def test_builtin_returns_help_option(self, hierarchy_with_plugins: dict) -> None:
-        items = _complete_plugin(hierarchy_with_plugins["qiime"], "info", "")
+        items = complete_plugin(hierarchy_with_plugins["qiime"], "info", "")
         assert_labels(items, {"--help"})
 
     def test_builtin_with_actions_returns_actions(
         self, hierarchy_root_builtins: dict
     ) -> None:
         """Test that builtins with actions return their subcommands, not just --help."""
-        items = _complete_plugin(hierarchy_root_builtins["qiime"], "tools", "")
+        items = complete_plugin(hierarchy_root_builtins["qiime"], "tools", "")
         assert_labels(items, {"import", "export", "peek", "citations", "validate"})
 
     def test_builtin_with_actions_filters_by_prefix(
         self, hierarchy_root_builtins: dict
     ) -> None:
         """Test that prefix filtering works for builtin actions."""
-        items = _complete_plugin(hierarchy_root_builtins["qiime"], "tools", "i")
+        items = complete_plugin(hierarchy_root_builtins["qiime"], "tools", "i")
         assert_labels(items, {"import"})
 
     def test_builtin_types_returns_actions(self, hierarchy_root_builtins: dict) -> None:
         """Test that 'types' builtin returns its subcommands."""
-        items = _complete_plugin(hierarchy_root_builtins["qiime"], "types", "")
+        items = complete_plugin(hierarchy_root_builtins["qiime"], "types", "")
         assert_labels(items, {"collate-contigs", "partition-samples-single"})
 
     def test_builtin_metadata_returns_actions(
         self, hierarchy_root_builtins: dict
     ) -> None:
         """Test that 'metadata' builtin returns its subcommands."""
-        items = _complete_plugin(hierarchy_root_builtins["qiime"], "metadata", "")
+        items = complete_plugin(hierarchy_root_builtins["qiime"], "metadata", "")
         assert_labels(items, {"distance-matrix", "merge", "shuffle-groups", "tabulate"})
 
     def test_builtin_dev_returns_actions(self, hierarchy_root_builtins: dict) -> None:
         """Test that 'dev' builtin returns its subcommands."""
-        items = _complete_plugin(hierarchy_root_builtins["qiime"], "dev", "")
+        items = complete_plugin(hierarchy_root_builtins["qiime"], "dev", "")
         assert_labels(items, {"refresh-cache", "reset-theme"})
 
     def test_builtin_action_kind(self, hierarchy_root_builtins: dict) -> None:
         """Test that builtin actions have the 'action' kind."""
-        items = _complete_plugin(hierarchy_root_builtins["qiime"], "tools", "import")
+        items = complete_plugin(hierarchy_root_builtins["qiime"], "tools", "import")
         assert len(items) == 1
         assert items[0].kind == "action"
 
@@ -461,14 +479,14 @@ class TestCompletePlugin:
         self, hierarchy_root_builtins: dict
     ) -> None:
         """Test that builtin with actions returns empty list when no actions match prefix."""
-        items = _complete_plugin(hierarchy_root_builtins["qiime"], "tools", "xyz")
+        items = complete_plugin(hierarchy_root_builtins["qiime"], "tools", "xyz")
         # Should return empty list, not --help, because tools has actions
         assert items == []
 
 
 class TestCompleteParameters:
     def test_returns_parameters(self, hierarchy_with_parameters: dict) -> None:
-        items = _complete_parameters(
+        items = complete_parameters(
             hierarchy_with_parameters["qiime"],
             "feature-table",
             "summarize",
@@ -480,7 +498,7 @@ class TestCompleteParameters:
         )
 
     def test_filters_by_prefix(self, hierarchy_with_parameters: dict) -> None:
-        items = _complete_parameters(
+        items = complete_parameters(
             hierarchy_with_parameters["qiime"],
             "feature-table",
             "summarize",
@@ -490,7 +508,7 @@ class TestCompleteParameters:
         assert_labels(items, {"--i-table"})
 
     def test_excludes_used_parameters(self, hierarchy_with_parameters: dict) -> None:
-        items = _complete_parameters(
+        items = complete_parameters(
             hierarchy_with_parameters["qiime"],
             "feature-table",
             "summarize",
@@ -501,7 +519,7 @@ class TestCompleteParameters:
         assert "--o-output-dir" in labels(items)
 
     def test_includes_help(self, hierarchy_with_parameters: dict) -> None:
-        items = _complete_parameters(
+        items = complete_parameters(
             hierarchy_with_parameters["qiime"],
             "feature-table",
             "summarize",
@@ -511,7 +529,7 @@ class TestCompleteParameters:
         assert "--help" in labels(items)
 
     def test_parameter_kind(self, hierarchy_with_parameters: dict) -> None:
-        items = _complete_parameters(
+        items = complete_parameters(
             hierarchy_with_parameters["qiime"],
             "feature-table",
             "summarize",
@@ -522,7 +540,7 @@ class TestCompleteParameters:
         assert items[0].kind == "parameter"
 
     def test_required_indicator(self, hierarchy_with_parameters: dict) -> None:
-        items = _complete_parameters(
+        items = complete_parameters(
             hierarchy_with_parameters["qiime"],
             "feature-table",
             "summarize",
@@ -551,7 +569,7 @@ class TestGetUsedParameters:
             token_index=6,
             prefix="",
         )
-        used = _get_used_parameters(ctx)
+        used = ctx_get_used_parameters(ctx)
         assert "table" in used
         assert "output_dir" in used  # normalized to underscore
 
@@ -570,7 +588,7 @@ class TestGetUsedParameters:
             token_index=4,
             prefix="",
         )
-        used = _get_used_parameters(ctx)
+        used = ctx_get_used_parameters(ctx)
         assert "table" in used
 
 
@@ -586,7 +604,7 @@ class TestCompletionPipeline:
         assert ctx.mode == CompletionMode.ROOT
         assert ctx.prefix == "feat"
 
-        items = get_completions(ctx, hierarchy_with_plugins)
+        items = _get_completions_via_usecase(ctx, hierarchy_with_plugins)
         assert_labels(items, {"feature-table"})
 
     def test_plugin_mode_pipeline(self, hierarchy_with_plugins: dict) -> None:
@@ -600,7 +618,7 @@ class TestCompletionPipeline:
         assert ctx.mode == CompletionMode.PLUGIN
         assert ctx.prefix == ""
 
-        items = get_completions(ctx, hierarchy_with_plugins)
+        items = _get_completions_via_usecase(ctx, hierarchy_with_plugins)
         assert_labels(items, {"summarize", "filter-samples"})
 
     def test_parameter_mode_pipeline(self, hierarchy_with_parameters: dict) -> None:
@@ -614,7 +632,7 @@ class TestCompletionPipeline:
         assert ctx.mode == CompletionMode.PARAMETER
         assert ctx.prefix == "--"
 
-        items = get_completions(ctx, hierarchy_with_parameters)
+        items = _get_completions_via_usecase(ctx, hierarchy_with_parameters)
         item_labels = labels(items)
         assert "--i-table" in item_labels
         assert "--help" in item_labels
@@ -627,7 +645,7 @@ class TestCompletionPipeline:
         ctx = get_completion_context(text, offset)
         assert ctx.mode == CompletionMode.NONE
 
-        items = get_completions(ctx, hierarchy_with_plugins)
+        items = _get_completions_via_usecase(ctx, hierarchy_with_plugins)
         assert items == []
 
 
@@ -640,7 +658,7 @@ class TestGetCompletions:
             token_index=-1,
             prefix="",
         )
-        items = get_completions(ctx, full_mock_hierarchy)
+        items = _get_completions_via_usecase(ctx, full_mock_hierarchy)
         assert items == []
 
     def test_mode_root(self, full_mock_hierarchy: dict) -> None:
@@ -653,7 +671,7 @@ class TestGetCompletions:
             token_index=1,
             prefix="",
         )
-        items = get_completions(ctx, full_mock_hierarchy)
+        items = _get_completions_via_usecase(ctx, full_mock_hierarchy)
         assert "info" in labels(items)
         assert "feature-table" in labels(items)
 
@@ -670,7 +688,7 @@ class TestGetCompletions:
             token_index=2,
             prefix="",
         )
-        items = get_completions(ctx, full_mock_hierarchy)
+        items = _get_completions_via_usecase(ctx, full_mock_hierarchy)
         assert "summarize" in labels(items)
 
     def test_mode_parameter(self, full_mock_hierarchy: dict) -> None:
@@ -687,7 +705,7 @@ class TestGetCompletions:
             token_index=3,
             prefix="--",
         )
-        items = get_completions(ctx, full_mock_hierarchy)
+        items = _get_completions_via_usecase(ctx, full_mock_hierarchy)
         assert "--i-table" in labels(items)
 
     def test_mode_parameter_explicit_required_false_not_marked_required(self) -> None:
@@ -722,7 +740,7 @@ class TestGetCompletions:
             prefix="--",
         )
 
-        items = get_completions(ctx, hierarchy)
+        items = _get_completions_via_usecase(ctx, hierarchy)
         level_item = next(item for item in items if item.label == "--level")
         assert "(required)" not in level_item.detail
 
@@ -758,6 +776,6 @@ class TestGetCompletions:
             prefix="--",
         )
 
-        items = get_completions(ctx, hierarchy)
+        items = _get_completions_via_usecase(ctx, hierarchy)
         level_item = next(item for item in items if item.label == "--level")
         assert "(required)" in level_item.detail

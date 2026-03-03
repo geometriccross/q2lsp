@@ -1,6 +1,6 @@
 """LSP types for QIIME 2 language server."""
 
-from q2lsp.lsp.completions import CompletionItem, get_completions
+from q2lsp.core.types import CompletionItem
 from q2lsp.lsp.parser import get_completion_context
 from q2lsp.lsp.types import (
     CompletionContext,
@@ -16,5 +16,4 @@ __all__ = [
     "ParsedCommand",
     "TokenSpan",
     "get_completion_context",
-    "get_completions",
 ]

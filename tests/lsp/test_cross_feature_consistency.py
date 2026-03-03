@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from q2lsp.lsp.completions import (
-    CompletionItem,
-    _complete_parameters,
-    _complete_plugin,
-    _complete_root,
+from tests.helpers.completions import (
+    complete_parameters,
+    complete_plugin,
+    complete_root,
 )
+
+from q2lsp.core.types import CompletionItem
 from q2lsp.lsp.diagnostics.codes import UNKNOWN_ACTION
 from q2lsp.lsp.diagnostics.hierarchy import (
     _get_valid_actions,
@@ -129,7 +130,7 @@ class TestCompletionsDiagnosticsConsistency:
         root_node = shared_hierarchy["qiime"]
         action_node = root_node["diversity"]["core-metrics"]
 
-        completion_items = _complete_parameters(
+        completion_items = complete_parameters(
             root_node,
             "diversity",
             "core-metrics",
@@ -151,7 +152,7 @@ class TestCompletionsDiagnosticsConsistency:
         root_node = shared_hierarchy["qiime"]
         action_node = root_node["diversity"]["core-metrics"]
 
-        completion_items = _complete_parameters(
+        completion_items = complete_parameters(
             root_node,
             "diversity",
             "core-metrics",
@@ -170,7 +171,7 @@ class TestCompletionsDiagnosticsConsistency:
         """Plugin/builtin names from completions match diagnostics valid names."""
         root_node = shared_hierarchy["qiime"]
 
-        completion_names = _labels(_complete_root(root_node, ""))
+        completion_names = _labels(complete_root(root_node, ""))
         valid_plugins, valid_builtins = _get_valid_plugins_and_builtins(root_node)
 
         assert completion_names == (valid_plugins | valid_builtins)
@@ -180,7 +181,7 @@ class TestCompletionsDiagnosticsConsistency:
         root_node = shared_hierarchy["qiime"]
         plugin_node = root_node["diversity"]
 
-        completion_action_names = _labels(_complete_plugin(root_node, "diversity", ""))
+        completion_action_names = _labels(complete_plugin(root_node, "diversity", ""))
         valid_actions = set(_get_valid_actions(plugin_node))
 
         assert completion_action_names == valid_actions
@@ -227,7 +228,7 @@ class TestCompletionsDiagnosticsConsistency:
         issues = validate_command(command, shared_hierarchy)
         assert issues == []
 
-        completion_items = _complete_parameters(
+        completion_items = complete_parameters(
             root_node,
             "diversity",
             "core-metrics",
