@@ -6,19 +6,22 @@ what type of completion is needed at a given cursor position.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from q2lsp.lsp.parser import (
     command_at_position,
     find_qiime_commands,
     merge_line_continuations,
 )
-from q2lsp.lsp.types import CompletionContext, CompletionMode, TokenSpan
+from q2lsp.lsp.types import CompletionContext, CompletionMode, ParsedCommand, TokenSpan
 
 
 def get_completion_context(text: str, offset: int) -> CompletionContext:
     """
     Get completion context at the given position.
 
-    This is the main entry point for determining completion context.
+    This is a convenience wrapper that merges line continuations,
+    converts the offset, and delegates to get_context_from_merged.
 
     Args:
         text: The full document text.
@@ -27,17 +30,33 @@ def get_completion_context(text: str, offset: int) -> CompletionContext:
     Returns:
         CompletionContext with mode, command, current token, etc.
     """
-    # Merge line continuations
     merged_text, offset_map = merge_line_continuations(text)
-
-    # Convert offset to merged position
     merged_offset = _original_to_merged_offset(offset, offset_map)
-
-    # Find all qiime commands
     commands = find_qiime_commands(merged_text)
+    return get_context_from_merged(merged_text, merged_offset, commands)
 
-    # Find command at cursor position
-    command = command_at_position(commands, merged_offset)
+
+def get_context_from_merged(
+    merged_text: str,
+    merged_offset: int,
+    commands: Sequence[ParsedCommand],
+) -> CompletionContext:
+    """
+    Get completion context from pre-merged text and pre-parsed commands.
+
+    This is the core context-resolution logic. Use this when you have
+    already merged line continuations and parsed commands (e.g., via
+    analyze_document).
+
+    Args:
+        merged_text: Text with line continuations already merged.
+        merged_offset: Cursor position in the merged text.
+        commands: Pre-parsed QIIME commands from the merged text.
+
+    Returns:
+        CompletionContext with mode, command, current token, etc.
+    """
+    command = command_at_position(list(commands), merged_offset)
 
     if command is None:
         return CompletionContext(
