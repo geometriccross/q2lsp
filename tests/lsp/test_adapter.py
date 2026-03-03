@@ -7,10 +7,7 @@ from lsprotocol import types
 from pygls.workspace import TextDocument
 
 from q2lsp.core.types import (
-    COMPLETION_KIND_ACTION,
-    COMPLETION_KIND_BUILTIN,
-    COMPLETION_KIND_PARAMETER,
-    COMPLETION_KIND_PLUGIN,
+    CompletionKind,
     CompletionItem as InternalCompletionItem,
 )
 from q2lsp.lsp.adapter import (
@@ -121,22 +118,22 @@ class TestCompletionKindToLsp:
 
     def test_plugin_maps_to_module(self) -> None:
         """CompletionKind.PLUGIN -> CompletionItemKind.Module."""
-        kind = completion_kind_to_lsp(COMPLETION_KIND_PLUGIN)
+        kind = completion_kind_to_lsp(CompletionKind.PLUGIN)
         assert kind == types.CompletionItemKind.Module
 
     def test_action_maps_to_function(self) -> None:
         """CompletionKind.ACTION -> CompletionItemKind.Function."""
-        kind = completion_kind_to_lsp(COMPLETION_KIND_ACTION)
+        kind = completion_kind_to_lsp(CompletionKind.ACTION)
         assert kind == types.CompletionItemKind.Function
 
     def test_parameter_maps_to_field(self) -> None:
         """CompletionKind.PARAMETER -> CompletionItemKind.Field."""
-        kind = completion_kind_to_lsp(COMPLETION_KIND_PARAMETER)
+        kind = completion_kind_to_lsp(CompletionKind.PARAMETER)
         assert kind == types.CompletionItemKind.Field
 
     def test_builtin_maps_to_class(self) -> None:
         """CompletionKind.BUILTIN -> CompletionItemKind.Class."""
-        kind = completion_kind_to_lsp(COMPLETION_KIND_BUILTIN)
+        kind = completion_kind_to_lsp(CompletionKind.BUILTIN)
         assert kind == types.CompletionItemKind.Class
 
 
@@ -148,7 +145,7 @@ class TestToLspCompletionItem:
         item = InternalCompletionItem(
             label="test-label",
             detail="test detail",
-            kind=COMPLETION_KIND_PLUGIN,
+            kind=CompletionKind.PLUGIN,
             insert_text=None,
         )
         lsp_item = to_lsp_completion_item(item)
@@ -159,7 +156,10 @@ class TestToLspCompletionItem:
     def test_insert_text_none_when_not_provided(self) -> None:
         """insert_text=None stays None."""
         item = InternalCompletionItem(
-            label="test", detail="detail", kind=COMPLETION_KIND_ACTION, insert_text=None
+            label="test",
+            detail="detail",
+            kind=CompletionKind.ACTION,
+            insert_text=None,
         )
         lsp_item = to_lsp_completion_item(item)
         assert lsp_item.insert_text is None
@@ -169,7 +169,7 @@ class TestToLspCompletionItem:
         item = InternalCompletionItem(
             label="test",
             detail="detail",
-            kind=COMPLETION_KIND_ACTION,
+            kind=CompletionKind.ACTION,
             insert_text="foo",
         )
         lsp_item = to_lsp_completion_item(item)
@@ -180,7 +180,7 @@ class TestToLspCompletionItem:
         item = InternalCompletionItem(
             label="--p-input",
             detail="test detail",
-            kind=COMPLETION_KIND_PARAMETER,
+            kind=CompletionKind.PARAMETER,
         )
         lsp_item = to_lsp_completion_item(
             item, position=types.Position(line=0, character=5), prefix="--"

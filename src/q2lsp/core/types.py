@@ -2,20 +2,33 @@
 
 from __future__ import annotations
 
-from typing import Literal, NamedTuple, TypeAlias
+from enum import Enum
+from typing import NamedTuple
 
-CompletionMode: TypeAlias = Literal["root", "plugin", "parameter", "none"]
-CompletionKind: TypeAlias = Literal["plugin", "action", "parameter", "builtin"]
 
-COMPLETION_MODE_ROOT: CompletionMode = "root"
-COMPLETION_MODE_PLUGIN: CompletionMode = "plugin"
-COMPLETION_MODE_PARAMETER: CompletionMode = "parameter"
-COMPLETION_MODE_NONE: CompletionMode = "none"
+class _StrEnum(str, Enum):
+    """String-valued enum that behaves like str at runtime."""
 
-COMPLETION_KIND_PLUGIN: CompletionKind = "plugin"
-COMPLETION_KIND_ACTION: CompletionKind = "action"
-COMPLETION_KIND_PARAMETER: CompletionKind = "parameter"
-COMPLETION_KIND_BUILTIN: CompletionKind = "builtin"
+    def __str__(self) -> str:
+        return str(self.value)
+
+
+class CompletionMode(_StrEnum):
+    """Mode determines what kind of completions to offer."""
+
+    ROOT = "root"
+    PLUGIN = "plugin"
+    PARAMETER = "parameter"
+    NONE = "none"
+
+
+class CompletionKind(_StrEnum):
+    """Kind categorizes completion items."""
+
+    PLUGIN = "plugin"
+    ACTION = "action"
+    PARAMETER = "parameter"
+    BUILTIN = "builtin"
 
 
 class CompletionQuery(NamedTuple):

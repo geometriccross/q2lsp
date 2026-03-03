@@ -8,12 +8,8 @@ from q2lsp.core.types import (
     CommandCandidate,
     CompletionData,
     CompletionItem,
-    COMPLETION_KIND_ACTION,
-    COMPLETION_KIND_BUILTIN,
-    COMPLETION_KIND_PARAMETER,
-    COMPLETION_KIND_PLUGIN,
-    COMPLETION_MODE_PARAMETER,
-    COMPLETION_MODE_ROOT,
+    CompletionKind,
+    CompletionMode,
     CompletionQuery,
     ParameterCandidate,
 )
@@ -25,16 +21,16 @@ def test_root_completion_returns_plugins_and_builtins() -> None:
             CompletionItem(
                 label="info",
                 detail="Display information",
-                kind=COMPLETION_KIND_BUILTIN,
+                kind=CompletionKind.BUILTIN,
             ),
             CompletionItem(
                 label="feature-table",
                 detail="Feature table operations",
-                kind=COMPLETION_KIND_PLUGIN,
+                kind=CompletionKind.PLUGIN,
             ),
         )
     )
-    query = CompletionQuery(mode=COMPLETION_MODE_ROOT, prefix="")
+    query = CompletionQuery(mode=CompletionMode.ROOT, prefix="")
 
     items = get_completions(query, data)
 
@@ -47,7 +43,7 @@ def test_parameter_completion_excludes_used_and_keeps_help() -> None:
         item=CompletionItem(
             label="summarize",
             detail="Summarize a feature table",
-            kind=COMPLETION_KIND_ACTION,
+            kind=CompletionKind.ACTION,
         ),
         parameters=(
             ParameterCandidate(
@@ -55,7 +51,7 @@ def test_parameter_completion_excludes_used_and_keeps_help() -> None:
                 item=CompletionItem(
                     label="--i-table",
                     detail="(required) [FeatureTable] Input table",
-                    kind=COMPLETION_KIND_PARAMETER,
+                    kind=CompletionKind.PARAMETER,
                 ),
                 match_texts=("--i-table", "i-table", "table", "--table"),
             ),
@@ -64,7 +60,7 @@ def test_parameter_completion_excludes_used_and_keeps_help() -> None:
                 item=CompletionItem(
                     label="--o-output-dir",
                     detail="[Path] Output directory",
-                    kind=COMPLETION_KIND_PARAMETER,
+                    kind=CompletionKind.PARAMETER,
                 ),
                 match_texts=(
                     "--o-output-dir",
@@ -85,7 +81,7 @@ def test_parameter_completion_excludes_used_and_keeps_help() -> None:
         )
     )
     query = CompletionQuery(
-        mode=COMPLETION_MODE_PARAMETER,
+        mode=CompletionMode.PARAMETER,
         prefix="--",
         plugin_name="feature-table",
         action_name="summarize",

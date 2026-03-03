@@ -8,15 +8,8 @@ from q2lsp.core.types import (
     ActionCandidate,
     CommandCandidate,
     CompletionData,
+    CompletionKind,
     CompletionItem,
-    COMPLETION_KIND_ACTION,
-    COMPLETION_KIND_BUILTIN,
-    COMPLETION_KIND_PARAMETER,
-    COMPLETION_KIND_PLUGIN,
-    COMPLETION_MODE_NONE,
-    COMPLETION_MODE_PARAMETER,
-    COMPLETION_MODE_PLUGIN,
-    COMPLETION_MODE_ROOT,
     CompletionMode,
     CompletionQuery,
     ParameterCandidate,
@@ -41,7 +34,7 @@ def to_completion_query(
     """Map boundary input values to a pure completion query."""
     resolved_mode = _to_completion_mode(mode)
     if not command_tokens:
-        resolved_mode = COMPLETION_MODE_NONE
+        resolved_mode = CompletionMode.NONE
 
     return CompletionQuery(
         mode=resolved_mode,
@@ -88,7 +81,7 @@ def to_completion_data_from_root(root_node: JsonObject) -> CompletionData:
             CompletionItem(
                 label=builtin_name,
                 detail=detail or "Built-in command",
-                kind=COMPLETION_KIND_BUILTIN,
+                kind=CompletionKind.BUILTIN,
             )
         )
 
@@ -106,7 +99,7 @@ def to_completion_data_from_root(root_node: JsonObject) -> CompletionData:
             CompletionItem(
                 label=key,
                 detail=detail or "Plugin",
-                kind=COMPLETION_KIND_PLUGIN,
+                kind=CompletionKind.PLUGIN,
             )
         )
         commands.append(
@@ -135,13 +128,13 @@ def option_matches_prefix(option_name: str, prefix_filter: str) -> bool:
 
 
 def _to_completion_mode(mode: str) -> CompletionMode:
-    if mode == COMPLETION_MODE_ROOT:
-        return COMPLETION_MODE_ROOT
-    if mode == COMPLETION_MODE_PLUGIN:
-        return COMPLETION_MODE_PLUGIN
-    if mode == COMPLETION_MODE_PARAMETER:
-        return COMPLETION_MODE_PARAMETER
-    return COMPLETION_MODE_NONE
+    if mode == CompletionMode.ROOT:
+        return CompletionMode.ROOT
+    if mode == CompletionMode.PLUGIN:
+        return CompletionMode.PLUGIN
+    if mode == CompletionMode.PARAMETER:
+        return CompletionMode.PARAMETER
+    return CompletionMode.NONE
 
 
 def _get_root_node(hierarchy: CommandHierarchy) -> JsonObject | None:
@@ -186,7 +179,7 @@ def _to_command_candidate(
                 item=CompletionItem(
                     label=key,
                     detail=detail or "Action",
-                    kind=COMPLETION_KIND_ACTION,
+                    kind=CompletionKind.ACTION,
                 ),
                 parameters=_to_parameter_candidates(value_json),
             )
@@ -221,7 +214,7 @@ def _to_parameter_candidates(action_node: JsonObject) -> tuple[ParameterCandidat
                 item=CompletionItem(
                     label=option_name,
                     detail=" ".join(detail_parts) if detail_parts else "Parameter",
-                    kind=COMPLETION_KIND_PARAMETER,
+                    kind=CompletionKind.PARAMETER,
                 ),
                 match_texts=_to_parameter_match_texts(option_name),
             )

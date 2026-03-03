@@ -9,7 +9,7 @@ from q2lsp.adapters.completion_adapter import (
     to_completion_data,
     to_completion_query,
 )
-from q2lsp.core.types import COMPLETION_MODE_NONE, COMPLETION_MODE_PARAMETER
+from q2lsp.core.types import CompletionMode
 
 
 def test_maps_boundary_values_to_core_query() -> None:
@@ -19,7 +19,7 @@ def test_maps_boundary_values_to_core_query() -> None:
         command_tokens=("qiime", "feature-table", "summarize", "--"),
     )
 
-    assert query.mode == COMPLETION_MODE_PARAMETER
+    assert query.mode == CompletionMode.PARAMETER
     assert query.prefix == "--"
     assert query.normalized_prefix == ""
     assert query.plugin_name == "feature-table"
@@ -30,7 +30,7 @@ def test_maps_boundary_values_to_core_query() -> None:
 def test_unknown_mode_maps_to_none() -> None:
     query = to_completion_query(mode="unknown", prefix="", command_tokens=())
 
-    assert query.mode == COMPLETION_MODE_NONE
+    assert query.mode == CompletionMode.NONE
     assert query.plugin_name == ""
     assert query.action_name == ""
 
@@ -38,7 +38,7 @@ def test_unknown_mode_maps_to_none() -> None:
 def test_empty_tokens_maps_to_none_mode() -> None:
     query = to_completion_query(mode="root", prefix="", command_tokens=())
 
-    assert query.mode == COMPLETION_MODE_NONE
+    assert query.mode == CompletionMode.NONE
 
 
 def test_get_used_parameters_ignores_empty_option_stub() -> None:
@@ -80,6 +80,6 @@ def test_normalizes_hierarchy_to_core_data() -> None:
     assert command_names == {"info", "feature-table"}
 
 
-def test_can_import_lsp_completions_and_adapter() -> None:
-    importlib.import_module("q2lsp.lsp.completions")
+def test_can_import_lsp_package_and_adapter() -> None:
+    importlib.import_module("q2lsp.lsp")
     importlib.import_module("q2lsp.adapters.completion_adapter")

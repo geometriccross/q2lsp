@@ -6,10 +6,6 @@ from lsprotocol import types
 from pygls.workspace import TextDocument
 
 from q2lsp.core.types import (
-    COMPLETION_KIND_ACTION,
-    COMPLETION_KIND_BUILTIN,
-    COMPLETION_KIND_PARAMETER,
-    COMPLETION_KIND_PLUGIN,
     CompletionItem as InternalCompletionItem,
     CompletionKind,
 )
@@ -22,10 +18,10 @@ __all__ = [
 ]
 
 _COMPLETION_KIND_TO_LSP: dict[str, types.CompletionItemKind] = {
-    COMPLETION_KIND_PLUGIN: types.CompletionItemKind.Module,
-    COMPLETION_KIND_ACTION: types.CompletionItemKind.Function,
-    COMPLETION_KIND_PARAMETER: types.CompletionItemKind.Field,
-    COMPLETION_KIND_BUILTIN: types.CompletionItemKind.Class,
+    CompletionKind.PLUGIN: types.CompletionItemKind.Module,
+    CompletionKind.ACTION: types.CompletionItemKind.Function,
+    CompletionKind.PARAMETER: types.CompletionItemKind.Field,
+    CompletionKind.BUILTIN: types.CompletionItemKind.Class,
 }
 
 

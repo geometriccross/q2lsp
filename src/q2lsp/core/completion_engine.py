@@ -6,12 +6,9 @@ from q2lsp.core.types import (
     ActionCandidate,
     CommandCandidate,
     CompletionData,
-    COMPLETION_KIND_PARAMETER,
-    COMPLETION_MODE_NONE,
-    COMPLETION_MODE_PARAMETER,
-    COMPLETION_MODE_PLUGIN,
-    COMPLETION_MODE_ROOT,
     CompletionItem,
+    CompletionKind,
+    CompletionMode,
     CompletionQuery,
 )
 
@@ -21,14 +18,14 @@ def get_completions(
     data: CompletionData,
 ) -> list[CompletionItem]:
     """Get completion items for a pure completion query."""
-    if query.mode == COMPLETION_MODE_NONE:
+    if query.mode == CompletionMode.NONE:
         return []
 
-    if query.mode == COMPLETION_MODE_ROOT:
+    if query.mode == CompletionMode.ROOT:
         return complete_root(data, query.prefix)
-    if query.mode == COMPLETION_MODE_PLUGIN:
+    if query.mode == CompletionMode.PLUGIN:
         return complete_plugin(data, query.plugin_name, query.prefix)
-    if query.mode == COMPLETION_MODE_PARAMETER:
+    if query.mode == CompletionMode.PARAMETER:
         return complete_parameters(
             data,
             query.plugin_name,
@@ -74,7 +71,7 @@ def _complete_builtin_options(prefix: str) -> list[CompletionItem]:
                 CompletionItem(
                     label=opt,
                     detail=desc,
-                    kind=COMPLETION_KIND_PARAMETER,
+                    kind=CompletionKind.PARAMETER,
                 )
             )
     return items
@@ -119,7 +116,7 @@ def complete_parameters(
             CompletionItem(
                 label="--help",
                 detail="Show help message",
-                kind=COMPLETION_KIND_PARAMETER,
+                kind=CompletionKind.PARAMETER,
             )
         )
 
