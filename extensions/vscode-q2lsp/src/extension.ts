@@ -3,10 +3,12 @@ import * as vscode from 'vscode';
 import { type LanguageClient } from 'vscode-languageclient/node';
 import {
 	DEFAULT_PATH_CANDIDATES,
+	VALIDATION_TIMEOUT_MS,
 	buildInterpreterCandidates,
 	buildInterpreterPathNotAbsoluteMessage,
 	buildInterpreterValidationMessage,
 	buildMissingInterpreterMessage,
+	formatOutputSnippet,
 	getUnsupportedPlatformMessage,
 	isAbsolutePath,
 	shouldRestartOnConfigChange,
@@ -21,8 +23,6 @@ import {
 	showDiagnoseMessage,
 	showValidationError,
 } from './diagnosis';
-
-const validationTimeoutMs = 2000;
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
@@ -92,7 +92,7 @@ const startClient = async (context: vscode.ExtensionContext): Promise<void> => {
 	const activeDocument = vscode.window.activeTextEditor?.document;
 	const { interpreterPath: normalizedInterpreter, serverEnvOverrides } = resolveQ2lspConfig(activeDocument);
 	if (normalizedInterpreter && !isAbsolutePath(normalizedInterpreter)) {
-		const message = buildInterpreterPathNotAbsoluteMessage(normalizedInterpreter);
+		const message = buildInterpreterPathNotAbsoluteMessage();
 		outputChannel?.appendLine(message);
 		vscode.window.showErrorMessage(message);
 		return;
@@ -135,17 +135,13 @@ const resolveValidInterpreter = async (
 ): Promise<InterpreterCandidate | undefined> => {
 	let lastFailure: { candidate: InterpreterCandidate; validation: ValidationResult } | undefined;
 	for (const candidate of candidates) {
-		const validation = await validateInterpreter(execFileForValidation, candidate.path, validationTimeoutMs);
+		const validation = await validateInterpreter(execFileForValidation, candidate.path, VALIDATION_TIMEOUT_MS);
 		if (validation.ok) {
 			return candidate;
 		}
 		lastFailure = { candidate, validation };
 
-		const message = buildInterpreterValidationMessage(
-			candidate.path,
-			validation.missingModules,
-			validation.stderr ?? validation.errorMessage
-		);
+		const message = buildInterpreterValidationMessage(candidate.path, validation.missingModules);
 		outputChannel?.appendLine(message);
 		const detail = validation.stderr ?? validation.errorMessage;
 		if (detail?.trim()) {
@@ -166,8 +162,7 @@ const resolveValidInterpreter = async (
 	if (lastFailure) {
 		const message = buildInterpreterValidationMessage(
 			lastFailure.candidate.path,
-			lastFailure.validation.missingModules,
-			lastFailure.validation.stderr ?? lastFailure.validation.errorMessage
+			lastFailure.validation.missingModules
 		);
 		await showValidationError({
 			context,
@@ -235,17 +230,6 @@ const resolveServerCwd = (activeDocument: vscode.TextDocument | undefined): stri
 	return undefined;
 };
 
-const formatOutputSnippet = (value: string | undefined): string => {
-	const trimmed = value?.trim();
-	if (!trimmed) {
-		return '<empty>';
-	}
-	if (trimmed.length > 400) {
-		return `${trimmed.slice(0, 400)}...`;
-	}
-	return trimmed;
-};
-
 const appendValidationReport = (candidate: InterpreterCandidate, validation: ValidationResult): void => {
 	outputChannel?.appendLine('q2lsp diagnose report:');
 	outputChannel?.appendLine(`Candidate: ${candidate.path} (${candidate.source})`);
@@ -281,7 +265,7 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 		await showValidationError({
 			context,
 			outputChannel,
-			message: buildInterpreterPathNotAbsoluteMessage(normalizedInterpreter),
+			message: buildInterpreterPathNotAbsoluteMessage(),
 			validation: { ok: false },
 			interpreterPath: normalizedInterpreter,
 		});
@@ -310,7 +294,7 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 		return;
 	}
 
-	const validation = await validateInterpreter(execFileForValidation, candidate.path, validationTimeoutMs);
+	const validation = await validateInterpreter(execFileForValidation, candidate.path, VALIDATION_TIMEOUT_MS);
 	appendValidationReport(candidate, validation);
 	await showDiagnoseMessage({
 		context,

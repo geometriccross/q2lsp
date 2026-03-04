@@ -3,24 +3,11 @@ import * as vscode from 'vscode';
 import {
 	Q2CLI_MISSING_QIIME_HINT,
 	QIIME2_QUICKSTART_URL,
+	VALIDATION_TIMEOUT_MS,
+	formatOutputSnippet,
 	type InterpreterCandidate,
 } from './helpers';
 import { execFileForValidation, type ValidationResult } from './interpreter';
-
-const validationTimeoutMs = 2000;
-
-const formatOutputSnippet = (value: string | undefined): string => {
-	const trimmed = value?.trim();
-	if (!trimmed) {
-		return '<empty>';
-	}
-
-	if (trimmed.length > 400) {
-		return `${trimmed.slice(0, 400)}...`;
-	}
-
-	return trimmed;
-};
 
 const buildDiagnoseErrorMessage = (validation: ValidationResult): string => {
 	if (!validation.missingModules?.length) {
@@ -190,7 +177,7 @@ const checkPipAvailable = async (
 	return new Promise((resolve) => {
 		const execOptions: ExecFileOptionsWithStringEncoding = {
 			encoding: 'utf8',
-			timeout: validationTimeoutMs,
+			timeout: VALIDATION_TIMEOUT_MS,
 		};
 
 		execFileForValidation(interpreterPath, ['-m', 'pip', '--version'], execOptions, (error, stdout, stderr) => {

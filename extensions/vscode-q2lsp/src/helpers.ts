@@ -9,6 +9,7 @@ export type InterpreterCandidate = {
 
 export const DEFAULT_PATH_CANDIDATES = ['python3', 'python'] as const;
 export const REQUIRED_PYTHON_MODULES = ['q2lsp', 'q2cli'] as const;
+export const VALIDATION_TIMEOUT_MS = 2000;
 export const QIIME2_QUICKSTART_URL = 'https://library.qiime2.org/quickstart/amplicon';
 export const Q2CLI_MISSING_QIIME_HINT =
 	` QIIME 2 is not installed in this Python environment (missing q2cli). Install QIIME 2: ${QIIME2_QUICKSTART_URL}.`;
@@ -60,6 +61,17 @@ export const mergeEnv = (
 	return { ...base, ...(overrides ?? {}) };
 };
 
+export const formatOutputSnippet = (value: string | undefined): string => {
+	const trimmed = value?.trim();
+	if (!trimmed) {
+		return '<empty>';
+	}
+	if (trimmed.length > 400) {
+		return `${trimmed.slice(0, 400)}...`;
+	}
+	return trimmed;
+};
+
 export const buildServerCommand = (interpreterPath: string): { command: string; args: string[] } => {
 	return {
 		command: interpreterPath,
@@ -78,7 +90,6 @@ export const getUnsupportedPlatformMessage = (platform: NodeJS.Platform): string
 export const buildMissingInterpreterMessage = (): string => {
 	return 'Python interpreter not found for q2lsp. Set q2lsp.interpreterPath or install Python extension.';
 };
-
 
 export const buildInterpreterValidationSnippet = (
 	modules: readonly string[] = REQUIRED_PYTHON_MODULES
@@ -131,8 +142,7 @@ export const parseInterpreterValidationStdout = (
 
 export const buildInterpreterValidationMessage = (
 	interpreterPath: string,
-	missingModules: readonly string[] | undefined,
-	_stderr: string | undefined
+	missingModules: readonly string[] | undefined
 ): string => {
 	const missingDetail =
 		missingModules && missingModules.length > 0 ? `Required modules missing: ${missingModules.join(', ')}.` : undefined;
@@ -149,7 +159,7 @@ export const isAbsolutePath = (value: string): boolean => {
 	return path.isAbsolute(value);
 };
 
-export const buildInterpreterPathNotAbsoluteMessage = (_interpreterPath: string): string => {
+export const buildInterpreterPathNotAbsoluteMessage = (): string => {
 	return 'q2lsp.interpreterPath must be absolute (e.g., /usr/bin/python3).';
 };
 

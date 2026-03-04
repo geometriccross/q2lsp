@@ -4,6 +4,7 @@ import {
 	buildInterpreterPathNotAbsoluteMessage,
 	buildInterpreterValidationMessage,
 	buildInterpreterValidationSnippet,
+	formatOutputSnippet,
 	parseInterpreterValidationStdout,
 	buildServerCommand,
 	DEFAULT_PATH_CANDIDATES,
@@ -33,6 +34,22 @@ suite('q2lsp helper tests', () => {
 		assert.deepStrictEqual(merged, { FOO: 'base', BAR: 'override', BAZ: 'override' });
 	});
 
+	test('formatOutputSnippet returns <empty> for undefined or whitespace', () => {
+		assert.strictEqual(formatOutputSnippet(undefined), '<empty>');
+		assert.strictEqual(formatOutputSnippet('   \n\t  '), '<empty>');
+	});
+
+	test('formatOutputSnippet truncates values longer than 400 chars and appends ellipsis', () => {
+		const longText = 'a'.repeat(401);
+		const formatted = formatOutputSnippet(longText);
+		assert.strictEqual(formatted.length, 403);
+		assert.strictEqual(formatted, `${'a'.repeat(400)}...`);
+	});
+
+	test('formatOutputSnippet returns short non-empty values unchanged', () => {
+		assert.strictEqual(formatOutputSnippet('hello output'), 'hello output');
+	});
+
 	test('windows platform is blocked', () => {
 		assert.ok(getUnsupportedPlatformMessage('win32'));
 		assert.strictEqual(getUnsupportedPlatformMessage('linux'), undefined);
@@ -51,7 +68,7 @@ suite('q2lsp helper tests', () => {
 	});
 
 	test('non-absolute interpreter message is actionable', () => {
-		const message = buildInterpreterPathNotAbsoluteMessage('python3');
+		const message = buildInterpreterPathNotAbsoluteMessage();
 		assert.strictEqual(
 			message,
 			'q2lsp.interpreterPath must be absolute (e.g., /usr/bin/python3).'
@@ -67,7 +84,7 @@ suite('q2lsp helper tests', () => {
 	});
 
 	test('validation message includes missing modules', () => {
-		const message = buildInterpreterValidationMessage('/opt/python', ['q2lsp', 'q2cli'], undefined);
+		const message = buildInterpreterValidationMessage('/opt/python', ['q2lsp', 'q2cli']);
 		assert.ok(message.includes('q2lsp'));
 		assert.ok(message.includes('q2cli'));
 		assert.ok(message.includes('Required modules missing'));
