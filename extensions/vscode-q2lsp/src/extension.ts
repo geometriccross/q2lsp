@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { execFile, type ExecFileException, type ExecFileOptionsWithStringEncoding } from 'child_process';
-import { LanguageClient, type LanguageClientOptions, type ServerOptions } from 'vscode-languageclient/node';
+import { type LanguageClient } from 'vscode-languageclient/node';
 import {
 	DEFAULT_PATH_CANDIDATES,
 	QIIME2_QUICKSTART_URL,
@@ -11,15 +11,14 @@ import {
 	buildInterpreterValidationMessage,
 	buildInterpreterValidationSnippet,
 	buildMissingInterpreterMessage,
-	buildServerCommand,
 	getUnsupportedPlatformMessage,
 	isAbsolutePath,
-	mergeEnv,
 	parseInterpreterValidationStdout,
 	shouldRestartOnConfigChange,
 	type InterpreterValidationDetails,
 	type InterpreterCandidate,
 } from './helpers';
+import { startQ2lspClient, stopQ2lspClient } from './client';
 
 type ValidationResult = {
 	ok: boolean;
@@ -97,7 +96,7 @@ const stopClient = async (): Promise<void> => {
 	}
 
 	try {
-		await client.stop();
+		await stopQ2lspClient(client);
 	} finally {
 		client = undefined;
 	}
@@ -111,7 +110,7 @@ const startClient = async (context: vscode.ExtensionContext): Promise<void> => {
 		: vscode.workspace.getConfiguration('q2lsp');
 	const configuredInterpreter = configuration.get<string>('interpreterPath');
 	const normalizedInterpreter = configuredInterpreter?.trim() ? configuredInterpreter.trim() : undefined;
-	const serverEnvOverrides = sanitizeServerEnvOverrides(configuration.get('serverEnv'));
+	const serverEnvOverrides = sanitizeServerEnvOverrides(configuration.get<unknown>('serverEnv'));
 	if (normalizedInterpreter && !isAbsolutePath(normalizedInterpreter)) {
 		showError(buildInterpreterPathNotAbsoluteMessage(normalizedInterpreter));
 		return;
@@ -133,25 +132,16 @@ const startClient = async (context: vscode.ExtensionContext): Promise<void> => {
 		return;
 	}
 
-	const serverCommand = buildServerCommand(resolvedInterpreter.path);
 	const cwd = resolveServerCwd(activeDocument);
-	const serverOptions: ServerOptions = {
-		command: serverCommand.command,
-		args: serverCommand.args,
-		options: {
-			cwd,
-			env: mergeEnv(process.env, serverEnvOverrides),
-		},
-	};
-
-	const clientOptions: LanguageClientOptions = {
-		documentSelector: [{ language: 'shellscript', scheme: 'file' }],
+	const startedClient = await startQ2lspClient({
+		interpreterPath: resolvedInterpreter.path,
+		cwd,
+		serverEnv: serverEnvOverrides,
 		outputChannel,
-	};
+	});
 
-	client = new LanguageClient('q2lsp', 'q2lsp', serverOptions, clientOptions);
+	client = startedClient;
 	context.subscriptions.push(client);
-	await client.start();
 	outputChannel?.appendLine(`Started q2lsp using ${resolvedInterpreter.path}.`);
 };
 
