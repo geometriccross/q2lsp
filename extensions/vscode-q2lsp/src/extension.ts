@@ -1,11 +1,8 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { type ExecFileOptionsWithStringEncoding } from 'child_process';
 import { type LanguageClient } from 'vscode-languageclient/node';
 import {
 	DEFAULT_PATH_CANDIDATES,
-	QIIME2_QUICKSTART_URL,
-	Q2CLI_MISSING_QIIME_HINT,
 	buildInterpreterCandidates,
 	buildInterpreterPathNotAbsoluteMessage,
 	buildInterpreterValidationMessage,
@@ -18,6 +15,12 @@ import {
 import { resolveQ2lspConfig } from './config';
 import { execFileForValidation, type ValidationResult, validateInterpreter } from './interpreter';
 import { startQ2lspClient, stopQ2lspClient } from './client';
+import {
+	manageWorkspaceTrust,
+	selectInterpreterCandidate,
+	showDiagnoseMessage,
+	showValidationError,
+} from './diagnosis';
 
 const validationTimeoutMs = 2000;
 
@@ -89,7 +92,9 @@ const startClient = async (context: vscode.ExtensionContext): Promise<void> => {
 	const activeDocument = vscode.window.activeTextEditor?.document;
 	const { interpreterPath: normalizedInterpreter, serverEnvOverrides } = resolveQ2lspConfig(activeDocument);
 	if (normalizedInterpreter && !isAbsolutePath(normalizedInterpreter)) {
-		showError(buildInterpreterPathNotAbsoluteMessage(normalizedInterpreter));
+		const message = buildInterpreterPathNotAbsoluteMessage(normalizedInterpreter);
+		outputChannel?.appendLine(message);
+		vscode.window.showErrorMessage(message);
 		return;
 	}
 	const pythonExtensionInterpreter = await resolvePythonExtensionInterpreter();
@@ -100,7 +105,9 @@ const startClient = async (context: vscode.ExtensionContext): Promise<void> => {
 	);
 
 	if (candidates.length === 0) {
-		showError(buildMissingInterpreterMessage());
+		const message = buildMissingInterpreterMessage();
+		outputChannel?.appendLine(message);
+		vscode.window.showErrorMessage(message);
 		return;
 	}
 
@@ -145,7 +152,13 @@ const resolveValidInterpreter = async (
 			outputChannel?.appendLine(`Validation detail for ${candidate.path}: ${formatOutputSnippet(detail)}`);
 		}
 		if (candidate.source === 'config') {
-			await showValidationError(context, message, validation, candidate.path);
+			await showValidationError({
+				context,
+				outputChannel,
+				message,
+				validation,
+				interpreterPath: candidate.path,
+			});
 			return undefined;
 		}
 	}
@@ -156,7 +169,13 @@ const resolveValidInterpreter = async (
 			lastFailure.validation.missingModules,
 			lastFailure.validation.stderr ?? lastFailure.validation.errorMessage
 		);
-		await showValidationError(context, message, lastFailure.validation, lastFailure.candidate.path);
+		await showValidationError({
+			context,
+			outputChannel,
+			message,
+			validation: lastFailure.validation,
+			interpreterPath: lastFailure.candidate.path,
+		});
 	}
 
 	return undefined;
@@ -238,134 +257,6 @@ const appendValidationReport = (candidate: InterpreterCandidate, validation: Val
 	outputChannel?.appendLine(`stderr: ${formatOutputSnippet(validation.stderr)}`);
 };
 
-const selectInterpreterCandidate = async (
-	candidates: InterpreterCandidate[]
-): Promise<InterpreterCandidate | undefined> => {
-	if (candidates.length === 1) {
-		return candidates[0];
-	}
-
-	const items = candidates.map((candidate) => ({
-		label: candidate.path,
-		description:
-			candidate.source === 'config'
-				? 'Configured'
-				: candidate.source === 'pythonExtension'
-					? 'Python extension'
-					: 'PATH',
-		candidate,
-	}));
-	const selection = await vscode.window.showQuickPick(items, {
-		placeHolder: 'Select a Python interpreter to diagnose q2lsp',
-	});
-	return selection?.candidate;
-};
-
-const buildRepairActions = (missingModules: readonly string[] | undefined): string[] => {
-	const hasMissingQ2cli = missingModules?.includes('q2cli') ?? false;
-	const actions = [
-		'Select Python Interpreter',
-		'Open Settings',
-		hasMissingQ2cli ? 'Open QIIME 2 Quickstart' : 'Open README',
-		'Show q2lsp Log',
-	];
-	if (missingModules?.includes('q2lsp')) {
-		return ['Install q2lsp', ...actions];
-	}
-	return actions;
-};
-
-const showDiagnoseMessage = async (
-	context: vscode.ExtensionContext,
-	message: string,
-	validation: ValidationResult | undefined,
-	interpreterPath: string | undefined,
-	isSuccess: boolean
-): Promise<void> => {
-	const actions = buildRepairActions(validation?.missingModules);
-	const selection = isSuccess
-		? await vscode.window.showInformationMessage(message, ...actions)
-		: await vscode.window.showErrorMessage(message, ...actions);
-	if (!selection) {
-		return;
-	}
-	await handleRepairSelection(context, selection, interpreterPath);
-};
-
-const handleRepairSelection = async (
-	context: vscode.ExtensionContext,
-	selection: string,
-	interpreterPath: string | undefined
-): Promise<void> => {
-		switch (selection) {
-			case 'Select Python Interpreter':
-				await selectPythonInterpreter();
-				return;
-			case 'Open Settings':
-				await vscode.commands.executeCommand('workbench.action.openSettings', 'q2lsp.interpreterPath');
-				return;
-			case 'Open QIIME 2 Quickstart':
-				await vscode.env.openExternal(vscode.Uri.parse(QIIME2_QUICKSTART_URL));
-				return;
-			case 'Open README':
-				await openReadme(context);
-				return;
-		case 'Show q2lsp Log':
-			outputChannel?.show(true);
-			return;
-		case 'Install q2lsp':
-			if (interpreterPath) {
-				await confirmAndInstallQ2lsp(interpreterPath);
-			}
-			return;
-		default:
-			return;
-	}
-};
-
-const confirmAndInstallQ2lsp = async (interpreterPath: string): Promise<void> => {
-	const command = `"${interpreterPath}" -m pip install -U q2lsp`;
-	const selection = await vscode.window.showWarningMessage(
-		'Install q2lsp in this interpreter now?',
-		{ modal: true },
-		'Install q2lsp'
-	);
-	if (selection !== 'Install q2lsp') {
-		return;
-	}
-
-	const hasPip = await checkPipAvailable(interpreterPath);
-	if (!hasPip) {
-		vscode.window.showErrorMessage(
-			'pip is not available for this interpreter. Install pip, then retry.'
-		);
-		return;
-	}
-
-	const terminal = vscode.window.createTerminal({ name: 'q2lsp Install' });
-	terminal.show(true);
-	terminal.sendText(command);
-};
-
-const checkPipAvailable = async (interpreterPath: string): Promise<boolean> => {
-	return new Promise((resolve) => {
-		const execOptions: ExecFileOptionsWithStringEncoding = {
-			encoding: 'utf8',
-			timeout: validationTimeoutMs,
-		};
-		execFileForValidation(interpreterPath, ['-m', 'pip', '--version'], execOptions, (error, stdout, stderr) => {
-			if (error || !stdout?.trim()) {
-				outputChannel?.appendLine(
-					`pip check failed for ${interpreterPath}. stderr: ${formatOutputSnippet(stderr)}`
-				);
-				resolve(false);
-				return;
-			}
-			resolve(true);
-		});
-	});
-};
-
 const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<void> => {
 	if (!vscode.workspace.isTrusted) {
 		const selection = await vscode.window.showWarningMessage(
@@ -378,7 +269,8 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 			return;
 		}
 		if (selection === 'Open README') {
-			await openReadme(context);
+			const readmeUri = vscode.Uri.joinPath(context.extensionUri, 'README.md');
+			await vscode.commands.executeCommand('vscode.open', readmeUri);
 		}
 		return;
 	}
@@ -386,13 +278,13 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 	const activeDocument = vscode.window.activeTextEditor?.document;
 	const { interpreterPath: normalizedInterpreter } = resolveQ2lspConfig(activeDocument);
 	if (normalizedInterpreter && !isAbsolutePath(normalizedInterpreter)) {
-		await showDiagnoseMessage(
+		await showValidationError({
 			context,
-			buildInterpreterPathNotAbsoluteMessage(normalizedInterpreter),
-			undefined,
-			normalizedInterpreter,
-			false
-		);
+			outputChannel,
+			message: buildInterpreterPathNotAbsoluteMessage(normalizedInterpreter),
+			validation: { ok: false },
+			interpreterPath: normalizedInterpreter,
+		});
 		return;
 	}
 
@@ -403,7 +295,13 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 		DEFAULT_PATH_CANDIDATES
 	);
 	if (candidates.length === 0) {
-		await showDiagnoseMessage(context, buildMissingInterpreterMessage(), undefined, undefined, false);
+		await showValidationError({
+			context,
+			outputChannel,
+			message: buildMissingInterpreterMessage(),
+			validation: { ok: false },
+			interpreterPath: '',
+		});
 		return;
 	}
 
@@ -414,89 +312,10 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 
 	const validation = await validateInterpreter(execFileForValidation, candidate.path, validationTimeoutMs);
 	appendValidationReport(candidate, validation);
-
-	if (validation.ok && validation.details) {
-		await showDiagnoseMessage(
-			context,
-			'Environment is ready. q2lsp checks passed.',
-			validation,
-			candidate.path,
-			true
-		);
-		return;
-	}
-
-	if (validation.missingModules?.length) {
-		const q2cliHint = validation.missingModules.includes('q2cli')
-			? Q2CLI_MISSING_QIIME_HINT
-			: '';
-		await showDiagnoseMessage(
-			context,
-			`Required modules missing: ${validation.missingModules.join(', ')}.${q2cliHint}`,
-			validation,
-			candidate.path,
-			false
-		);
-		return;
-	}
-
-	await showDiagnoseMessage(
+	await showDiagnoseMessage({
 		context,
-		"q2lsp couldn't validate this interpreter. See q2lsp log for details.",
+		outputChannel,
 		validation,
-		candidate.path,
-		false
-	);
-};
-const showError = (message: string): void => {
-	outputChannel?.appendLine(message);
-	vscode.window.showErrorMessage(message);
-};
-
-const showValidationError = async (
-	context: vscode.ExtensionContext,
-	message: string,
-	validation: ValidationResult,
-	interpreterPath: string
-): Promise<void> => {
-	const actions = buildRepairActions(validation.missingModules);
-	const selection = await vscode.window.showErrorMessage(message, ...actions);
-	if (!selection) {
-		return;
-	}
-	await handleRepairSelection(context, selection, interpreterPath);
-};
-
-const selectPythonInterpreter = async (): Promise<void> => {
-	const pythonExtension = vscode.extensions.getExtension('ms-python.python');
-	if (!pythonExtension) {
-		vscode.window.showErrorMessage('Install the VS Code Python extension to select a Python interpreter.');
-		return;
-	}
-
-	try {
-		await vscode.commands.executeCommand('python.setInterpreter');
-	} catch (error) {
-		vscode.window.showErrorMessage(
-			`Unable to open Python interpreter selection. Ensure the Python extension is installed. (${String(error)})`
-		);
-	}
-};
-
-const manageWorkspaceTrust = async (): Promise<void> => {
-	const commands = ['workbench.action.manageTrust', 'workbench.trust.manage', 'workbench.action.openWorkspaceTrustEditor'];
-	for (const command of commands) {
-		try {
-			await vscode.commands.executeCommand(command);
-			return;
-		} catch {
-			// ignore
-		}
-	}
-};
-
-const openReadme = async (context: vscode.ExtensionContext): Promise<void> => {
-	const readmeUri = vscode.Uri.joinPath(context.extensionUri, 'README.md');
-	const document = await vscode.workspace.openTextDocument(readmeUri);
-	await vscode.window.showTextDocument(document, { preview: false });
+		interpreterPath: candidate.path,
+	});
 };
