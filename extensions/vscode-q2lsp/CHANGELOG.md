@@ -8,6 +8,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - No changes yet.
 
+## [3.1.0] - 2026-03-04
+
+### Changed
+- Modularized extension runtime/config/interpreter/diagnosis modules
+- Improved diagnostics suggestion data flow to structured mapping
+- Internal cleanup and test coverage improvements
+
 ## [3.0.0] - 2026-02-11
 
 ### Added
