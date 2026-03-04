@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { execFile, type ExecFileException, type ExecFileOptionsWithStringEncoding } from 'child_process';
+import { type ExecFileOptionsWithStringEncoding } from 'child_process';
 import { type LanguageClient } from 'vscode-languageclient/node';
 import {
 	DEFAULT_PATH_CANDIDATES,
@@ -9,37 +9,20 @@ import {
 	buildInterpreterCandidates,
 	buildInterpreterPathNotAbsoluteMessage,
 	buildInterpreterValidationMessage,
-	buildInterpreterValidationSnippet,
 	buildMissingInterpreterMessage,
 	getUnsupportedPlatformMessage,
 	isAbsolutePath,
-	parseInterpreterValidationStdout,
 	shouldRestartOnConfigChange,
-	type InterpreterValidationDetails,
 	type InterpreterCandidate,
 } from './helpers';
+import { resolveQ2lspConfig } from './config';
+import { execFileForValidation, type ValidationResult, validateInterpreter } from './interpreter';
 import { startQ2lspClient, stopQ2lspClient } from './client';
-
-type ValidationResult = {
-	ok: boolean;
-	stdout?: string;
-	stderr?: string;
-	errorMessage?: string;
-	missingModules?: string[];
-	details?: InterpreterValidationDetails;
-};
 
 const validationTimeoutMs = 2000;
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
-
-type ExecFileRunner = (
-	file: string,
-	args: readonly string[],
-	options: ExecFileOptionsWithStringEncoding,
-	callback: (error: ExecFileException | null, stdout: string, stderr: string) => void
-) => void;
 
 export async function activate(context: vscode.ExtensionContext) {
 	outputChannel = vscode.window.createOutputChannel('q2lsp');
@@ -104,13 +87,7 @@ const stopClient = async (): Promise<void> => {
 
 const startClient = async (context: vscode.ExtensionContext): Promise<void> => {
 	const activeDocument = vscode.window.activeTextEditor?.document;
-	const configScope = activeDocument?.uri;
-	const configuration = configScope
-		? vscode.workspace.getConfiguration('q2lsp', configScope)
-		: vscode.workspace.getConfiguration('q2lsp');
-	const configuredInterpreter = configuration.get<string>('interpreterPath');
-	const normalizedInterpreter = configuredInterpreter?.trim() ? configuredInterpreter.trim() : undefined;
-	const serverEnvOverrides = sanitizeServerEnvOverrides(configuration.get<unknown>('serverEnv'));
+	const { interpreterPath: normalizedInterpreter, serverEnvOverrides } = resolveQ2lspConfig(activeDocument);
 	if (normalizedInterpreter && !isAbsolutePath(normalizedInterpreter)) {
 		showError(buildInterpreterPathNotAbsoluteMessage(normalizedInterpreter));
 		return;
@@ -237,51 +214,6 @@ const resolveServerCwd = (activeDocument: vscode.TextDocument | undefined): stri
 	}
 
 	return undefined;
-};
-
-const execFileForValidation: ExecFileRunner = (file, args, options, callback) => {
-	execFile(file, args, options, callback);
-};
-
-const validateInterpreter = (
-	execFileFn: ExecFileRunner,
-	interpreterPath: string,
-	timeoutMs: number
-): Promise<ValidationResult> => {
-	return new Promise((resolve) => {
-		const execOptions: ExecFileOptionsWithStringEncoding = {
-			encoding: 'utf8',
-			timeout: timeoutMs,
-		};
-		execFileFn(
-			interpreterPath,
-			['-c', buildInterpreterValidationSnippet()],
-			execOptions,
-			(error, stdout, stderr) => {
-				if (error) {
-					resolve({ ok: false, stdout, stderr, errorMessage: error.message });
-					return;
-				}
-				const details = parseInterpreterValidationStdout(stdout);
-				if (details === null) {
-					const trimmed = stdout?.trim() ?? '';
-					const snippet = trimmed.length > 200 ? `${trimmed.slice(0, 200)}...` : trimmed;
-					resolve({
-						ok: false,
-						stdout,
-						stderr,
-						errorMessage: `Unexpected validation output (expected JSON). stdout: ${snippet}`,
-					});
-					return;
-				}
-				if (details.missing.length > 0) {
-					resolve({ ok: false, stdout, stderr, missingModules: details.missing, details });
-					return;
-				}
-				resolve({ ok: true, stdout, stderr, details });
-			}
-		);
-	});
 };
 
 const formatOutputSnippet = (value: string | undefined): string => {
@@ -452,12 +384,7 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 	}
 
 	const activeDocument = vscode.window.activeTextEditor?.document;
-	const configScope = activeDocument?.uri;
-	const configuration = configScope
-		? vscode.workspace.getConfiguration('q2lsp', configScope)
-		: vscode.workspace.getConfiguration('q2lsp');
-	const configuredInterpreter = configuration.get<string>('interpreterPath');
-	const normalizedInterpreter = configuredInterpreter?.trim() ? configuredInterpreter.trim() : undefined;
+	const { interpreterPath: normalizedInterpreter } = resolveQ2lspConfig(activeDocument);
 	if (normalizedInterpreter && !isAbsolutePath(normalizedInterpreter)) {
 		await showDiagnoseMessage(
 			context,
@@ -521,22 +448,6 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 		false
 	);
 };
-
-const sanitizeServerEnvOverrides = (value: unknown): Record<string, string> => {
-	if (!value || typeof value !== 'object') {
-		return {};
-	}
-
-	const overrides: Record<string, string> = {};
-	for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-		if (typeof entry === 'string') {
-			overrides[key] = entry;
-		}
-	}
-
-	return overrides;
-};
-
 const showError = (message: string): void => {
 	outputChannel?.appendLine(message);
 	vscode.window.showErrorMessage(message);
