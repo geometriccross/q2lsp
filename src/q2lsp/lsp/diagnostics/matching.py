@@ -111,30 +111,3 @@ def _get_close_matches(
     cutoff = 0.6
     matches = difflib.get_close_matches(token_text, candidates, n=limit, cutoff=cutoff)
     return matches
-
-
-def _extract_single_suggestion(message: str) -> str | None:
-    """Extract a single suggestion from a diagnostic message, if present."""
-    marker = "Did you mean "
-    marker_index = message.find(marker)
-    if marker_index == -1:
-        return None
-
-    suggestion_text = message[marker_index + len(marker) :].strip()
-    if not suggestion_text.endswith("?"):
-        return None
-
-    suggestion_text = suggestion_text[:-1]
-    if "," in suggestion_text:
-        return None
-
-    suggestion_text = suggestion_text.strip()
-    if not suggestion_text:
-        return None
-
-    if (suggestion_text.startswith("'") and suggestion_text.endswith("'")) or (
-        suggestion_text.startswith('"') and suggestion_text.endswith('"')
-    ):
-        suggestion_text = suggestion_text[1:-1]
-
-    return suggestion_text or None

@@ -9,6 +9,7 @@ from q2lsp.lsp.diagnostics.matching import (
     _get_suggestions,
     _is_exact_match,
 )
+from q2lsp.lsp.diagnostics.stages import _validate_options
 from q2lsp.lsp.diagnostics.validator import validate_command
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
 
@@ -1113,3 +1114,112 @@ class TestValidateRequiredOptions:
         cmd = ParsedCommand(tokens=tokens, start=0, end=80)
         issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
+
+
+class TestValidateOptionsSuggestionMap:
+    def test_returns_tuple_with_unknown_option_suggestions_for_unknown_option(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        root_node = hierarchy_with_plugins_and_builtins["qiime"]
+        option_tokens = [
+            TokenSpan("--table", 30, 37),
+            TokenSpan("table.qza", 38, 47),
+        ]
+
+        issues, unknown_option_suggestions = _validate_options(
+            option_tokens,
+            root_node,
+            "feature-table",
+            "summarize",
+        )
+
+        assert len(issues) == 1
+        assert unknown_option_suggestions == {"--table": ["--i-table"]}
+
+    def test_returns_empty_unknown_option_suggestions_when_no_unknown_options(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        root_node = hierarchy_with_plugins_and_builtins["qiime"]
+        option_tokens = [
+            TokenSpan("--i-table", 30, 39),
+            TokenSpan("table.qza", 40, 49),
+        ]
+
+        issues, unknown_option_suggestions = _validate_options(
+            option_tokens,
+            root_node,
+            "feature-table",
+            "summarize",
+        )
+
+        assert issues == []
+        assert unknown_option_suggestions == {}
+
+    def test_omits_unknown_option_without_suggestions_from_unknown_option_suggestions(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        root_node = hierarchy_with_plugins_and_builtins["qiime"]
+        option_tokens = [
+            TokenSpan("--xyz123", 30, 38),
+            TokenSpan("foo", 39, 42),
+        ]
+
+        issues, unknown_option_suggestions = _validate_options(
+            option_tokens,
+            root_node,
+            "feature-table",
+            "summarize",
+        )
+
+        assert len(issues) == 1
+        assert "--xyz123" not in unknown_option_suggestions
+
+    def test_multiple_suggestions_do_not_suppress_missing_required(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("filter-samples", 20, 34),
+            TokenSpan("--i", 35, 38),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=38)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        unknown_option_issues = [
+            issue for issue in issues if issue.code == "q2lsp-dni/unknown-option"
+        ]
+        missing_required_issues = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+
+        assert len(unknown_option_issues) == 1
+        assert len(missing_required_issues) >= 1
+        assert any("--i-table" in issue.message for issue in missing_required_issues)
+
+    def test_unknown_option_without_suggestions_still_emits_missing_required(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--xyz123", 30, 38),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=38)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        unknown_option_issues = [
+            issue for issue in issues if issue.code == "q2lsp-dni/unknown-option"
+        ]
+        missing_required_issues = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+
+        assert len(unknown_option_issues) == 1
+        assert len(missing_required_issues) == 1
+        assert "--i-table" in missing_required_issues[0].message

@@ -83,8 +83,9 @@ def validate_command(
         plugin_name = token1.text
         action_name = token2.text
         option_issues: list[DiagnosticIssue] = []
+        unknown_option_suggestions: dict[str, list[str]] = {}
         if len(command.tokens) >= 4:
-            option_issues = _validate_options(
+            option_issues, unknown_option_suggestions = _validate_options(
                 command.tokens[3:], root_node, plugin_name, action_name
             )
         issues.extend(option_issues)
@@ -93,7 +94,7 @@ def validate_command(
             root_node,
             plugin_name,
             action_name,
-            option_issues,
+            unknown_option_suggestions,
         )
         issues.extend(required_option_issues)
 

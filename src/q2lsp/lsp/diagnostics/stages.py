@@ -1,3 +1,5 @@
+from collections.abc import Mapping, Sequence
+
 from q2lsp.lsp.diagnostics import codes
 from q2lsp.lsp.diagnostics.hierarchy import (
     _get_valid_plugins_and_builtins,
@@ -7,7 +9,6 @@ from q2lsp.lsp.diagnostics.hierarchy import (
 from q2lsp.lsp.diagnostics.matching import (
     _is_exact_match,
     _get_suggestions,
-    _extract_single_suggestion,
 )
 from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
 from q2lsp.lsp.types import TokenSpan
@@ -107,7 +108,7 @@ def _validate_options(
     root_node: JsonObject,
     plugin_name: str,
     action_name: str,
-) -> list[DiagnosticIssue]:
+) -> tuple[list[DiagnosticIssue], dict[str, list[str]]]:
     """
     Validate option tokens for a valid command path.
 
@@ -120,21 +121,24 @@ def _validate_options(
         action_name: The action name (token2).
 
     Returns:
-        List of DiagnosticIssue for option validation problems.
+        A tuple containing:
+        - List of DiagnosticIssue for option validation problems.
+        - Map of unknown option names to their suggestion lists.
     """
     issues: list[DiagnosticIssue] = []
+    unknown_option_suggestions: dict[str, list[str]] = {}
 
     # Get the plugin node
     plugin_node = root_node.get(plugin_name)
     if not isinstance(plugin_node, dict):
         # Plugin doesn't exist - should have been caught by token1 validation
-        return issues
+        return issues, unknown_option_suggestions
 
     # Get the action node
     action_node = plugin_node.get(action_name)
     if not isinstance(action_node, dict):
         # Action doesn't exist - should have been caught by token2 validation
-        return issues
+        return issues, unknown_option_suggestions
 
     # Get valid options from the action signature
     valid_options = get_all_option_labels(action_node)
@@ -165,6 +169,7 @@ def _validate_options(
             # Get suggestions (prefix matches + difflib)
             suggestions = _get_suggestions(option_name, valid_options, limit=3)
             if suggestions:
+                unknown_option_suggestions[option_name] = suggestions
                 message = f"Unknown option '{option_name}'. Did you mean {', '.join(repr(s) for s in suggestions)}?"
             else:
                 message = f"Unknown option '{option_name}'."
@@ -178,7 +183,7 @@ def _validate_options(
                 )
             )
 
-    return issues
+    return issues, unknown_option_suggestions
 
 
 def _validate_required_options(
@@ -186,7 +191,7 @@ def _validate_required_options(
     root_node: JsonObject,
     plugin_name: str,
     action_name: str,
-    unknown_option_issues: list[DiagnosticIssue],
+    unknown_option_suggestions: Mapping[str, Sequence[str]],
 ) -> list[DiagnosticIssue]:
     """Validate required options for an already valid command path."""
     issues: list[DiagnosticIssue] = []
@@ -229,11 +234,10 @@ def _validate_required_options(
     }
 
     suppressed_missing: set[str] = set()
-    for unknown_issue in unknown_option_issues:
-        suggestion = _extract_single_suggestion(unknown_issue.message)
-        if suggestion is None:
+    for suggestions in unknown_option_suggestions.values():
+        if len(suggestions) != 1:
             continue
-        suggestion_param_name = normalize_option_to_param_name(suggestion)
+        suggestion_param_name = normalize_option_to_param_name(suggestions[0])
         if suggestion_param_name is None:
             continue
         suggestion_param_name_lower = suggestion_param_name.lower()
