@@ -29,7 +29,7 @@ class TestMergeLineContinuations:
 
     def test_multiple_continuations(self) -> None:
         text = "qiime \\\ninfo \\\n--help"
-        merged, offset_map = merge_line_continuations(text)
+        merged, _ = merge_line_continuations(text)
         assert merged == "qiime info --help"
 
     def test_offset_map_boundaries(self) -> None:
@@ -122,6 +122,70 @@ class TestFindQiimeCommands:
         # "sudo qiime" should NOT be detected (first token must be "qiime")
         cmds = find_qiime_commands("sudo qiime info")
         assert len(cmds) == 0
+
+    def test_groups_option_and_value_tokens(self) -> None:
+        cmds = find_qiime_commands("qiime feature-table summarize --i-table table.qza")
+
+        assert len(cmds) == 1
+        assert [option.option_text for option in cmds[0].options] == ["--i-table"]
+        assert [token.text for token in cmds[0].options[0].value_tokens] == [
+            "table.qza"
+        ]
+        assert cmds[0].options[0].inline_value is None
+
+    def test_groups_multiple_values_until_next_option(self) -> None:
+        cmds = find_qiime_commands(
+            "qiime feature-table summarize --p-where sample id --output-dir out"
+        )
+
+        assert len(cmds) == 1
+        assert [option.option_text for option in cmds[0].options] == [
+            "--p-where",
+            "--output-dir",
+        ]
+        assert [token.text for token in cmds[0].options[0].value_tokens] == [
+            "sample",
+            "id",
+        ]
+        assert [token.text for token in cmds[0].options[1].value_tokens] == ["out"]
+
+    def test_groups_consecutive_flag_options_without_values(self) -> None:
+        cmds = find_qiime_commands(
+            "qiime feature-table summarize --use-cache --verbose --help"
+        )
+
+        assert len(cmds) == 1
+        assert [option.option_text for option in cmds[0].options] == [
+            "--use-cache",
+            "--verbose",
+            "--help",
+        ]
+        assert all(not option.value_tokens for option in cmds[0].options)
+
+    def test_groups_inline_option_values(self) -> None:
+        cmds = find_qiime_commands(
+            "qiime feature-table summarize --i-table=table.qza --verbose"
+        )
+
+        assert len(cmds) == 1
+        assert [option.option_text for option in cmds[0].options] == [
+            "--i-table",
+            "--verbose",
+        ]
+        assert cmds[0].options[0].inline_value == "table.qza"
+        assert cmds[0].options[0].value_tokens == ()
+
+    def test_groups_short_help_token_as_immediate_option_value(self) -> None:
+        cmds = find_qiime_commands(
+            "qiime feature-table summarize --p-obs-metadata -h --i-table table.qza"
+        )
+
+        assert len(cmds) == 1
+        assert [option.option_text for option in cmds[0].options] == [
+            "--p-obs-metadata",
+            "--i-table",
+        ]
+        assert [token.text for token in cmds[0].options[0].value_tokens] == ["-h"]
 
 
 class TestCommandAtPosition:

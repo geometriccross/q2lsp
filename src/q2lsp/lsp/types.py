@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from q2lsp.core.types import CompletionMode
+from q2lsp.qiime.options import OptionGroup, group_option_tokens
 
 
 class TokenSpan(NamedTuple):
@@ -21,6 +22,10 @@ class ParsedCommand(NamedTuple):
     tokens: list[TokenSpan]
     start: int  # Start offset in original text
     end: int  # End offset in original text (exclusive)
+
+    @property
+    def options(self) -> tuple[OptionGroup[TokenSpan], ...]:
+        return group_option_tokens(self.tokens, lambda token: token.text, start_index=3)
 
 
 class CompletionContext(NamedTuple):
