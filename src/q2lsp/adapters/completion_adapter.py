@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 from q2lsp.core.types import (
     ActionCandidate,
@@ -14,9 +14,12 @@ from q2lsp.core.types import (
     CompletionQuery,
     ParameterCandidate,
 )
+from q2lsp.lsp.types import ParsedCommand
 from q2lsp.qiime.hierarchy_keys import COMMAND_METADATA_KEYS, ROOT_METADATA_KEYS
 from q2lsp.qiime.options import (
     format_qiime_option_label,
+    group_option_tokens,
+    OptionGroup,
     normalize_option_to_param_name,
     option_label_matches_prefix,
     param_is_required,
@@ -112,11 +115,12 @@ def to_completion_data_from_root(root_node: JsonObject) -> CompletionData:
     )
 
 
-def get_used_parameters(command_tokens: tuple[str, ...]) -> set[str]:
+def get_used_parameters(command_tokens: tuple[str, ...] | ParsedCommand) -> set[str]:
     """Extract normalized parameter names from command tokens."""
     used: set[str] = set()
-    for token in command_tokens[3:]:
-        param_name = normalize_option_to_param_name(token)
+    option_groups = _group_command_options(command_tokens)
+    for option in option_groups:
+        param_name = normalize_option_to_param_name(option.option_text)
         if param_name:
             used.add(param_name)
     return used
@@ -150,6 +154,14 @@ def _get_token_text(command_tokens: tuple[str, ...], index: int) -> str:
     if index >= len(command_tokens):
         return ""
     return command_tokens[index]
+
+
+def _group_command_options(
+    command_tokens: tuple[str, ...] | ParsedCommand,
+) -> tuple[OptionGroup[Any], ...]:
+    if isinstance(command_tokens, ParsedCommand):
+        return command_tokens.options
+    return group_option_tokens(command_tokens, lambda token: token, start_index=3)
 
 
 def _builtin_names(root_node: JsonObject) -> list[str]:

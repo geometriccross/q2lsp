@@ -62,4 +62,4 @@ def ctx_get_used_parameters(ctx: CompletionContext) -> set[str]:
     """Extract used parameter names from a CompletionContext."""
     if ctx.command is None:
         return set()
-    return get_used_parameters(tuple(token.text for token in ctx.command.tokens))
+    return get_used_parameters(ctx.command)

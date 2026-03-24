@@ -10,6 +10,7 @@ from q2lsp.adapters.completion_adapter import (
     to_completion_query,
 )
 from q2lsp.core.types import CompletionMode
+from q2lsp.lsp.parser import find_qiime_commands
 
 
 def test_maps_boundary_values_to_core_query() -> None:
@@ -47,6 +48,16 @@ def test_get_used_parameters_ignores_empty_option_stub() -> None:
     )
 
     assert used == {"table"}
+
+
+def test_get_used_parameters_from_parsed_command_ignores_value_tokens() -> None:
+    command = find_qiime_commands(
+        "qiime feature-table summarize --i-table table.qza metadata.tsv --p-where sample id"
+    )[0]
+
+    used = get_used_parameters(command)
+
+    assert used == {"table", "where"}
 
 
 def test_normalizes_hierarchy_to_core_data() -> None:
