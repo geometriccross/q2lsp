@@ -133,6 +133,8 @@ def _iter_option_value_references(
                     path=option.inline_value,
                     start=inline_span[0],
                     end=inline_span[1],
+                    option_start=option.token.start,
+                    option_end=option.token.end,
                 )
             )
 
@@ -144,6 +146,8 @@ def _iter_option_value_references(
                 path=value_token.text,
                 start=value_token.start,
                 end=value_token.end,
+                option_start=option.token.start,
+                option_end=option.token.end,
             )
         )
 

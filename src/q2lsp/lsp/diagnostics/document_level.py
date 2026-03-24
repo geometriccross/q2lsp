@@ -1,4 +1,4 @@
-"""Document-level dependency diagnostics."""
+"""Document-level diagnostics from cross-command analysis."""
 
 from __future__ import annotations
 
@@ -12,7 +12,15 @@ from q2lsp.lsp.diagnostics.models import CommandAnalysis
 def collect_document_diagnostics(
     command_analyses: Sequence[CommandAnalysis],
 ) -> list[DiagnosticIssue]:
-    """Collect document-level diagnostics from command dependency edges."""
+    """Collect document-level diagnostics from cross-command relationships."""
+    issues = _collect_dependency_cycle_diagnostics(command_analyses)
+    issues.extend(_collect_duplicate_output_path_diagnostics(command_analyses))
+    return issues
+
+
+def _collect_dependency_cycle_diagnostics(
+    command_analyses: Sequence[CommandAnalysis],
+) -> list[DiagnosticIssue]:
     producers_by_path: dict[str, list[int]] = {}
     for index, analysis in enumerate(command_analyses):
         for output_ref in analysis.dependencies.outputs:
@@ -63,6 +71,36 @@ def collect_document_diagnostics(
         )
         for (_consumer_index, start, end, path) in cyclic_inputs
     ]
+
+
+def _collect_duplicate_output_path_diagnostics(
+    command_analyses: Sequence[CommandAnalysis],
+) -> list[DiagnosticIssue]:
+    outputs_by_path: dict[str, dict[int, tuple[int, int]]] = {}
+
+    for index, analysis in enumerate(command_analyses):
+        for output_ref in analysis.dependencies.outputs:
+            refs_for_path = outputs_by_path.setdefault(output_ref.path, {})
+            refs_for_path.setdefault(
+                index, (output_ref.anchor_start, output_ref.anchor_end)
+            )
+
+    issues: list[DiagnosticIssue] = []
+    for path, refs_by_command in outputs_by_path.items():
+        if len(refs_by_command) < 2:
+            continue
+        message = f"Duplicate output path '{path}' is produced by multiple commands."
+        for start, end in refs_by_command.values():
+            issues.append(
+                DiagnosticIssue(
+                    message=message,
+                    start=start,
+                    end=end,
+                    code=codes.DUPLICATE_OUTPUT_PATH,
+                )
+            )
+
+    return issues
 
 
 def _get_components(

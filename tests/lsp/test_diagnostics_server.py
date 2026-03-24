@@ -268,3 +268,83 @@ class TestDiagnosticSeverity:
             diagnostics[0].message
             == "Dependency cycle detected for input path 'loop.qza'."
         )
+
+    @pytest.mark.asyncio
+    async def test_did_open_publishes_duplicate_output_paths_as_errors(
+        self, mocker
+    ) -> None:
+        hierarchy: CommandHierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "builtins": [],
+                "demo": {
+                    "name": "demo",
+                    "step": {
+                        "name": "step",
+                        "signature": [
+                            {"name": "table", "type": "input"},
+                            {"name": "result", "type": "output"},
+                        ],
+                    },
+                },
+            }
+        }
+
+        server = server_mod.create_server(
+            get_hierarchy=lambda: hierarchy,
+            debounce_ms=0,
+        )
+
+        source = "\n".join(
+            [
+                "qiime demo step --i-table in-1.qza --o-result dup.qza",
+                "qiime demo step --i-table in-2.qza --o-result dup.qza",
+            ]
+        )
+
+        class MockDocument:
+            def __init__(self) -> None:
+                self.uri = "file:///test.sh"
+                self.source = source
+                self.version = 1
+                self.lines = source.splitlines()
+
+        document = MockDocument()
+
+        mock_workspace = mocker.Mock()
+        mock_workspace.get_text_document.return_value = document
+        server.protocol._workspace = mock_workspace
+
+        mock_publish = mocker.patch.object(
+            server,
+            "text_document_publish_diagnostics",
+            autospec=True,
+        )
+
+        fm = server.protocol.fm
+        did_open_handler = fm.features[types.TEXT_DOCUMENT_DID_OPEN]
+        params = types.DidOpenTextDocumentParams(
+            text_document=types.TextDocumentItem(
+                uri=document.uri,
+                language_id="shellscript",
+                version=document.version,
+                text=document.source,
+            )
+        )
+
+        await did_open_handler(params)
+        await asyncio.sleep(0.05)
+
+        mock_publish.assert_called_once()
+        publish_params = mock_publish.call_args[0][0]
+        diagnostics = publish_params.diagnostics
+
+        assert len(diagnostics) == 2
+        assert all(
+            diagnostic.code == "q2lsp-dni/duplicate-output-path"
+            for diagnostic in diagnostics
+        )
+        assert all(
+            diagnostic.severity == types.DiagnosticSeverity.Error
+            for diagnostic in diagnostics
+        )
