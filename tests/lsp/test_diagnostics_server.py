@@ -197,3 +197,74 @@ class TestDiagnosticSeverity:
             diagnostic.severity == types.DiagnosticSeverity.Warning
             for diagnostic in unknown_option_diagnostics
         )
+
+    @pytest.mark.asyncio
+    async def test_did_open_publishes_dependency_cycles_as_errors(self, mocker) -> None:
+        hierarchy: CommandHierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "builtins": [],
+                "demo": {
+                    "name": "demo",
+                    "step": {
+                        "name": "step",
+                        "signature": [
+                            {"name": "table", "type": "input"},
+                            {"name": "result", "type": "output"},
+                        ],
+                    },
+                },
+            }
+        }
+
+        server = server_mod.create_server(
+            get_hierarchy=lambda: hierarchy,
+            debounce_ms=0,
+        )
+
+        source = "qiime demo step --i-table loop.qza --o-result loop.qza"
+
+        class MockDocument:
+            def __init__(self) -> None:
+                self.uri = "file:///test.sh"
+                self.source = source
+                self.version = 1
+                self.lines = [source]
+
+        document = MockDocument()
+
+        mock_workspace = mocker.Mock()
+        mock_workspace.get_text_document.return_value = document
+        server.protocol._workspace = mock_workspace
+
+        mock_publish = mocker.patch.object(
+            server,
+            "text_document_publish_diagnostics",
+            autospec=True,
+        )
+
+        fm = server.protocol.fm
+        did_open_handler = fm.features[types.TEXT_DOCUMENT_DID_OPEN]
+        params = types.DidOpenTextDocumentParams(
+            text_document=types.TextDocumentItem(
+                uri=document.uri,
+                language_id="shellscript",
+                version=document.version,
+                text=document.source,
+            )
+        )
+
+        await did_open_handler(params)
+        await asyncio.sleep(0.05)
+
+        mock_publish.assert_called_once()
+        publish_params = mock_publish.call_args[0][0]
+        diagnostics = publish_params.diagnostics
+
+        assert len(diagnostics) == 1
+        assert diagnostics[0].code == "q2lsp-dni/dependency-cycle"
+        assert diagnostics[0].severity == types.DiagnosticSeverity.Error
+        assert (
+            diagnostics[0].message
+            == "Dependency cycle detected for input path 'loop.qza'."
+        )

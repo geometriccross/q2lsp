@@ -17,7 +17,7 @@ from q2lsp.lsp.adapter import (
     position_to_offset as _position_to_offset,
     to_lsp_completion_item as _to_lsp_completion_item,
 )
-from q2lsp.lsp.diagnostics import validate_command
+from q2lsp.lsp.diagnostics import collect_diagnostics
 from q2lsp.lsp.diagnostics.codes import DEFAULT_SEVERITY, DIAGNOSTIC_SEVERITY
 from q2lsp.lsp.diagnostics.debounce import DebounceManager
 from q2lsp.lsp.document_commands import (
@@ -182,30 +182,26 @@ def create_server(
             # Analyze document
             doc = analyze_document(document.source)
 
-            # Validate each command
+            # Collect diagnostics
             lsp_diagnostics: list[types.Diagnostic] = []
-            for cmd in doc.commands:
-                issues = validate_command(cmd, hierarchy)
-                for issue in issues:
-                    # Map merged offsets back to original offsets
-                    original_start = to_original_offset(doc, issue.start)
-                    original_end = to_original_offset(doc, issue.end)
+            for issue in collect_diagnostics(doc, hierarchy):
+                # Map merged offsets back to original offsets
+                original_start = to_original_offset(doc, issue.start)
+                original_end = to_original_offset(doc, issue.end)
 
-                    # Convert offsets to LSP position
-                    start_pos = _offset_to_position(document, original_start)
-                    end_pos = _offset_to_position(document, original_end)
+                # Convert offsets to LSP position
+                start_pos = _offset_to_position(document, original_start)
+                end_pos = _offset_to_position(document, original_end)
 
-                    lsp_diagnostics.append(
-                        types.Diagnostic(
-                            range=types.Range(start=start_pos, end=end_pos),
-                            message=issue.message,
-                            severity=DIAGNOSTIC_SEVERITY.get(
-                                issue.code, DEFAULT_SEVERITY
-                            ),
-                            source="q2lsp",
-                            code=issue.code,
-                        )
+                lsp_diagnostics.append(
+                    types.Diagnostic(
+                        range=types.Range(start=start_pos, end=end_pos),
+                        message=issue.message,
+                        severity=DIAGNOSTIC_SEVERITY.get(issue.code, DEFAULT_SEVERITY),
+                        source="q2lsp",
+                        code=issue.code,
                     )
+                )
 
             # Publish diagnostics using pygls standard method
             server.text_document_publish_diagnostics(

@@ -71,14 +71,13 @@ class TestDiagnosticsIntegration:
             version = 1
             source = "qiime feature-tabel summarize"
 
-        # Simulate validation by calling the internal validation
-        from q2lsp.lsp.parser import find_qiime_commands, merge_line_continuations
-        from q2lsp.lsp.diagnostics import validate_command
+        # Simulate diagnostics by calling the unified collector
+        from q2lsp.lsp.document_commands import analyze_document
+        from q2lsp.lsp.diagnostics import collect_diagnostics
 
-        merged_text, _ = merge_line_continuations(MockDocument.source)
-        commands = find_qiime_commands(merged_text)
+        doc = analyze_document(MockDocument.source)
 
-        issues = validate_command(commands[0], mock_hierarchy)
+        issues = collect_diagnostics(doc, mock_hierarchy)
 
         assert len(issues) == 1
         assert "feature-tabel" in issues[0].message
@@ -91,16 +90,15 @@ class TestDiagnosticsIntegration:
         self, server_with_diagnostics: LanguageServer, mock_hierarchy: CommandHierarchy
     ) -> None:
         """Test that a valid command produces no diagnostics."""
-        from q2lsp.lsp.parser import find_qiime_commands, merge_line_continuations
-        from q2lsp.lsp.diagnostics import validate_command
+        from q2lsp.lsp.document_commands import analyze_document
+        from q2lsp.lsp.diagnostics import collect_diagnostics
 
         class MockDocument:
             source = "qiime feature-table summarize --i-table table.qza"
 
-        merged_text, _ = merge_line_continuations(MockDocument.source)
-        commands = find_qiime_commands(merged_text)
+        doc = analyze_document(MockDocument.source)
 
-        issues = validate_command(commands[0], mock_hierarchy)
+        issues = collect_diagnostics(doc, mock_hierarchy)
 
         assert issues == []
 
@@ -109,16 +107,15 @@ class TestDiagnosticsIntegration:
         self, server_with_diagnostics: LanguageServer, mock_hierarchy: CommandHierarchy
     ) -> None:
         """Test that an option typo produces a diagnostic with correct code."""
-        from q2lsp.lsp.parser import find_qiime_commands, merge_line_continuations
-        from q2lsp.lsp.diagnostics import validate_command
+        from q2lsp.lsp.document_commands import analyze_document
+        from q2lsp.lsp.diagnostics import collect_diagnostics
 
         class MockDocument:
             source = "qiime feature-table summarize --i-tabel"
 
-        merged_text, _ = merge_line_continuations(MockDocument.source)
-        commands = find_qiime_commands(merged_text)
+        doc = analyze_document(MockDocument.source)
 
-        issues = validate_command(commands[0], mock_hierarchy)
+        issues = collect_diagnostics(doc, mock_hierarchy)
 
         assert len(issues) == 1
         assert "--i-tabel" in issues[0].message
