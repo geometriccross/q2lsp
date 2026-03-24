@@ -638,6 +638,80 @@ class TestValidateRequiredOptions:
 
         assert issues == []
 
+    def test_value_token_matching_short_help_does_not_suppress_required_check(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--p-obs-metadata", 30, 46),
+            TokenSpan("-h", 47, 49),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        missing = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+        assert len(missing) == 1
+        assert "--i-table" in missing[0].message
+
+    def test_short_help_after_option_value_suppresses_required_check(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--p-obs-metadata", 30, 46),
+            TokenSpan("foo", 47, 50),
+            TokenSpan("-h", 51, 53),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=53)
+        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+
+        assert issues == []
+
+    def test_short_help_after_flag_option_suppresses_required_check(self) -> None:
+        hierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "builtins": [],
+                "example-plugin": {
+                    "name": "example-plugin",
+                    "example-action": {
+                        "name": "example-action",
+                        "signature": [
+                            {
+                                "name": "table",
+                                "type": "input",
+                            },
+                            {
+                                "name": "verbose",
+                                "type": "boolean",
+                                "default": False,
+                                "is_bool_flag": True,
+                            },
+                        ],
+                    },
+                },
+            }
+        }
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("example-plugin", 6, 20),
+            TokenSpan("example-action", 21, 35),
+            TokenSpan("--verbose", 36, 45),
+            TokenSpan("-h", 46, 48),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=48)
+        issues = validate_command(cmd, hierarchy)
+
+        assert issues == []
+
     def test_help_equals_value_suppresses_required_check(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:

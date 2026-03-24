@@ -14,7 +14,9 @@ from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
 from q2lsp.lsp.types import TokenSpan
 from q2lsp.qiime.options import (
     format_qiime_option_label,
+    group_option_tokens,
     normalize_option_to_param_name,
+    OptionGroup,
     param_is_required,
 )
 from q2lsp.qiime.signature_params import (
@@ -112,7 +114,7 @@ def _validate_options(
     """
     Validate option tokens for a valid command path.
 
-    Only validates tokens that start with '--' (or are '--help'/'-h').
+    Only validates option delimiters that start with '--'.
 
     Args:
         tokens: Option tokens to validate (tokens at index >= 3).
@@ -143,30 +145,12 @@ def _validate_options(
     # Get valid options from the action signature
     valid_options = get_all_option_labels(action_node)
 
-    # Validate each option token
-    for token in tokens:
-        token_text = token.text
-
-        # Skip tokens that don't look like options
-        if not token_text.startswith("--"):
-            # Always treat --help and -h as valid
-            if token_text in ("--help", "-h"):
-                continue
-            # Skip non-option tokens (values, etc.)
-            continue
-
-        # Extract option name (handle --opt=value format)
-        option_name = token_text
-        if "=" in token_text:
-            option_name = token_text.split("=", 1)[0]
-
-        # Skip --help and -h
+    for option in group_option_tokens(tokens, lambda token: token.text):
+        option_name = option.option_text
         if option_name in ("--help", "-h"):
             continue
 
-        # Check if option is valid
         if not _is_exact_match(option_name, valid_options):
-            # Get suggestions (prefix matches + difflib)
             suggestions = _get_suggestions(option_name, valid_options, limit=3)
             if suggestions:
                 unknown_option_suggestions[option_name] = suggestions
@@ -177,8 +161,8 @@ def _validate_options(
             issues.append(
                 DiagnosticIssue(
                     message=message,
-                    start=token.start,
-                    end=token.end,
+                    start=option.token.start,
+                    end=option.token.end,
                     code=codes.UNKNOWN_OPTION,
                 )
             )
@@ -208,16 +192,14 @@ def _validate_required_options(
         return issues
 
     option_tokens = tokens[3:]
+    option_groups = group_option_tokens(option_tokens, lambda token: token.text)
 
-    # Suppress required-option diagnostics for help invocations.
-    for token in option_tokens:
-        token_name = token.text.split("=", 1)[0]
-        if token_name in ("--help", "-h"):
-            return issues
+    if _has_help_invocation(option_tokens, option_groups, action_node):
+        return issues
 
     present_param_names: set[str] = set()
-    for token in option_tokens:
-        param_name = normalize_option_to_param_name(token.text)
+    for option in option_groups:
+        param_name = normalize_option_to_param_name(option.option_text)
         if param_name is None:
             continue
         present_param_names.add(param_name.lower())
@@ -258,3 +240,44 @@ def _validate_required_options(
         )
 
     return issues
+
+
+def _has_help_invocation(
+    option_tokens: list[TokenSpan],
+    option_groups: tuple[OptionGroup[TokenSpan], ...],
+    action_node: JsonObject,
+) -> bool:
+    flag_option_labels = _get_flag_option_labels(action_node)
+
+    for option in option_groups:
+        if option.option_text == "--help":
+            return True
+
+        for index, value_token in enumerate(option.value_tokens):
+            if value_token.text != "-h":
+                continue
+            if option.option_text in flag_option_labels:
+                return True
+            if index == 0 and option.inline_value is None:
+                continue
+            return True
+
+    if not option_groups:
+        return any(token.text == "-h" for token in option_tokens)
+
+    for token in option_tokens:
+        token_text = token.text
+        if token_text.startswith("--"):
+            break
+        if token_text == "-h":
+            return True
+
+    return False
+
+
+def _get_flag_option_labels(action_node: JsonObject) -> set[str]:
+    return {
+        format_qiime_option_label(option_prefix, name)
+        for name, option_prefix, param in iter_signature_params(action_node)
+        if param.get("is_bool_flag") is True
+    }
