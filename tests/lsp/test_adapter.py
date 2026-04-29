@@ -11,10 +11,17 @@ from q2lsp.core.types import (
     CompletionItem as InternalCompletionItem,
 )
 from q2lsp.lsp.adapter import (
+    LSP_POSITION_ENCODING,
     completion_kind_to_lsp,
+    offset_to_position,
     position_to_offset,
     to_lsp_completion_item,
 )
+
+
+def test_lsp_position_encoding_contract_is_utf16() -> None:
+    """Adapter-owned LSP position mapping contract is UTF-16."""
+    assert LSP_POSITION_ENCODING == types.PositionEncodingKind.Utf16
 
 
 class TestPositionToOffset:
@@ -112,6 +119,57 @@ class TestPositionToOffset:
         offset = position_to_offset(doc, pos)
         assert offset == 4
 
+    def test_position_to_offset_clamps_large_character_before_crlf(self) -> None:
+        """Position(0,99) on "abc\r\ndef" -> offset 3, before CRLF."""
+        doc = TextDocument(
+            uri="file:///test.txt",
+            source="abc\r\ndef",
+            language_id="shell",
+            version=1,
+        )
+        pos = types.Position(line=0, character=99)
+        offset = position_to_offset(doc, pos)
+        assert offset == 3
+
+    def test_position_to_offset_clamps_large_character_before_cr(self) -> None:
+        """Position(0,99) on "abc\rdef" -> offset 3, before CR."""
+        doc = TextDocument(
+            uri="file:///test.txt",
+            source="abc\rdef",
+            language_id="shell",
+            version=1,
+        )
+        pos = types.Position(line=0, character=99)
+        offset = position_to_offset(doc, pos)
+        assert offset == 3
+
+
+class TestOffsetToPosition:
+    """Tests for offset_to_position function."""
+
+    def test_offset_to_position_handles_utf16_emoji_via_offset_mapper(self) -> None:
+        """Offset 2 on "a😀b" -> Position(0,3) in LSP UTF-16 units."""
+        doc = TextDocument(
+            uri="file:///test.txt",
+            source="a😀b",
+            language_id="shell",
+            version=1,
+        )
+        position = offset_to_position(doc, 2)
+        assert position == types.Position(line=0, character=3)
+
+    def test_offset_to_position_handles_bare_cr_line_break(self) -> None:
+        """Bare CR is a line break, with CR offset mapped to previous line end."""
+        doc = TextDocument(
+            uri="file:///test.txt",
+            source="abc\rdef",
+            language_id="shell",
+            version=1,
+        )
+
+        assert offset_to_position(doc, 3) == types.Position(line=0, character=3)
+        assert offset_to_position(doc, 4) == types.Position(line=1, character=0)
+
 
 class TestCompletionKindToLsp:
     """Tests for completion_kind_to_lsp function."""
@@ -190,3 +248,20 @@ class TestToLspCompletionItem:
         assert lsp_item.text_edit.new_text == "--p-input"
         assert lsp_item.text_edit.range.start == types.Position(line=0, character=3)
         assert lsp_item.text_edit.range.end == types.Position(line=0, character=5)
+
+    def test_text_edit_start_after_non_bmp_before_ascii_prefix(self) -> None:
+        """Prefix replacement uses UTF-16 position units after earlier emoji."""
+        item = InternalCompletionItem(
+            label="qiime",
+            detail="test detail",
+            kind=CompletionKind.BUILTIN,
+        )
+
+        lsp_item = to_lsp_completion_item(
+            item, position=types.Position(line=0, character=4), prefix="qi"
+        )
+
+        assert lsp_item.text_edit is not None
+        assert isinstance(lsp_item.text_edit, types.TextEdit)
+        assert lsp_item.text_edit.range.start == types.Position(line=0, character=2)
+        assert lsp_item.text_edit.range.end == types.Position(line=0, character=4)
