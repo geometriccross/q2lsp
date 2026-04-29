@@ -1,27 +1,195 @@
-"""QIIME2 CLI gateway module.
-
-This module provides a boundary interface for all q2cli interactions,
-encapsulating RootCommand creation and hierarchy building logic.
-"""
+"""Build QIIME hierarchy/catalog data from q2cli and create help providers."""
 
 from __future__ import annotations
 
-import logging
 import re
 import threading
-import time
-from typing import Callable
+from collections.abc import Callable, Mapping
+from typing import cast
 
-import click
-from q2cli.commands import RootCommand
-from q2lsp.qiime.command_hierarchy import build_command_hierarchy
-from q2lsp.qiime.types import CommandHierarchy
+import click as _click
+from q2cli.commands import PluginCommand as _PluginCommand
+from q2cli.commands import RootCommand as _RootCommand
+from q2lsp.qiime.catalog import QiimeCatalog
+from q2lsp.qiime.types import (
+    ActionCommandProperties,
+    ActionSignatureParameter,
+    BuiltinCommandProperties,
+    CommandHierarchy,
+    JsonObject,
+    JsonValue,
+    PluginCommandProperties,
+)
 
 __all__ = [
-    "Q2CliGateway",
-    "build_qiime_hierarchy_via_gateway",
+    "build_qiime_catalog",
+    "build_qiime_hierarchy",
     "create_qiime_help_provider",
 ]
+
+
+def _normalize_param_name(name: str | None) -> str:
+    """Normalize a parameter name by replacing hyphens with underscores."""
+    return (name or "").replace("-", "_")
+
+
+def _option_default(opt: _click.Option) -> object | None:
+    """Get the default value for an option, excluding callable defaults."""
+    if opt.required:
+        return None
+    default_value = opt.default
+    if callable(default_value):
+        return None
+    return default_value
+
+
+def _option_type_name(opt: _click.Option) -> str:
+    """Get the type name for an option."""
+    return getattr(opt.type, "name", "") or opt.type.__class__.__name__
+
+
+def _click_option_to_signature_param(opt: _click.Option) -> ActionSignatureParameter:
+    """Convert a click Option to an ActionSignatureParameter dict."""
+    entry: ActionSignatureParameter = {
+        "name": _normalize_param_name(opt.name),
+        "type": _option_type_name(opt),
+        "description": opt.help or "",
+    }
+
+    default_value = _option_default(opt)
+    if default_value is not None:
+        entry["default"] = cast(JsonValue, default_value)
+
+    if opt.required:
+        entry["required"] = True
+
+    if opt.metavar is not None:
+        entry["metavar"] = opt.metavar
+
+    if opt.multiple:
+        entry["multiple"] = str(opt.multiple)
+
+    flag_value = getattr(opt, "flag_value", None)
+    bool_flag = (getattr(opt, "is_flag", False) and isinstance(flag_value, bool)) or (
+        getattr(opt, "secondary_opts", []) and isinstance(flag_value, bool)
+    )
+    if bool_flag:
+        entry["is_bool_flag"] = True
+
+    return entry
+
+
+def _extract_signature_from_click_command(
+    command: _click.BaseCommand,
+) -> list[ActionSignatureParameter]:
+    """Extract signature parameters from a click command."""
+    signature: list[ActionSignatureParameter] = []
+    params = getattr(command, "params", [])
+    for param in params:
+        if not isinstance(param, _click.Option):
+            continue
+        if getattr(param, "hidden", False):
+            continue
+        signature.append(_click_option_to_signature_param(param))
+    return signature
+
+
+def _build_builtin_command_node(
+    builtin_name: str, builtin_command: _click.Command
+) -> JsonObject:
+    """Build a node for a builtin command, including its subcommands if any."""
+    builtin_properties: BuiltinCommandProperties = {
+        "name": builtin_name,
+        "help": getattr(builtin_command, "help", None),
+        "short_help": getattr(builtin_command, "short_help", None),
+        "type": "builtin",
+    }
+    if isinstance(builtin_command, _click.MultiCommand):
+        builtin_ctx = _click.Context(builtin_command)
+        builtin_node: JsonObject = cast(JsonObject, builtin_properties)
+        for subcommand_name in builtin_command.list_commands(builtin_ctx):
+            subcommand = builtin_command.get_command(builtin_ctx, subcommand_name)
+            if subcommand is None:
+                continue
+            if not isinstance(subcommand, _click.Command):
+                continue
+            subcommand_properties: BuiltinCommandProperties = {
+                "name": subcommand_name,
+                "help": getattr(subcommand, "help", None),
+                "short_help": getattr(subcommand, "short_help", None),
+                "type": "builtin_action",
+                "signature": _extract_signature_from_click_command(subcommand),
+            }
+            builtin_node[subcommand_name] = cast(JsonObject, subcommand_properties)
+        return builtin_node
+    return cast(JsonObject, builtin_properties)
+
+
+def _build_builtin_nodes(root: _RootCommand) -> dict[str, JsonObject]:
+    """Build all builtin command nodes."""
+    nodes: dict[str, JsonObject] = {}
+    for builtin_name, builtin_command in root._builtin_commands.items():
+        nodes[builtin_name] = _build_builtin_command_node(builtin_name, builtin_command)
+    return nodes
+
+
+def _build_plugin_nodes(root: _RootCommand, ctx: _click.Context) -> dict[str, JsonObject]:
+    """Build all plugin command nodes."""
+    plugin_lookup = cast(Mapping[str, PluginCommandProperties], root._plugin_lookup)
+    nodes: dict[str, JsonObject] = {}
+    for plugin_name, plugin_data in plugin_lookup.items():
+        plugin_command = _get_plugin_command(root, ctx, plugin_name)
+        action_lookup: dict[str, ActionCommandProperties] = dict(
+            plugin_command._action_lookup
+        )
+        action_lookup.update(getattr(plugin_command, "_hidden_actions", {}))
+        plugin_node: JsonObject = cast(JsonObject, dict(plugin_data))
+        for action_name, action_data in action_lookup.items():
+            plugin_node[action_name] = cast(JsonObject, dict(action_data))
+        nodes[plugin_name] = plugin_node
+    return nodes
+
+
+def _build_command_hierarchy_from_root(root: _RootCommand) -> CommandHierarchy:
+    root_name = root.name or "qiime"
+    root_node: JsonObject = {
+        "name": root_name,
+        "help": root.help,
+        "short_help": root.short_help,
+        "builtins": cast(list[JsonValue], sorted(root._builtin_commands.keys())),
+    }
+
+    for name, node in _build_builtin_nodes(root).items():
+        root_node[name] = node
+
+    ctx = _click.Context(root)
+    for name, node in _build_plugin_nodes(root, ctx).items():
+        root_node[name] = node
+
+    return {root_name: root_node}
+
+
+def build_qiime_hierarchy() -> CommandHierarchy:
+    """Build the QIIME command hierarchy without exposing q2cli types."""
+    return _build_command_hierarchy_from_root(_RootCommand())
+
+
+def build_qiime_catalog() -> QiimeCatalog:
+    """Build the minimal owned QIIME catalog abstraction."""
+    return QiimeCatalog.from_hierarchy(build_qiime_hierarchy())
+
+
+def _get_plugin_command(
+    root: _RootCommand, ctx: _click.Context, plugin_name: str
+) -> _PluginCommand:
+    command = root.get_command(ctx, plugin_name)
+    if command is None:
+        raise ValueError(f"Plugin command not found: {plugin_name}")
+    if not isinstance(command, _PluginCommand):
+        raise TypeError(
+            f"Unexpected command type for {plugin_name}: {type(command).__name__}"
+        )
+    return command
 
 
 def _sanitize_help_text(text: str) -> str:
@@ -67,97 +235,19 @@ def _sanitize_help_text(text: str) -> str:
     return "".join(result)
 
 
-class Q2CliGateway:
-    """Gateway for QIIME2 CLI interactions.
-
-    Provides a clean interface for building command hierarchies from q2cli,
-    with built-in logging and error handling.
-    """
-
-    def __init__(self, logger: logging.Logger | None = None) -> None:
-        """Initialize the gateway.
-
-        Args:
-            logger: Optional logger instance. If None, creates a default logger.
-        """
-        if logger is None:
-            logger = logging.getLogger("q2lsp.qiime.q2cli_gateway")
-        self._logger = logger
-
-    def build_hierarchy(self) -> CommandHierarchy:
-        """Build the QIIME2 command hierarchy.
-
-        Logs start, duration, and end of the build process.
-        Logs errors if the build fails.
-
-        Returns:
-            CommandHierarchy: The built hierarchy structure.
-
-        Raises:
-            Exception: Propagates any errors from the build process.
-        """
-        self._logger.debug("Starting QIIME2 hierarchy build")
-        start_time = time.time()
-
-        try:
-            hierarchy = self._build_hierarchy_impl()
-            duration_ms = (time.time() - start_time) * 1000
-            self._logger.debug(
-                "QIIME2 hierarchy build completed successfully in %.2fms",
-                duration_ms,
-            )
-            return hierarchy
-        except Exception as e:
-            duration_ms = (time.time() - start_time) * 1000
-            self._logger.error(
-                "QIIME2 hierarchy build failed after %.2fms: %s",
-                duration_ms,
-                e,
-                exc_info=True,
-            )
-            raise
-
-    def _build_hierarchy_impl(self) -> CommandHierarchy:
-        """Internal implementation of hierarchy building.
-
-        This method contains the actual q2cli interaction logic.
-
-        Returns:
-            CommandHierarchy: The built hierarchy structure.
-        """
-        root = RootCommand()
-        return build_command_hierarchy(root)
-
-
-# Singleton gateway instance for backward compatibility
-_default_gateway = Q2CliGateway()
-
-
-def build_qiime_hierarchy_via_gateway() -> CommandHierarchy:
-    """Build QIIME2 command hierarchy using the gateway.
-
-    This is the public entry point for building hierarchies.
-    It uses the default gateway instance.
-
-    Returns:
-        CommandHierarchy: The built hierarchy structure.
-    """
-    return _default_gateway.build_hierarchy()
-
-
 # Singleton root command instance for lazy loading
-_cached_root_command: RootCommand | None = None
+_cached_root_command: _RootCommand | None = None
 _root_command_lock = threading.Lock()
 
 
-def _get_root_command() -> RootCommand:
+def _get_root_command() -> _RootCommand:
     """Get or create the cached RootCommand instance (thread-safe)."""
     global _cached_root_command
     if _cached_root_command is None:
         with _root_command_lock:
             # Double-check pattern
             if _cached_root_command is None:
-                _cached_root_command = RootCommand()
+                _cached_root_command = _RootCommand()
     return _cached_root_command
 
 
@@ -182,7 +272,7 @@ def create_qiime_help_provider(
         """Get help text for the given command path."""
         root = _get_root_command()
         # Build context chain with parent references for correct Usage lines
-        ctx = click.Context(
+        ctx = _click.Context(
             root,
             max_content_width=max_content_width,
             color=color,
@@ -190,15 +280,15 @@ def create_qiime_help_provider(
         )
 
         # Navigate to the command
-        cmd: click.Command = root
+        cmd: _click.Command = root
         for name in command_path:
-            if isinstance(cmd, click.MultiCommand):
+            if isinstance(cmd, _click.MultiCommand):
                 subcommand = cmd.get_command(ctx, name)
                 if subcommand is None:
                     return None
                 cmd = subcommand
                 # Create new context with parent reference for proper command path
-                ctx = click.Context(
+                ctx = _click.Context(
                     cmd,
                     parent=ctx,
                     max_content_width=max_content_width,
