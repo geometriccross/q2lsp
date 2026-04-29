@@ -2,10 +2,10 @@
 
 from q2lsp.lsp.diagnostics.debounce import DebounceManager
 from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
-from q2lsp.lsp.diagnostics.validator import validate_command
+from q2lsp.lsp.diagnostics.validator import validate_command_with_catalog
 
 __all__ = [
     "DebounceManager",
     "DiagnosticIssue",
-    "validate_command",
+    "validate_command_with_catalog",
 ]

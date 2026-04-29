@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from q2lsp.lsp.adapter import LSP_POSITION_ENCODING
 from tests.lsp.e2e.lsp_client import LspTestClient
 
 
@@ -21,6 +22,24 @@ class TestStdioE2E:
         assert "capabilities" in response["result"]
 
         # Shutdown
+        await lsp_client.shutdown_exit()
+
+    @pytest.mark.asyncio
+    async def test_initialize_does_not_negotiate_utf8_positions(
+        self, lsp_client: LspTestClient
+    ) -> None:
+        """Server keeps wire positions compatible with the UTF-16 adapter."""
+        response = await lsp_client.initialize(
+            capabilities={"general": {"positionEncodings": ["utf-8", "utf-16"]}}
+        )
+
+        assert "result" in response
+        capabilities = response["result"]["capabilities"]
+        assert (
+            capabilities.get("positionEncoding", LSP_POSITION_ENCODING)
+            == LSP_POSITION_ENCODING
+        )
+
         await lsp_client.shutdown_exit()
 
     @pytest.mark.asyncio

@@ -19,6 +19,8 @@ from q2lsp.lsp.types import (
     ParsedCommand,
     TokenSpan,
 )
+from q2lsp.qiime.catalog import QiimeCatalog
+from q2lsp.qiime.types import CommandHierarchy
 from q2lsp.usecases.get_completions_usecase import (
     CompletionRequest,
     get_completions as get_usecase_completions,
@@ -26,7 +28,7 @@ from q2lsp.usecases.get_completions_usecase import (
 
 
 def _get_completions_via_usecase(
-    ctx: CompletionContext, hierarchy: dict
+    ctx: CompletionContext, hierarchy: CommandHierarchy
 ) -> list[CompletionItem]:
     """Call the usecase completion path from a CompletionContext."""
     command_tokens: tuple[str, ...] = ()
@@ -37,7 +39,7 @@ def _get_completions_via_usecase(
         prefix=ctx.prefix,
         command_tokens=command_tokens,
     )
-    return get_usecase_completions(request, hierarchy)
+    return get_usecase_completions(request, QiimeCatalog.from_hierarchy(hierarchy))
 
 
 def labels(items: list[CompletionItem]) -> list[str]:

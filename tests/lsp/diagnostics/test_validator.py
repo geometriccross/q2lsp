@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import pytest
 
-from q2lsp.lsp.diagnostics.matching import (
-    _get_close_matches,
-    _get_suggestions,
-    _is_exact_match,
-)
-from q2lsp.lsp.diagnostics.stages import _validate_options
-from q2lsp.lsp.diagnostics.validator import validate_command
+from q2lsp.lsp.diagnostics import codes
+from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
+from q2lsp.lsp.diagnostics.validator import validate_command_with_catalog
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
+from q2lsp.qiime.catalog import QiimeCatalog
+from q2lsp.qiime.types import CommandHierarchy
+
+
+def validate_command_with_hierarchy(
+    command: ParsedCommand, hierarchy: CommandHierarchy
+) -> list[DiagnosticIssue]:
+    return validate_command_with_catalog(command, QiimeCatalog.from_hierarchy(hierarchy))
 
 
 @pytest.fixture
@@ -136,91 +140,34 @@ def hierarchy_with_plugins_and_builtins() -> dict:
     }
 
 
-class TestIsExactMatch:
-    def test_exact_match_case_sensitive(self) -> None:
-        assert _is_exact_match("feature-table", ["feature-table", "diversity"])
-
-    def test_exact_match_case_insensitive(self) -> None:
-        assert _is_exact_match("FEATURE-TABLE", ["feature-table", "diversity"])
-        assert _is_exact_match("feature-table", ["FEATURE-TABLE", "diversity"])
-
-    def test_prefix_match(self) -> None:
-        # Prefix matches should NOT return True for exact match only
-        assert not _is_exact_match("feat", ["feature-table", "diversity"])
-        assert not _is_exact_match("FEAT", ["feature-table", "diversity"])
-        assert not _is_exact_match("f", ["feature-table", "diversity"])
-
-    def test_not_a_match(self) -> None:
-        assert not _is_exact_match("wrong", ["feature-table", "diversity"])
-        assert not _is_exact_match("feat", ["diversity", "metadata"])
-
-    def test_empty_candidates(self) -> None:
-        assert not _is_exact_match("feature-table", [])
-
-
-class TestGetCloseMatches:
-    def test_returns_close_matches(self) -> None:
-        candidates = ["feature-table", "feature-table", "diversity", "metadata"]
-        matches = _get_close_matches("feature", candidates, limit=3)
-        assert "feature-table" in matches
-
-    def test_limits_results(self) -> None:
-        candidates = ["feature-table", "feature-table", "diversity", "metadata"]
-        matches = _get_close_matches("feature", candidates, limit=1)
-        assert len(matches) <= 1
-
-    def test_no_matches_below_cutoff(self) -> None:
-        candidates = ["abc", "def", "xyz"]
-        matches = _get_close_matches("qwerty", candidates)
-        assert matches == []
-
-    def test_empty_candidates(self) -> None:
-        matches = _get_close_matches("test", [])
-        assert matches == []
-
-
-class TestGetSuggestions:
-    def test_prefers_prefix_matches(self) -> None:
-        candidates = ["feature-table", "diversity", "metadata"]
-        suggestions = _get_suggestions("feat", candidates, limit=3)
-        # Should return "feature-table" as a prefix match
-        assert "feature-table" in suggestions
-
-    def test_prefix_case_insensitive(self) -> None:
-        candidates = ["feature-table", "diversity"]
-        suggestions = _get_suggestions("FEAT", candidates, limit=3)
-        assert "feature-table" in suggestions
-
-    def test_fallback_to_difflib(self) -> None:
-        candidates = ["feature-table", "diversity", "metadata"]
-        suggestions = _get_suggestions("feture", candidates, limit=3)
-        # Should return close matches via difflib
-        assert "feature-table" in suggestions
-
-    def test_limits_results(self) -> None:
-        candidates = ["metadata", "metadata-file", "feature-table", "diversity"]
-        suggestions = _get_suggestions("metad", candidates, limit=2)
-        assert len(suggestions) <= 2
-
-    def test_empty_candidates(self) -> None:
-        suggestions = _get_suggestions("test", [])
-        assert suggestions == []
-
-    def test_exact_match_excluded_from_prefix_matches(self) -> None:
-        candidates = ["feature-table"]
-        suggestions = _get_suggestions("feature-table", candidates, limit=3)
-        # Exact match should not be in suggestions
-        assert suggestions == []
-
-    def test_deduplication(self) -> None:
-        # Test that duplicates are removed
-        candidates = ["feature-table", "feature-table", "diversity"]
-        suggestions = _get_suggestions("feat", candidates, limit=3)
-        # Should not have duplicates
-        assert len(suggestions) == len(set(suggestions))
-
-
 class TestValidateCommand:
+    def test_catalog_option_validation_uses_action_node(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--bad-option", 30, 42),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=42)
+        hierarchy = hierarchy_with_plugins_and_builtins
+        hierarchy["qiime"]["feature-table"]["summarize"] = {
+            "id": "summarize",
+            "name": "summarize",
+            "signature": [
+                {"name": "required_input", "type": "parameter"}
+            ],
+        }
+        catalog = QiimeCatalog.from_hierarchy(hierarchy)
+
+        issues = validate_command_with_catalog(cmd, catalog)
+
+        assert [issue.code for issue in issues] == [
+            codes.UNKNOWN_OPTION,
+            codes.MISSING_REQUIRED_OPTION,
+        ]
+
     def test_valid_command_no_issues(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:
@@ -232,7 +179,7 @@ class TestValidateCommand:
             TokenSpan("table.qza", 40, 49),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=49)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
     def test_typo_in_plugin(self, hierarchy_with_plugins_and_builtins: dict) -> None:
@@ -242,7 +189,7 @@ class TestValidateCommand:
             TokenSpan("summarize", 20, 29),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=29)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "feature-tabel" in issues[0].message
         assert "Did you mean" in issues[0].message
@@ -256,7 +203,7 @@ class TestValidateCommand:
             TokenSpan("refresh-cache", 11, 25),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=25)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "inof" in issues[0].message
         assert "Did you mean" in issues[0].message
@@ -268,7 +215,7 @@ class TestValidateCommand:
             TokenSpan("summerize", 20, 29),  # typo: summerize instead of summarize
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=29)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "summerize" in issues[0].message
         assert "feature-table" in issues[0].message  # mentions the plugin
@@ -281,7 +228,7 @@ class TestValidateCommand:
             TokenSpan("sumerize", 18, 27),  # typo in action
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=27)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         # Only 1 issue because token1 is invalid - we don't validate token2
         # to avoid noise since action candidates are unknown
         assert len(issues) == 1
@@ -295,7 +242,7 @@ class TestValidateCommand:
             TokenSpan("sum", 11, 14),  # prefix of "summarize"
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=14)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         # Should have issues for both prefix tokens
         assert len(issues) == 2
         assert "feat" in issues[0].message
@@ -313,7 +260,7 @@ class TestValidateCommand:
             TokenSpan("Sum", 11, 14),  # prefix (capitalized) of "summarize"
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=14)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         # Should have issues for both prefix tokens
         assert len(issues) == 2
         assert "FEAT" in issues[0].message
@@ -331,7 +278,7 @@ class TestValidateCommand:
             TokenSpan("tabul", 15, 20),  # prefix of "tabulate"
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=20)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "tabul" in issues[0].message
         assert "'tabulate'" in issues[0].message
@@ -343,7 +290,7 @@ class TestValidateCommand:
         # Commands with less than 3 tokens should not be validated
         tokens = [TokenSpan("qiime", 0, 5)]
         cmd = ParsedCommand(tokens=tokens, start=0, end=5)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
     def test_unknown_plugin_with_no_suggestions(
@@ -356,7 +303,7 @@ class TestValidateCommand:
             TokenSpan("summarize", 13, 22),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=22)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "xyz123" in issues[0].message
         # No "Did you mean" because there are no close matches
@@ -372,7 +319,7 @@ class TestValidateCommand:
             TokenSpan("xyz123", 20, 26),  # completely unknown
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=26)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "xyz123" in issues[0].message
         # No "Did you mean" because there are no close matches
@@ -387,7 +334,7 @@ class TestValidateCommand:
             TokenSpan("toolss", 6, 12),  # typo: should be "tools"
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=12)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "toolss" in issues[0].message
         assert issues[0].start == 6
@@ -403,7 +350,7 @@ class TestValidateCommand:
             TokenSpan("--help", 6, 12),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=12)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
         # Test: qiime tools --help
@@ -413,7 +360,7 @@ class TestValidateCommand:
             TokenSpan("--help", 12, 18),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=18)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
         # Test: qiime tools -h
@@ -423,7 +370,7 @@ class TestValidateCommand:
             TokenSpan("-h", 12, 14),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=14)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
     def test_builtin_leaf_no_subcommands(
@@ -437,7 +384,7 @@ class TestValidateCommand:
             TokenSpan("something", 11, 20),  # should not be validated
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=20)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         # Only one issue possible for token1, but "info" is valid so no issues
         assert issues == []
 
@@ -451,7 +398,7 @@ class TestValidateCommand:
             TokenSpan("something", 11, 20),  # should not be validated
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=20)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "inof" in issues[0].message
         assert issues[0].start == 6
@@ -473,7 +420,7 @@ class TestValidateOptions:
             TokenSpan("--i-tabel", 30, 39),  # typo: tabel instead of table
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=39)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "--i-tabel" in issues[0].message
         assert "Did you mean" in issues[0].message
@@ -494,7 +441,7 @@ class TestValidateOptions:
             TokenSpan("--i-ta", 30, 36),  # prefix of --i-table
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=36)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "--i-ta" in issues[0].message
         assert "Did you mean" in issues[0].message
@@ -513,7 +460,7 @@ class TestValidateOptions:
             TokenSpan("--i-table=foo", 30, 43),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=43)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
 
@@ -551,7 +498,7 @@ class TestValidateRequiredOptions:
             TokenSpan("tabulate", 15, 23),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=23)
-        issues = validate_command(cmd, hierarchy)
+        issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         missing = [
             issue
@@ -572,7 +519,7 @@ class TestValidateRequiredOptions:
             TokenSpan("foo", 47, 50),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=50)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         assert len(issues) == 1
         assert issues[0].code == "q2lsp-dni/missing-required-option"
@@ -591,7 +538,7 @@ class TestValidateRequiredOptions:
             TokenSpan("table.qza", 40, 49),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=49)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         assert issues == []
 
@@ -606,7 +553,7 @@ class TestValidateRequiredOptions:
             TokenSpan("table.qza", 40, 49),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=49)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         assert issues == []
 
@@ -620,7 +567,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--help", 30, 36),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=36)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         assert issues == []
 
@@ -634,7 +581,7 @@ class TestValidateRequiredOptions:
             TokenSpan("-h", 30, 32),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=32)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         assert issues == []
 
@@ -648,7 +595,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--help=1", 30, 38),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=38)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         assert issues == []
 
@@ -662,7 +609,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--i-table=table.qza", 30, 49),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=49)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         assert issues == []
 
@@ -677,7 +624,7 @@ class TestValidateRequiredOptions:
             TokenSpan("table.qza", 38, 47),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=47)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         unknown_option_issues = [
             issue for issue in issues if issue.code == "q2lsp-dni/unknown-option"
@@ -703,7 +650,7 @@ class TestValidateRequiredOptions:
             TokenSpan("table.qza", 40, 49),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=49)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         assert issues == []
 
@@ -751,7 +698,7 @@ class TestValidateRequiredOptions:
             TokenSpan("csv", 28, 31),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=31)
-        issues = validate_command(cmd, hierarchy)
+        issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         missing = [
             issue
@@ -794,7 +741,7 @@ class TestValidateRequiredOptions:
             TokenSpan("true", 29, 33),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=33)
-        issues = validate_command(cmd, hierarchy)
+        issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         missing = [
             issue
@@ -833,7 +780,7 @@ class TestValidateRequiredOptions:
             TokenSpan("true", 48, 52),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=52)
-        issues = validate_command(cmd, hierarchy)
+        issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         missing = [
             issue
@@ -877,7 +824,7 @@ class TestValidateRequiredOptions:
             TokenSpan("foo", 37, 40),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=40)
-        issues = validate_command(cmd, hierarchy)
+        issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         missing = [
             issue
@@ -898,7 +845,7 @@ class TestValidateRequiredOptions:
             TokenSpan("some condition", 45, 59),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=59)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         required_issues = [
             issue
@@ -918,7 +865,7 @@ class TestValidateRequiredOptions:
             TokenSpan("table.qza", 40, 49),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=49)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         unknown_option_issues = [
             issue for issue in issues if issue.code == "q2lsp-dni/unknown-option"
@@ -963,7 +910,7 @@ class TestValidateRequiredOptions:
             TokenSpan("bar", 44, 47),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=47)
-        issues = validate_command(cmd, hierarchy)
+        issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         missing_required_issues = [
             issue
@@ -983,7 +930,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--i-tabel", 30, 39),  # typo for --i-table
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=39)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         # Only action issue, no option issue because action is invalid
         assert len(issues) == 1
         assert "summerize" in issues[0].message
@@ -1000,7 +947,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--help", 30, 36),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=36)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
         tokens = [
@@ -1010,7 +957,7 @@ class TestValidateRequiredOptions:
             TokenSpan("-h", 30, 32),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=32)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
     def test_multiple_options_with_one_typo(
@@ -1025,7 +972,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--i-metadat", 39, 50),  # typo (prefix of --i-metadata)
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=50)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         unknown_option_issues = [
             issue for issue in issues if issue.code == "q2lsp-dni/unknown-option"
@@ -1058,7 +1005,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--p-exclude-ids", 100, 114),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=114)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
     def test_case_insensitive_prefix_for_options(
@@ -1072,7 +1019,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--I-TA", 30, 36),  # prefix (uppercase) of --i-table
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=36)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "--I-TA" in issues[0].message
         assert "Did you mean" in issues[0].message
@@ -1092,7 +1039,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--xyz123", 50, 58),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=58)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert len(issues) == 1
         assert "--xyz123" in issues[0].message
         # No "Did you mean" because there are no close matches
@@ -1112,68 +1059,11 @@ class TestValidateRequiredOptions:
             TokenSpan("metadata.tsv", 68, 80),  # value, not an option
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=80)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
         assert issues == []
 
 
-class TestValidateOptionsSuggestionMap:
-    def test_returns_tuple_with_unknown_option_suggestions_for_unknown_option(
-        self, hierarchy_with_plugins_and_builtins: dict
-    ) -> None:
-        root_node = hierarchy_with_plugins_and_builtins["qiime"]
-        option_tokens = [
-            TokenSpan("--table", 30, 37),
-            TokenSpan("table.qza", 38, 47),
-        ]
-
-        issues, unknown_option_suggestions = _validate_options(
-            option_tokens,
-            root_node,
-            "feature-table",
-            "summarize",
-        )
-
-        assert len(issues) == 1
-        assert unknown_option_suggestions == {"--table": ["--i-table"]}
-
-    def test_returns_empty_unknown_option_suggestions_when_no_unknown_options(
-        self, hierarchy_with_plugins_and_builtins: dict
-    ) -> None:
-        root_node = hierarchy_with_plugins_and_builtins["qiime"]
-        option_tokens = [
-            TokenSpan("--i-table", 30, 39),
-            TokenSpan("table.qza", 40, 49),
-        ]
-
-        issues, unknown_option_suggestions = _validate_options(
-            option_tokens,
-            root_node,
-            "feature-table",
-            "summarize",
-        )
-
-        assert issues == []
-        assert unknown_option_suggestions == {}
-
-    def test_omits_unknown_option_without_suggestions_from_unknown_option_suggestions(
-        self, hierarchy_with_plugins_and_builtins: dict
-    ) -> None:
-        root_node = hierarchy_with_plugins_and_builtins["qiime"]
-        option_tokens = [
-            TokenSpan("--xyz123", 30, 38),
-            TokenSpan("foo", 39, 42),
-        ]
-
-        issues, unknown_option_suggestions = _validate_options(
-            option_tokens,
-            root_node,
-            "feature-table",
-            "summarize",
-        )
-
-        assert len(issues) == 1
-        assert "--xyz123" not in unknown_option_suggestions
-
+class TestValidateOptionsRequiredSuppression:
     def test_multiple_suggestions_do_not_suppress_missing_required(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:
@@ -1184,7 +1074,7 @@ class TestValidateOptionsSuggestionMap:
             TokenSpan("--i", 35, 38),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=38)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         unknown_option_issues = [
             issue for issue in issues if issue.code == "q2lsp-dni/unknown-option"
@@ -1209,7 +1099,7 @@ class TestValidateOptionsSuggestionMap:
             TokenSpan("--xyz123", 30, 38),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=38)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         unknown_option_issues = [
             issue for issue in issues if issue.code == "q2lsp-dni/unknown-option"

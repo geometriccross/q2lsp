@@ -31,7 +31,6 @@ def test_diagnostics_submodules_cold_import_without_circular_dependencies(
             "importlib.import_module('q2lsp.lsp.diagnostics.diagnostic_issue')",
             f"importlib.import_module('{first_module}')",
             f"importlib.import_module('{second_module}')",
-            "importlib.import_module('q2lsp.lsp.diagnostics.hierarchy')",
             "importlib.import_module('q2lsp.lsp.diagnostics.matching')",
         ]
     )
@@ -52,5 +51,5 @@ def test_diagnostics_public_api_all_is_pinned() -> None:
     assert set(diagnostics.__all__) == {
         "DebounceManager",
         "DiagnosticIssue",
-        "validate_command",
+        "validate_command_with_catalog",
     }

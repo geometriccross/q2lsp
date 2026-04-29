@@ -89,14 +89,19 @@ class LspTestClient:
 
         await write_lsp_message(self._writer, notification)
 
-    async def initialize(self, *, root_uri: str = "file:///test") -> dict[str, Any]:
+    async def initialize(
+        self,
+        *,
+        root_uri: str = "file:///test",
+        capabilities: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Send initialize request."""
         response = await self.send_request(
             method="initialize",
             params={
                 "processId": None,
                 "rootUri": root_uri,
-                "capabilities": {},
+                "capabilities": capabilities or {},
             },
         )
         # Send initialized notification

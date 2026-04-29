@@ -10,6 +10,7 @@ import pytest
 from pygls.lsp.server import LanguageServer
 
 import q2lsp.lsp.server as server_mod
+from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
 
 
@@ -72,13 +73,15 @@ class TestDiagnosticsIntegration:
             source = "qiime feature-tabel summarize"
 
         # Simulate validation by calling the internal validation
+        from q2lsp.lsp.diagnostics import validate_command_with_catalog
         from q2lsp.lsp.parser import find_qiime_commands, merge_line_continuations
-        from q2lsp.lsp.diagnostics import validate_command
 
         merged_text, _ = merge_line_continuations(MockDocument.source)
         commands = find_qiime_commands(merged_text)
 
-        issues = validate_command(commands[0], mock_hierarchy)
+        issues = validate_command_with_catalog(
+            commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
 
         assert len(issues) == 1
         assert "feature-tabel" in issues[0].message
@@ -91,8 +94,8 @@ class TestDiagnosticsIntegration:
         self, server_with_diagnostics: LanguageServer, mock_hierarchy: CommandHierarchy
     ) -> None:
         """Test that a valid command produces no diagnostics."""
+        from q2lsp.lsp.diagnostics import validate_command_with_catalog
         from q2lsp.lsp.parser import find_qiime_commands, merge_line_continuations
-        from q2lsp.lsp.diagnostics import validate_command
 
         class MockDocument:
             source = "qiime feature-table summarize --i-table table.qza"
@@ -100,7 +103,9 @@ class TestDiagnosticsIntegration:
         merged_text, _ = merge_line_continuations(MockDocument.source)
         commands = find_qiime_commands(merged_text)
 
-        issues = validate_command(commands[0], mock_hierarchy)
+        issues = validate_command_with_catalog(
+            commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
 
         assert issues == []
 
@@ -109,8 +114,8 @@ class TestDiagnosticsIntegration:
         self, server_with_diagnostics: LanguageServer, mock_hierarchy: CommandHierarchy
     ) -> None:
         """Test that an option typo produces a diagnostic with correct code."""
+        from q2lsp.lsp.diagnostics import validate_command_with_catalog
         from q2lsp.lsp.parser import find_qiime_commands, merge_line_continuations
-        from q2lsp.lsp.diagnostics import validate_command
 
         class MockDocument:
             source = "qiime feature-table summarize --i-tabel"
@@ -118,7 +123,9 @@ class TestDiagnosticsIntegration:
         merged_text, _ = merge_line_continuations(MockDocument.source)
         commands = find_qiime_commands(merged_text)
 
-        issues = validate_command(commands[0], mock_hierarchy)
+        issues = validate_command_with_catalog(
+            commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
 
         assert len(issues) == 1
         assert "--i-tabel" in issues[0].message

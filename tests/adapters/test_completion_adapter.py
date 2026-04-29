@@ -10,6 +10,7 @@ from q2lsp.adapters.completion_adapter import (
     to_completion_query,
 )
 from q2lsp.core.types import CompletionMode
+from q2lsp.qiime.catalog import QiimeCatalog
 
 
 def test_maps_boundary_values_to_core_query() -> None:
@@ -49,35 +50,37 @@ def test_get_used_parameters_ignores_empty_option_stub() -> None:
     assert used == {"table"}
 
 
-def test_normalizes_hierarchy_to_core_data() -> None:
-    hierarchy = {
-        "qiime": {
-            "builtins": ["info"],
-            "info": {
-                "short_help": "Display information",
-            },
-            "feature-table": {
-                "short_description": "Feature table operations",
-                "summarize": {
-                    "description": "Summarize feature table",
-                    "signature": [
-                        {
-                            "name": "table",
-                            "type": "FeatureTable",
-                            "description": "Input table",
-                            "signature_type": "input",
-                        }
-                    ],
+def test_normalizes_catalog_to_core_data() -> None:
+    catalog = QiimeCatalog.from_hierarchy(
+        {
+            "qiime": {
+                "builtins": ["info"],
+                "info": {"short_help": "Display information"},
+                "feature-table": {
+                    "short_description": "Feature table operations",
+                    "summarize": {
+                        "description": "Summarize feature table",
+                        "signature": [
+                            {
+                                "name": "table",
+                                "type": "FeatureTable",
+                                "description": "Input table",
+                                "signature_type": "input",
+                            }
+                        ],
+                    },
                 },
-            },
+            }
         }
-    }
+    )
 
-    data = to_completion_data(hierarchy)
+    data = to_completion_data(catalog)
 
     assert {item.label for item in data.root_items} == {"info", "feature-table"}
-    command_names = {command.name for command in data.commands}
-    assert command_names == {"info", "feature-table"}
+    command = next(command for command in data.commands if command.name == "feature-table")
+    assert command.is_builtin is False
+    assert command.actions[0].item.label == "summarize"
+    assert command.actions[0].parameters[0].item.label == "--i-table"
 
 
 def test_can_import_lsp_package_and_adapter() -> None:

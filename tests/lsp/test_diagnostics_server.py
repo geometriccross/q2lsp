@@ -197,3 +197,59 @@ class TestDiagnosticSeverity:
             diagnostic.severity == types.DiagnosticSeverity.Warning
             for diagnostic in unknown_option_diagnostics
         )
+
+    @pytest.mark.asyncio
+    async def test_diagnostics_reuse_cached_catalog(
+        self, mock_hierarchy: CommandHierarchy, mocker
+    ) -> None:
+        """Repeated diagnostics use the server's cached catalog provider."""
+        hierarchy_call_count = 0
+
+        def get_hierarchy() -> CommandHierarchy:
+            nonlocal hierarchy_call_count
+            hierarchy_call_count += 1
+            return mock_hierarchy
+
+        server = server_mod.create_server(
+            get_hierarchy=get_hierarchy,
+            debounce_ms=0,
+        )
+
+        source = "qiime dummy-plugin dummy-action --unknown-opt value"
+
+        class MockDocument:
+            def __init__(self) -> None:
+                self.uri = "file:///test.sh"
+                self.source = source
+                self.version = 1
+                self.lines = [source]
+
+        document = MockDocument()
+
+        mock_workspace = mocker.Mock()
+        mock_workspace.get_text_document.return_value = document
+        server.protocol._workspace = mock_workspace
+
+        mocker.patch.object(
+            server,
+            "text_document_publish_diagnostics",
+            autospec=True,
+        )
+
+        fm = server.protocol.fm
+        did_open_handler = fm.features[types.TEXT_DOCUMENT_DID_OPEN]
+        params = types.DidOpenTextDocumentParams(
+            text_document=types.TextDocumentItem(
+                uri=document.uri,
+                language_id="shellscript",
+                version=document.version,
+                text=document.source,
+            )
+        )
+
+        await did_open_handler(params)
+        await asyncio.sleep(0.05)
+        await did_open_handler(params)
+        await asyncio.sleep(0.05)
+
+        assert hierarchy_call_count == 1

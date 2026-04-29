@@ -1,17 +1,13 @@
 from collections.abc import Mapping, Sequence
 
 from q2lsp.lsp.diagnostics import codes
-from q2lsp.lsp.diagnostics.hierarchy import (
-    _get_valid_plugins_and_builtins,
-    _get_valid_actions,
-    _is_builtin_leaf,
-)
-from q2lsp.lsp.diagnostics.matching import (
-    _is_exact_match,
-    _get_suggestions,
-)
 from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
+from q2lsp.lsp.diagnostics.matching import (
+    _get_suggestions,
+    _is_exact_match,
+)
 from q2lsp.lsp.types import TokenSpan
+from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.options import (
     format_qiime_option_label,
     normalize_option_to_param_name,
@@ -24,25 +20,16 @@ from q2lsp.qiime.signature_params import (
 from q2lsp.qiime.types import JsonObject
 
 
-def _validate_plugin_or_builtin(
-    token: TokenSpan, root_node: JsonObject
+def _validate_plugin_or_builtin_with_catalog(
+    token: TokenSpan, catalog: QiimeCatalog
 ) -> DiagnosticIssue | None:
-    """
-    Validate a plugin or builtin token (token 1).
-
-    Returns None if token is valid, otherwise a DiagnosticIssue.
-    """
     token_text = token.text
-
-    # Get all valid plugin names and builtin names
-    valid_plugins, valid_builtins = _get_valid_plugins_and_builtins(root_node)
+    valid_plugins, valid_builtins = catalog.valid_plugins_and_builtins()
     all_valid_names = list(valid_plugins | valid_builtins)
 
-    # If token matches exactly (case-insensitive), no issue
     if _is_exact_match(token_text, all_valid_names):
         return None
 
-    # Get suggestions (prefix matches + difflib)
     suggestions = _get_suggestions(token_text, all_valid_names, limit=3)
     if suggestions:
         message = f"Unknown QIIME command '{token_text}'. Did you mean {', '.join(repr(s) for s in suggestions)}?"
@@ -57,41 +44,33 @@ def _validate_plugin_or_builtin(
     )
 
 
-def _validate_action(
-    token: TokenSpan, root_node: JsonObject, plugin_name: str
+def _validate_action_with_catalog(
+    token: TokenSpan, catalog: QiimeCatalog, plugin_name: str
 ) -> DiagnosticIssue | None:
-    """
-    Validate an action token (token 2).
-
-    Returns None if token is valid, otherwise a DiagnosticIssue.
-    """
     token_text = token.text
 
-    # Get the plugin node
-    plugin_node = root_node.get(plugin_name)
-    if not isinstance(plugin_node, dict):
-        # Plugin doesn't exist - will be caught by token1 validation
+    if catalog.command_node(plugin_name) is None:
         return None
 
-    # Builtins with no subcommands: do not validate token2
-    if _is_builtin_leaf(plugin_node):
+    if catalog.is_builtin_leaf(plugin_name):
         return None
 
-    # Get all valid action names for this plugin
-    valid_actions = _get_valid_actions(plugin_node)
+    valid_actions = catalog.valid_actions(plugin_name)
 
-    # If token matches exactly (case-insensitive), no issue
     if _is_exact_match(token_text, valid_actions):
         return None
 
-    # Determine code based on whether parent is a builtin or plugin
-    is_builtin = plugin_node.get("type") == "builtin"
-    code = codes.UNKNOWN_SUBCOMMAND if is_builtin else codes.UNKNOWN_ACTION
-
-    # Get suggestions (prefix matches + difflib)
+    code = (
+        codes.UNKNOWN_SUBCOMMAND
+        if catalog.is_builtin(plugin_name)
+        else codes.UNKNOWN_ACTION
+    )
     suggestions = _get_suggestions(token_text, valid_actions, limit=3)
     if suggestions:
-        message = f"Unknown action '{token_text}' for '{plugin_name}'. Did you mean {', '.join(repr(s) for s in suggestions)}?"
+        message = (
+            f"Unknown action '{token_text}' for '{plugin_name}'. Did you mean "
+            f"{', '.join(repr(s) for s in suggestions)}?"
+        )
     else:
         message = f"Unknown action '{token_text}' for '{plugin_name}'."
 
@@ -103,42 +82,11 @@ def _validate_action(
     )
 
 
-def _validate_options(
-    tokens: list[TokenSpan],
-    root_node: JsonObject,
-    plugin_name: str,
-    action_name: str,
+def _validate_options_for_action(
+    tokens: list[TokenSpan], action_node: JsonObject
 ) -> tuple[list[DiagnosticIssue], dict[str, list[str]]]:
-    """
-    Validate option tokens for a valid command path.
-
-    Only validates tokens that start with '--' (or are '--help'/'-h').
-
-    Args:
-        tokens: Option tokens to validate (tokens at index >= 3).
-        root_node: The root node from hierarchy.
-        plugin_name: The plugin name (token1).
-        action_name: The action name (token2).
-
-    Returns:
-        A tuple containing:
-        - List of DiagnosticIssue for option validation problems.
-        - Map of unknown option names to their suggestion lists.
-    """
     issues: list[DiagnosticIssue] = []
     unknown_option_suggestions: dict[str, list[str]] = {}
-
-    # Get the plugin node
-    plugin_node = root_node.get(plugin_name)
-    if not isinstance(plugin_node, dict):
-        # Plugin doesn't exist - should have been caught by token1 validation
-        return issues, unknown_option_suggestions
-
-    # Get the action node
-    action_node = plugin_node.get(action_name)
-    if not isinstance(action_node, dict):
-        # Action doesn't exist - should have been caught by token2 validation
-        return issues, unknown_option_suggestions
 
     # Get valid options from the action signature
     valid_options = get_all_option_labels(action_node)
@@ -186,23 +134,26 @@ def _validate_options(
     return issues, unknown_option_suggestions
 
 
-def _validate_required_options(
+def _validate_options_with_catalog(
     tokens: list[TokenSpan],
-    root_node: JsonObject,
+    catalog: QiimeCatalog,
     plugin_name: str,
     action_name: str,
+) -> tuple[list[DiagnosticIssue], dict[str, list[str]]]:
+    """Validate option tokens for a catalog-backed valid command path."""
+    action_node = catalog.action_node(plugin_name, action_name)
+    if action_node is None:
+        return [], {}
+
+    return _validate_options_for_action(tokens, action_node)
+
+
+def _validate_required_options_for_action(
+    tokens: list[TokenSpan],
+    action_node: JsonObject,
     unknown_option_suggestions: Mapping[str, Sequence[str]],
 ) -> list[DiagnosticIssue]:
-    """Validate required options for an already valid command path."""
     issues: list[DiagnosticIssue] = []
-
-    plugin_node = root_node.get(plugin_name)
-    if not isinstance(plugin_node, dict):
-        return issues
-
-    action_node = plugin_node.get(action_name)
-    if not isinstance(action_node, dict):
-        return issues
 
     if len(tokens) < 3:
         return issues
@@ -258,3 +209,20 @@ def _validate_required_options(
         )
 
     return issues
+
+
+def _validate_required_options_with_catalog(
+    tokens: list[TokenSpan],
+    catalog: QiimeCatalog,
+    plugin_name: str,
+    action_name: str,
+    unknown_option_suggestions: Mapping[str, Sequence[str]],
+) -> list[DiagnosticIssue]:
+    """Validate required options for a catalog-backed valid command path."""
+    action_node = catalog.action_node(plugin_name, action_name)
+    if action_node is None:
+        return []
+
+    return _validate_required_options_for_action(
+        tokens, action_node, unknown_option_suggestions
+    )

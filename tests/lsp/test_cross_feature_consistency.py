@@ -12,16 +12,14 @@ from tests.helpers.completions import (
 
 from q2lsp.core.types import CompletionItem
 from q2lsp.lsp.diagnostics.codes import UNKNOWN_ACTION
-from q2lsp.lsp.diagnostics.hierarchy import (
-    _get_valid_actions,
-    _get_valid_plugins_and_builtins,
-)
-from q2lsp.lsp.diagnostics.validator import validate_command
+from q2lsp.lsp.diagnostics.validator import validate_command_with_catalog
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
+from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.signature_params import (
     get_all_option_labels,
     get_required_option_labels,
 )
+from q2lsp.qiime.types import CommandHierarchy
 
 
 def _labels(items: list[CompletionItem]) -> set[str]:
@@ -44,7 +42,7 @@ def _build_parsed_command(token_texts: list[str]) -> ParsedCommand:
 
 
 @pytest.fixture
-def shared_hierarchy() -> dict:
+def shared_hierarchy() -> CommandHierarchy:
     """Hierarchy shared between completions and diagnostics tests."""
     return {
         "qiime": {
@@ -125,7 +123,9 @@ def shared_hierarchy() -> dict:
 class TestCompletionsDiagnosticsConsistency:
     """Cross-feature tests ensuring completions and diagnostics agree."""
 
-    def test_option_labels_match_between_features(self, shared_hierarchy: dict) -> None:
+    def test_option_labels_match_between_features(
+        self, shared_hierarchy: CommandHierarchy
+    ) -> None:
         """Completion option labels == diagnostic valid options for same action."""
         root_node = shared_hierarchy["qiime"]
         action_node = root_node["diversity"]["core-metrics"]
@@ -146,7 +146,7 @@ class TestCompletionsDiagnosticsConsistency:
         assert completion_labels == diagnostic_labels
 
     def test_required_options_match_between_features(
-        self, shared_hierarchy: dict
+        self, shared_hierarchy: CommandHierarchy
     ) -> None:
         """Required options identified by completions match diagnostics required set."""
         root_node = shared_hierarchy["qiime"]
@@ -167,28 +167,33 @@ class TestCompletionsDiagnosticsConsistency:
 
         assert required_from_completions == required_from_diagnostics
 
-    def test_plugin_names_match_between_features(self, shared_hierarchy: dict) -> None:
+    def test_plugin_names_match_between_features(
+        self, shared_hierarchy: CommandHierarchy
+    ) -> None:
         """Plugin/builtin names from completions match diagnostics valid names."""
         root_node = shared_hierarchy["qiime"]
+        catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
 
         completion_names = _labels(complete_root(root_node, ""))
-        valid_plugins, valid_builtins = _get_valid_plugins_and_builtins(root_node)
+        valid_plugins, valid_builtins = catalog.valid_plugins_and_builtins()
 
         assert completion_names == (valid_plugins | valid_builtins)
 
-    def test_action_names_match_between_features(self, shared_hierarchy: dict) -> None:
+    def test_action_names_match_between_features(
+        self, shared_hierarchy: CommandHierarchy
+    ) -> None:
         """Action names from completions match diagnostics valid actions."""
         root_node = shared_hierarchy["qiime"]
-        plugin_node = root_node["diversity"]
+        catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
 
         completion_action_names = _labels(complete_plugin(root_node, "diversity", ""))
-        valid_actions = set(_get_valid_actions(plugin_node))
+        valid_actions = set(catalog.valid_actions("diversity"))
 
         assert completion_action_names == valid_actions
 
         for action_name in completion_action_names:
             command = _build_parsed_command(["qiime", "diversity", action_name])
-            issues = validate_command(command, shared_hierarchy)
+            issues = validate_command_with_catalog(command, catalog)
             unknown_action_issues = [
                 issue for issue in issues if issue.code == UNKNOWN_ACTION
             ]
@@ -196,7 +201,7 @@ class TestCompletionsDiagnosticsConsistency:
 
         unknown_action_name = "not-a-real-action"
         command = _build_parsed_command(["qiime", "diversity", unknown_action_name])
-        issues = validate_command(command, shared_hierarchy)
+        issues = validate_command_with_catalog(command, catalog)
         unknown_action_issues = [
             issue for issue in issues if issue.code == UNKNOWN_ACTION
         ]
@@ -205,10 +210,11 @@ class TestCompletionsDiagnosticsConsistency:
         assert len(unknown_action_issues) == 1
 
     def test_valid_command_has_no_diagnostics_and_has_completions(
-        self, shared_hierarchy: dict
+        self, shared_hierarchy: CommandHierarchy
     ) -> None:
         """A valid command with all required options has no diagnostics, but completions available."""
         root_node = shared_hierarchy["qiime"]
+        catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
         command = _build_parsed_command(
             [
                 "qiime",
@@ -225,7 +231,7 @@ class TestCompletionsDiagnosticsConsistency:
             ]
         )
 
-        issues = validate_command(command, shared_hierarchy)
+        issues = validate_command_with_catalog(command, catalog)
         assert issues == []
 
         completion_items = complete_parameters(

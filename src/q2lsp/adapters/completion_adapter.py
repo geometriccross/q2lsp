@@ -14,7 +14,8 @@ from q2lsp.core.types import (
     CompletionQuery,
     ParameterCandidate,
 )
-from q2lsp.qiime.hierarchy_keys import COMMAND_METADATA_KEYS, ROOT_METADATA_KEYS
+from q2lsp.qiime.catalog import QiimeCatalog
+from q2lsp.qiime.hierarchy_keys import COMMAND_METADATA_KEYS
 from q2lsp.qiime.options import (
     format_qiime_option_label,
     normalize_option_to_param_name,
@@ -22,7 +23,7 @@ from q2lsp.qiime.options import (
     param_is_required,
 )
 from q2lsp.qiime.signature_params import iter_signature_params
-from q2lsp.qiime.types import CommandHierarchy, JsonObject
+from q2lsp.qiime.types import JsonObject
 
 
 def to_completion_query(
@@ -46,70 +47,33 @@ def to_completion_query(
     )
 
 
-def to_completion_data(hierarchy: CommandHierarchy) -> CompletionData:
-    """Normalize external hierarchy data into core completion data."""
-    root_node = _get_root_node(hierarchy)
-    if root_node is None:
-        return CompletionData()
-    return to_completion_data_from_root(root_node)
-
-
-def to_completion_data_from_root(root_node: JsonObject) -> CompletionData:
-    """Normalize a root command node into core completion data."""
-    builtins = _builtin_names(root_node)
-    builtins_set = set(builtins)
-
+def to_completion_data(catalog: QiimeCatalog) -> CompletionData:
+    """Normalize catalog command data into core completion data."""
     root_items: list[CompletionItem] = []
     commands: list[CommandCandidate] = []
 
-    for builtin_name in builtins:
-        builtin_node = root_node.get(builtin_name)
-        detail = ""
-        if isinstance(builtin_node, dict):
-            builtin_json = cast(JsonObject, builtin_node)
-            detail = str(builtin_json.get("short_help", "")) or str(
-                builtin_json.get("help", "")
-            )
-            commands.append(
-                _to_command_candidate(
-                    name=builtin_name,
-                    command_node=builtin_json,
-                    is_builtin=True,
-                )
-            )
+    for command_name in catalog.command_names:
+        command_node = catalog.command_node(command_name)
+        if command_node is None:
+            continue
+
+        is_builtin = catalog.is_builtin(command_name)
         root_items.append(
             CompletionItem(
-                label=builtin_name,
-                detail=detail or "Built-in command",
-                kind=CompletionKind.BUILTIN,
-            )
-        )
-
-    for key, value in root_node.items():
-        if key in ROOT_METADATA_KEYS or key in builtins_set:
-            continue
-        if not isinstance(value, dict):
-            continue
-        value_json = cast(JsonObject, value)
-
-        detail = str(value_json.get("short_description", "")) or str(
-            value_json.get("description", "")
-        )
-        root_items.append(
-            CompletionItem(
-                label=key,
-                detail=detail or "Plugin",
-                kind=CompletionKind.PLUGIN,
+                label=command_name,
+                detail=_command_detail(command_node, is_builtin=is_builtin),
+                kind=CompletionKind.BUILTIN if is_builtin else CompletionKind.PLUGIN,
             )
         )
         commands.append(
-            _to_command_candidate(name=key, command_node=value_json, is_builtin=False)
+            _to_command_candidate(
+                name=command_name,
+                command_node=command_node,
+                is_builtin=is_builtin,
+            )
         )
 
-    return CompletionData(
-        root_items=tuple(root_items),
-        commands=tuple(commands),
-    )
+    return CompletionData(root_items=tuple(root_items), commands=tuple(commands))
 
 
 def get_used_parameters(command_tokens: tuple[str, ...]) -> set[str]:
@@ -137,26 +101,20 @@ def _to_completion_mode(mode: str) -> CompletionMode:
     return CompletionMode.NONE
 
 
-def _get_root_node(hierarchy: CommandHierarchy) -> JsonObject | None:
-    if not hierarchy:
-        return None
-    root_node = next(iter(hierarchy.values()), None)
-    if isinstance(root_node, dict):
-        return root_node
-    return None
-
-
 def _get_token_text(command_tokens: tuple[str, ...], index: int) -> str:
     if index >= len(command_tokens):
         return ""
     return command_tokens[index]
 
 
-def _builtin_names(root_node: JsonObject) -> list[str]:
-    builtins = root_node.get("builtins", [])
-    if not isinstance(builtins, list):
-        return []
-    return [name for name in builtins if isinstance(name, str)]
+def _command_detail(command_node: JsonObject, *, is_builtin: bool) -> str:
+    if is_builtin:
+        return str(command_node.get("short_help", "")) or str(
+            command_node.get("help", "")
+        ) or "Built-in command"
+    return str(command_node.get("short_description", "")) or str(
+        command_node.get("description", "")
+    ) or "Plugin"
 
 
 def _to_command_candidate(
