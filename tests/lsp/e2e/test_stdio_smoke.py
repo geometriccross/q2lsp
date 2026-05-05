@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
-from q2lsp.lsp.adapter import LSP_POSITION_ENCODING
 from tests.lsp.e2e.lsp_client import LspTestClient
 
 
@@ -13,7 +14,11 @@ class TestStdioE2E:
     """End-to-end tests for LSP server communication."""
 
     @pytest.mark.asyncio
-    async def test_initialize_shutdown(self, lsp_client: LspTestClient) -> None:
+    async def test_initialize_shutdown(
+        self,
+        lsp_client: LspTestClient,
+        lsp_server_process: asyncio.subprocess.Process,
+    ) -> None:
         """Server responds to initialize and shutdown requests."""
         # Initialize
         response = await lsp_client.initialize()
@@ -22,7 +27,10 @@ class TestStdioE2E:
         assert "capabilities" in response["result"]
 
         # Shutdown
-        await lsp_client.shutdown_exit()
+        shutdown_response = await lsp_client.shutdown_exit()
+        assert shutdown_response.get("result") is None
+        await asyncio.wait_for(lsp_server_process.wait(), timeout=5.0)
+        assert lsp_server_process.returncode == 0
 
     @pytest.mark.asyncio
     async def test_initialize_does_not_negotiate_utf8_positions(
@@ -35,10 +43,7 @@ class TestStdioE2E:
 
         assert "result" in response
         capabilities = response["result"]["capabilities"]
-        assert (
-            capabilities.get("positionEncoding", LSP_POSITION_ENCODING)
-            == LSP_POSITION_ENCODING
-        )
+        assert capabilities.get("positionEncoding") == "utf-16"
 
         await lsp_client.shutdown_exit()
 
@@ -54,7 +59,7 @@ class TestStdioE2E:
             uri=uri,
             language_id="shellscript",
             version=1,
-            text="qiime ",
+            text="qiime feature-table summarize ",
         )
 
         # Request completion at position after "qiime "
@@ -67,8 +72,23 @@ class TestStdioE2E:
         assert "items" in result
         assert isinstance(result["items"], list)
 
-        # Should have some completion items (builtins and plugins from stub)
-        assert len(result["items"]) > 0
+        labels = {item["label"] for item in result["items"]}
+        assert {"info", "tools", "feature-table"}.issubset(labels)
+        assert "plugins" not in labels
+
+        response = await lsp_client.completion(
+            uri=uri, line=0, character=len("qiime feature-table ")
+        )
+        labels = {item["label"] for item in response["result"]["items"]}
+        assert "summarize" in labels
+
+        response = await lsp_client.completion(
+            uri=uri, line=0, character=len("qiime feature-table summarize ")
+        )
+        labels = {item["label"] for item in response["result"]["items"]}
+        assert {"--i-table", "--p-sample-metadata", "--o-visualization"}.issubset(
+            labels
+        )
 
         # Shutdown
         await lsp_client.shutdown_exit()
@@ -89,7 +109,7 @@ class TestStdioE2E:
         response = await lsp_client.completion(uri=uri, line=0, character=0)
 
         assert "result" in response
-        # Empty document should return empty or no completions (not an error)
-        assert "items" in response["result"]
+        assert "error" not in response
+        assert response["result"]["items"] == []
 
         await lsp_client.shutdown_exit()
