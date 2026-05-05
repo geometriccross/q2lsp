@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+ACTION_REF_PATTERN = re.compile(r"^[^\s@]+@(?P<ref>[0-9a-f]{40})$")
+MAX_TIMEOUT_MINUTES = 60
+ALLOWED_PERMISSION_VALUES = {"none", "read", "write"}
+ALLOWED_PERMISSIONS = {"contents", "id-token"}
+
 
 def _workflow_files() -> list[Path]:
     repo_root = Path(__file__).resolve().parents[1]
-    return sorted((repo_root / ".github" / "workflows").glob("*.yml"))
+    workflow_dir = repo_root / ".github" / "workflows"
+    return sorted({*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")})
 
 
 def _load_workflow(path: Path) -> dict[str, Any]:
@@ -21,12 +28,23 @@ def _load_workflow(path: Path) -> dict[str, Any]:
     return content
 
 
+def test_workflow_files_are_discovered() -> None:
+    assert _workflow_files(), "Expected at least one GitHub Actions workflow"
+
+
 def test_workflows_have_readonly_contents_permission() -> None:
     for workflow_path in _workflow_files():
         workflow = _load_workflow(workflow_path)
         permissions = workflow.get("permissions")
         assert isinstance(permissions, dict), (
             f"Missing top-level permissions in {workflow_path}"
+        )
+        assert set(permissions) <= ALLOWED_PERMISSIONS, (
+            f"Unexpected top-level permissions in {workflow_path}: "
+            f"{set(permissions) - ALLOWED_PERMISSIONS}"
+        )
+        assert set(permissions.values()) <= ALLOWED_PERMISSION_VALUES, (
+            f"Unexpected top-level permission values in {workflow_path}"
         )
         assert permissions.get("contents") == "read", (
             f"permissions.contents must be read in {workflow_path}"
@@ -46,6 +64,58 @@ def test_workflow_jobs_define_timeout_minutes() -> None:
             assert isinstance(timeout, int) and timeout > 0, (
                 f"Job {job_name} in {workflow_path} must define positive timeout-minutes"
             )
+            assert timeout <= MAX_TIMEOUT_MINUTES, (
+                f"Job {job_name} in {workflow_path} timeout-minutes must be "
+                f"<= {MAX_TIMEOUT_MINUTES}"
+            )
+
+
+def test_workflow_job_permissions_are_allowlisted() -> None:
+    for workflow_path in _workflow_files():
+        workflow = _load_workflow(workflow_path)
+        jobs = workflow.get("jobs")
+        assert isinstance(jobs, dict), f"Missing jobs in {workflow_path}"
+        for job_name, job in jobs.items():
+            assert isinstance(job, dict), (
+                f"Job mapping required for {job_name} in {workflow_path}"
+            )
+            permissions = job.get("permissions")
+            if permissions is None:
+                continue
+            assert isinstance(permissions, dict), (
+                f"Job {job_name} permissions must be a mapping in {workflow_path}"
+            )
+            assert set(permissions) <= ALLOWED_PERMISSIONS, (
+                f"Unexpected permissions in {workflow_path} ({job_name}): "
+                f"{set(permissions) - ALLOWED_PERMISSIONS}"
+            )
+            assert set(permissions.values()) <= ALLOWED_PERMISSION_VALUES, (
+                f"Unexpected permission values in {workflow_path} ({job_name})"
+            )
+
+
+def test_action_references_are_pinned_to_full_sha() -> None:
+    for workflow_path in _workflow_files():
+        workflow = _load_workflow(workflow_path)
+        jobs = workflow.get("jobs")
+        assert isinstance(jobs, dict), f"Missing jobs in {workflow_path}"
+        for job_name, job in jobs.items():
+            assert isinstance(job, dict), (
+                f"Job mapping required for {job_name} in {workflow_path}"
+            )
+            steps = job.get("steps")
+            if not isinstance(steps, list):
+                continue
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                uses = step.get("uses")
+                if not isinstance(uses, str):
+                    continue
+                assert ACTION_REF_PATTERN.match(uses), (
+                    f"Action reference must be pinned to a full 40-character SHA "
+                    f"in {workflow_path} ({job_name}): {uses}"
+                )
 
 
 def test_checkout_steps_disable_persisted_credentials() -> None:

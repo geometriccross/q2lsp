@@ -14,6 +14,12 @@ def test_document_snapshot_is_immutable() -> None:
         snapshot.text = "changed"  # type: ignore[misc]
 
 
+def test_document_snapshot_offset_mapper_uses_snapshot_text() -> None:
+    snapshot = DocumentSnapshot(uri="file:///workflow.sh", text="a😀b", version=1)
+
+    assert snapshot.offset_mapper().offset_to_position(2) == (0, 3)
+
+
 def test_offset_mapper_round_trips_ascii_position() -> None:
     mapper = OffsetMapper("qiime\ninfo")
 
@@ -67,3 +73,27 @@ def test_offset_mapper_clamps_cr_line_columns_before_line_break() -> None:
     mapper = OffsetMapper("abc\rdef")
 
     assert mapper.position_to_offset(0, 999) == 3
+
+
+def test_offset_mapper_clamps_negative_offset_to_start() -> None:
+    mapper = OffsetMapper("qiime")
+
+    assert mapper.offset_to_position(-1) == (0, 0)
+
+
+def test_offset_mapper_clamps_offset_beyond_eof_to_end() -> None:
+    mapper = OffsetMapper("qiime\ninfo")
+
+    assert mapper.offset_to_position(999) == (1, 4)
+
+
+def test_offset_mapper_clamps_negative_position_to_start() -> None:
+    mapper = OffsetMapper("qiime")
+
+    assert mapper.position_to_offset(-1, -1) == 0
+
+
+def test_offset_mapper_clamps_line_beyond_end_to_eof() -> None:
+    mapper = OffsetMapper("qiime\ninfo")
+
+    assert mapper.position_to_offset(99, 0) == 10

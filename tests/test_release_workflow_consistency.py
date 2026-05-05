@@ -8,7 +8,11 @@ from typing import Any
 import yaml
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
 def _load_workflow(path: Path) -> dict[str, Any]:
+    assert path.exists(), f"Workflow file must exist: {path}"
     content = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(content, dict):
         msg = f"Workflow must parse to mapping: {path}"
@@ -42,8 +46,19 @@ def _job_steps(
     return normalized_steps
 
 
+def _assert_step_name_exists_once(
+    steps: list[dict[str, Any]], workflow_path: Path, step_name: str
+) -> dict[str, Any]:
+    matching_steps = [step for step in steps if step.get("name") == step_name]
+    assert len(matching_steps) == 1, (
+        f"Expected exactly one {step_name!r} step in {workflow_path}, "
+        f"found {len(matching_steps)}"
+    )
+    return matching_steps[0]
+
+
 def test_python_release_workflow_has_tag_trigger_and_version_check() -> None:
-    workflow_path = Path(".github/workflows/release-publish.yml")
+    workflow_path = REPO_ROOT / ".github/workflows/release-publish.yml"
     workflow = _load_workflow(workflow_path)
 
     on_section = _on_section(workflow, workflow_path)
@@ -53,17 +68,19 @@ def test_python_release_workflow_has_tag_trigger_and_version_check() -> None:
     assert isinstance(tags, list), f"Missing push.tags in {workflow_path}"
     assert "q2lsp-v*" in tags, f"q2lsp-v* tag trigger required in {workflow_path}"
 
-    steps = _job_steps(workflow, workflow_path, "build")
-    assert any(
-        step.get("name") == "Verify release tag matches project version"
-        and "q2lsp-v" in str(step.get("run", ""))
-        and "pyproject.toml" in str(step.get("run", ""))
-        for step in steps
-    ), f"Tag-version consistency step required in {workflow_path}"
+    step = _assert_step_name_exists_once(
+        _job_steps(workflow, workflow_path, "build"),
+        workflow_path,
+        "Verify release tag matches project version",
+    )
+    # This is a lightweight workflow structure check, not executable shell validation.
+    run = str(step.get("run", ""))
+    assert "q2lsp-v" in run, f"Project release tag prefix required in {workflow_path}"
+    assert "pyproject.toml" in run, f"Project version source required in {workflow_path}"
 
 
 def test_vscode_release_workflow_has_tag_trigger_and_version_check() -> None:
-    workflow_path = Path(".github/workflows/vscode-extension-release.yml")
+    workflow_path = REPO_ROOT / ".github/workflows/vscode-extension-release.yml"
     workflow = _load_workflow(workflow_path)
 
     on_section = _on_section(workflow, workflow_path)
@@ -75,11 +92,13 @@ def test_vscode_release_workflow_has_tag_trigger_and_version_check() -> None:
         f"vscode-q2lsp-v* tag trigger required in {workflow_path}"
     )
 
-    steps = _job_steps(workflow, workflow_path, "build-package")
-    assert any(
-        step.get("name") == "Verify release tag matches extension version"
-        and "vscode-q2lsp-v" in str(step.get("run", ""))
-        and "package.json" in str(step.get("run", ""))
-        and "refs/tags/" in str(step.get("run", ""))
-        for step in steps
-    ), f"Tag-version consistency step required in {workflow_path}"
+    step = _assert_step_name_exists_once(
+        _job_steps(workflow, workflow_path, "build-package"),
+        workflow_path,
+        "Verify release tag matches extension version",
+    )
+    # This is a lightweight workflow structure check, not executable shell validation.
+    run = str(step.get("run", ""))
+    assert "vscode-q2lsp-v" in run, f"Extension release tag prefix required in {workflow_path}"
+    assert "package.json" in run, f"Extension version source required in {workflow_path}"
+    assert "refs/tags/" in run, f"Tag-only validation guard required in {workflow_path}"

@@ -54,7 +54,11 @@ def _module_name_for_file(file_path: Path) -> str:
 
 def _resolve_import_from_modules(file_path: Path, node: ast.ImportFrom) -> list[str]:
     if node.level == 0:
-        return [] if node.module is None else [node.module]
+        if node.module is None:
+            return []
+        if node.module == "q2lsp":
+            return [f"{node.module}.{alias.name}" for alias in node.names]
+        return [node.module]
 
     current_module = _module_name_for_file(file_path)
     current_package = (
@@ -154,6 +158,61 @@ def test_collect_forbidden_imports_resolves_init_relative_imports(
 
     assert violations == [
         f"{(core_dir / '__init__.py').as_posix()}:1 imports q2lsp.lsp.diagnostics"
+    ]
+
+
+def test_collect_forbidden_imports_resolves_absolute_package_aliases(
+    tmp_path: Path,
+) -> None:
+    core_dir = tmp_path / "q2lsp" / "core"
+    core_dir.mkdir(parents=True)
+    sample_file = core_dir / "sample.py"
+    sample_file.write_text(
+        "from q2lsp import lsp\n"
+        "from q2lsp import qiime as q\n"
+        "from q2lsp import adapters, usecases as u\n",
+        encoding="utf-8",
+    )
+
+    violations = _collect_forbidden_imports(
+        layer_dir=core_dir,
+        forbidden_prefixes=(
+            "q2lsp.lsp",
+            "q2lsp.qiime",
+            "q2lsp.adapters",
+            "q2lsp.usecases",
+        ),
+    )
+
+    assert violations == [
+        f"{sample_file.as_posix()}:1 imports q2lsp.lsp",
+        f"{sample_file.as_posix()}:2 imports q2lsp.qiime",
+        f"{sample_file.as_posix()}:3 imports q2lsp.adapters",
+        f"{sample_file.as_posix()}:3 imports q2lsp.usecases",
+    ]
+
+
+def test_collect_forbidden_imports_handles_static_import_forms(
+    tmp_path: Path,
+) -> None:
+    core_dir = tmp_path / "q2lsp" / "core"
+    core_dir.mkdir(parents=True)
+    sample_file = core_dir / "sample.py"
+    sample_file.write_text(
+        "import q2lsp.lsp\n"
+        "from q2lsp.lsp import diagnostics\n"
+        "from q2lsp.core import model\n",
+        encoding="utf-8",
+    )
+
+    violations = _collect_forbidden_imports(
+        layer_dir=core_dir,
+        forbidden_prefixes=("q2lsp.lsp",),
+    )
+
+    assert violations == [
+        f"{sample_file.as_posix()}:1 imports q2lsp.lsp",
+        f"{sample_file.as_posix()}:2 imports q2lsp.lsp",
     ]
 
 

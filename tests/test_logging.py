@@ -3,9 +3,46 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
+
 from q2lsp.logging import configure_logging, get_logger
+
+
+@pytest.fixture(autouse=True)
+def restore_q2lsp_logger(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Restore global q2lsp logger state after each test."""
+    logger = logging.getLogger("q2lsp")
+    handlers = list(logger.handlers)
+    original_handlers = set(handlers)
+    transient_handlers: set[logging.Handler] = set()
+    level = logger.level
+    propagate = logger.propagate
+
+    original_add_handler = logger.addHandler
+
+    def add_handler(handler: logging.Handler) -> None:
+        if handler not in original_handlers:
+            transient_handlers.add(handler)
+        original_add_handler(handler)
+
+    monkeypatch.setattr(logger, "addHandler", add_handler)
+
+    yield
+
+    for handler in list(logger.handlers):
+        if handler not in handlers:
+            logger.removeHandler(handler)
+
+    for handler in transient_handlers:
+        if handler not in original_handlers:
+            handler.close()
+
+    logger.handlers[:] = handlers
+    logger.setLevel(level)
+    logger.propagate = propagate
 
 
 class TestConfigureLogging:
@@ -28,6 +65,23 @@ class TestConfigureLogging:
         configure_logging(level="warning")
         logger = logging.getLogger("q2lsp")
         assert logger.level == logging.WARNING
+
+    def test_invalid_level_falls_back_to_info(self) -> None:
+        """Unknown log levels fall back to INFO."""
+        configure_logging(level="not-a-level")
+        logger = logging.getLogger("q2lsp")
+        assert logger.level == logging.INFO
+
+    def test_default_stream_writes_to_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Default stream handler writes log output to stderr."""
+        configure_logging()
+        logger = logging.getLogger("q2lsp")
+
+        logger.info("stderr message")
+
+        captured = capsys.readouterr()
+        assert "stderr message" in captured.err
+        assert captured.out == ""
 
     def test_file_handler(self, tmp_path: Path) -> None:
         """Can configure logging to file."""
@@ -56,6 +110,16 @@ class TestConfigureLogging:
         configure_logging()
 
         assert len(logger.handlers) == initial_count
+
+    def test_removes_sentinel_handler(self) -> None:
+        """configure_logging removes previously attached handlers."""
+        logger = logging.getLogger("q2lsp")
+        sentinel = logging.NullHandler()
+        logger.addHandler(sentinel)
+
+        configure_logging()
+
+        assert sentinel not in logger.handlers
 
 
 class TestGetLogger:
