@@ -241,6 +241,66 @@ class TestGetCompletionContext:
         ctx = get_completion_context(text, offset)
         assert ctx.mode == CompletionMode.ROOT
 
+    def test_command_after_and_separator(self) -> None:
+        """Commands after && should complete from root."""
+        text, offset = extract_cursor_offset(
+            text_with_cursor="true && qiime <CURSOR>"
+        )
+        ctx = get_completion_context(text, offset)
+        assert ctx.mode == CompletionMode.ROOT
+        assert ctx.token_index == 1
+        assert ctx.prefix == ""
+        assert ctx.current_token is None
+
+    def test_command_after_or_separator(self) -> None:
+        """Commands after || should preserve plugin-position context."""
+        text, offset = extract_cursor_offset(
+            text_with_cursor="false || qiime info <CURSOR>"
+        )
+        ctx = get_completion_context(text, offset)
+        assert ctx.mode == CompletionMode.PLUGIN
+        assert ctx.token_index == 2
+        assert ctx.prefix == ""
+        assert ctx.current_token is None
+        assert ctx.command is not None
+        assert [token.text for token in ctx.command.tokens] == ["qiime", "info"]
+
+    def test_command_after_newline(self) -> None:
+        """Commands after newline should complete from root."""
+        text, offset = extract_cursor_offset(
+            text_with_cursor="echo hi\nqiime <CURSOR>"
+        )
+        ctx = get_completion_context(text, offset)
+        assert ctx.mode == CompletionMode.ROOT
+        assert ctx.token_index == 1
+        assert ctx.prefix == ""
+        assert ctx.current_token is None
+
+    def test_quoted_separator_does_not_start_command(self) -> None:
+        """Separators inside quotes should not affect qiime command detection."""
+        text, offset = extract_cursor_offset(
+            text_with_cursor="echo '; qiime'; qiime <CURSOR>"
+        )
+        ctx = get_completion_context(text, offset)
+        assert ctx.mode == CompletionMode.ROOT
+        assert ctx.token_index == 1
+        assert ctx.prefix == ""
+        assert ctx.current_token is None
+
+    def test_negative_offset_uses_start_of_document(self) -> None:
+        """Negative offsets currently resolve like the start of the document."""
+        ctx = get_completion_context("qiime ", -1)
+        assert ctx.mode == CompletionMode.NONE
+        assert ctx.token_index == 0
+
+    def test_offset_past_end_uses_end_of_document(self) -> None:
+        """Offsets past the document currently resolve like the document end."""
+        ctx = get_completion_context("qiime ", 999)
+        assert ctx.mode == CompletionMode.ROOT
+        assert ctx.token_index == 1
+        assert ctx.prefix == ""
+        assert ctx.current_token is None
+
     def test_multiple_parameters(self) -> None:
         """Multiple parameters should all be in PARAMETER mode."""
         text, offset = extract_cursor_offset(

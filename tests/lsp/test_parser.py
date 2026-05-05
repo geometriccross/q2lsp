@@ -86,6 +86,14 @@ class TestTokenizeShellLine:
         assert tokens[0].start == 10
         assert tokens[0].end == 15
 
+    def test_tabs_and_spaces(self) -> None:
+        tokens = tokenize_shell_line("\tqiime\t info  --help", 0)
+        assert [(token.text, token.start, token.end) for token in tokens] == [
+            ("qiime", 1, 6),
+            ("info", 8, 12),
+            ("--help", 14, 20),
+        ]
+
 
 class TestFindQiimeCommands:
     def test_simple_qiime_command(self) -> None:
@@ -118,6 +126,30 @@ class TestFindQiimeCommands:
         cmds = find_qiime_commands("qiime info; qiime tools")
         assert len(cmds) == 2
 
+    def test_separator_case_preserves_full_token_text_and_spans(self) -> None:
+        cmds = find_qiime_commands("echo hi; qiime info --help")
+        assert len(cmds) == 1
+        assert [(token.text, token.start, token.end) for token in cmds[0].tokens] == [
+            ("qiime", 9, 14),
+            ("info", 15, 19),
+            ("--help", 20, 26),
+        ]
+
+    def test_newline_separated_qiime_command(self) -> None:
+        cmds = find_qiime_commands("echo hi\nqiime info")
+        assert len(cmds) == 1
+        assert cmds[0].start == 8
+
+    def test_separators_inside_double_quotes_are_not_split(self) -> None:
+        cmds = find_qiime_commands('qiime tools import --input-path "a;b|c&&d||e"')
+        assert len(cmds) == 1
+        assert cmds[0].tokens[-1].text == "a;b|c&&d||e"
+
+    def test_escaped_separators_are_not_split(self) -> None:
+        cmds = find_qiime_commands(r"qiime tools import --input-path a\;b\|c")
+        assert len(cmds) == 1
+        assert cmds[0].tokens[-1].text == "a;b|c"
+
     def test_non_first_token_qiime(self) -> None:
         # "sudo qiime" should NOT be detected (first token must be "qiime")
         cmds = find_qiime_commands("sudo qiime info")
@@ -139,6 +171,18 @@ class TestCommandAtPosition:
         cmds = find_qiime_commands("echo hi; qiime info")
         cmd = command_at_position(cmds, 3)  # In "echo"
         assert cmd is None
+
+    def test_cursor_at_exclusive_command_end_is_outside_command(self) -> None:
+        cmds = find_qiime_commands("qiime info")
+        assert command_at_position(cmds, len("qiime info")) is None
+
+    def test_cursor_on_separator_is_outside_command(self) -> None:
+        cmds = find_qiime_commands("qiime info; echo hi")
+        assert command_at_position(cmds, len("qiime info")) is None
+
+    def test_cursor_just_after_command_before_separator_is_inside_command(self) -> None:
+        cmds = find_qiime_commands("qiime info ; echo hi")
+        assert command_at_position(cmds, len("qiime info")) is not None
 
 
 class TestGetCompletionContext:

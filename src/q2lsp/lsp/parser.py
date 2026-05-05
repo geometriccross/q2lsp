@@ -243,10 +243,10 @@ def command_at_position(
         offset: Position in the original text.
 
     Returns:
-        The ParsedCommand containing the offset, or None if not in any command.
+    The ParsedCommand containing the offset, or None if not in any command.
     """
     for cmd in commands:
-        if cmd.start <= offset <= cmd.end:
+        if cmd.start <= offset < cmd.end:
             return cmd
     return None
 
