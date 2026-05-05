@@ -11,7 +11,12 @@ from tests.helpers.completions import (
 )
 
 from q2lsp.core.types import CompletionItem
-from q2lsp.lsp.diagnostics.codes import UNKNOWN_ACTION
+from q2lsp.lsp.diagnostics.codes import (
+    MISSING_REQUIRED_OPTION,
+    UNKNOWN_ACTION,
+    UNKNOWN_OPTION,
+    UNKNOWN_SUBCOMMAND,
+)
 from q2lsp.lsp.diagnostics.validator import validate_command_with_catalog
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
 from q2lsp.qiime.catalog import QiimeCatalog
@@ -39,6 +44,11 @@ def _build_parsed_command(token_texts: list[str]) -> ParsedCommand:
 
     end_offset = tokens[-1].end if tokens else 0
     return ParsedCommand(tokens=tokens, start=0, end=end_offset)
+
+
+def _issue_codes(token_texts: list[str], catalog: QiimeCatalog) -> list[str]:
+    command = _build_parsed_command(token_texts)
+    return [issue.code for issue in validate_command_with_catalog(command, catalog)]
 
 
 @pytest.fixture
@@ -145,6 +155,14 @@ class TestCompletionsDiagnosticsConsistency:
 
         assert completion_labels == diagnostic_labels
 
+        catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
+        for option_label in completion_labels:
+            issue_codes = _issue_codes(
+                ["qiime", "diversity", "core-metrics", option_label, "value"],
+                catalog,
+            )
+            assert UNKNOWN_OPTION not in issue_codes
+
     def test_required_options_match_between_features(
         self, shared_hierarchy: CommandHierarchy
     ) -> None:
@@ -166,6 +184,41 @@ class TestCompletionsDiagnosticsConsistency:
         required_from_diagnostics = set(get_required_option_labels(action_node))
 
         assert required_from_completions == required_from_diagnostics
+
+        catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
+        missing_metadata_codes = _issue_codes(
+            [
+                "qiime",
+                "diversity",
+                "core-metrics",
+                "--i-table",
+                "x",
+                "--i-phylogeny",
+                "y",
+                "--p-sampling-depth",
+                "100",
+            ],
+            catalog,
+        )
+        complete_codes = _issue_codes(
+            [
+                "qiime",
+                "diversity",
+                "core-metrics",
+                "--i-table",
+                "x",
+                "--i-phylogeny",
+                "y",
+                "--p-sampling-depth",
+                "100",
+                "--m-metadata",
+                "m",
+            ],
+            catalog,
+        )
+
+        assert MISSING_REQUIRED_OPTION in missing_metadata_codes
+        assert MISSING_REQUIRED_OPTION not in complete_codes
 
     def test_plugin_names_match_between_features(
         self, shared_hierarchy: CommandHierarchy
@@ -208,6 +261,21 @@ class TestCompletionsDiagnosticsConsistency:
 
         assert unknown_action_name not in completion_action_names
         assert len(unknown_action_issues) == 1
+
+    def test_builtin_subcommand_names_match_between_features(
+        self, shared_hierarchy: CommandHierarchy
+    ) -> None:
+        """Builtin subcommands from completions are accepted by diagnostics."""
+        root_node = shared_hierarchy["qiime"]
+        catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
+
+        completion_subcommands = _labels(complete_plugin(root_node, "tools", ""))
+        valid_codes = _issue_codes(["qiime", "tools", "import"], catalog)
+        unknown_codes = _issue_codes(["qiime", "tools", "not-a-real-tool"], catalog)
+
+        assert "import" in completion_subcommands
+        assert UNKNOWN_SUBCOMMAND not in valid_codes
+        assert UNKNOWN_SUBCOMMAND in unknown_codes
 
     def test_valid_command_has_no_diagnostics_and_has_completions(
         self, shared_hierarchy: CommandHierarchy

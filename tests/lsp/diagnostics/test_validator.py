@@ -234,7 +234,7 @@ class TestValidateCommand:
         assert len(issues) == 1
         assert "feat-tabel" in issues[0].message
 
-    def test_prefix_no_issue(self, hierarchy_with_plugins_and_builtins: dict) -> None:
+    def test_prefix_emits_issue(self, hierarchy_with_plugins_and_builtins: dict) -> None:
         # If token is a prefix, issue should be raised (no longer suppressing prefix matches)
         tokens = [
             TokenSpan("qiime", 0, 5),
@@ -250,7 +250,7 @@ class TestValidateCommand:
         assert "Did you mean" in issues[0].message
         assert "Did you mean" in issues[1].message
 
-    def test_case_insensitive_prefix_no_issue(
+    def test_case_insensitive_prefix_emits_issue(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:
         # Case-insensitive prefix matching should now emit issues (no longer suppressing)
@@ -429,7 +429,7 @@ class TestValidateOptions:
         assert issues[0].start == 30
         assert issues[0].end == 39
 
-    def test_option_prefix_suppresses_issue(
+    def test_option_prefix_emits_issue(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:
         # Test: qiime feature-table summarize --i-ta
@@ -612,6 +612,99 @@ class TestValidateRequiredOptions:
         issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
 
         assert issues == []
+
+    def test_required_non_boolean_option_name_without_value_counts_as_present(
+        self, hierarchy_with_plugins_and_builtins: dict
+    ) -> None:
+        """Current validation is presence-based and does not require option values."""
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--i-table", 30, 39),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=39)
+        issues = validate_command_with_hierarchy(cmd, hierarchy_with_plugins_and_builtins)
+
+        assert issues == []
+
+    def test_legacy_dict_signature_valid_option_no_diagnostic(self) -> None:
+        hierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "builtins": [],
+                "feature-table": {
+                    "name": "feature-table",
+                    "summarize": {
+                        "name": "summarize",
+                        "signature": {
+                            "inputs": [{"name": "table", "type": "input"}],
+                            "parameters": [
+                                {
+                                    "name": "sample_axis",
+                                    "type": "parameter",
+                                    "default": "sample",
+                                }
+                            ],
+                        },
+                    },
+                },
+            }
+        }
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--i-table", 30, 39),
+            TokenSpan("table.qza", 40, 49),
+            TokenSpan("--p-sample-axis", 50, 65),
+            TokenSpan("sample", 66, 72),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=72)
+        issues = validate_command_with_hierarchy(cmd, hierarchy)
+
+        assert issues == []
+
+    def test_legacy_dict_signature_missing_required_option_diagnostic(self) -> None:
+        hierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "builtins": [],
+                "feature-table": {
+                    "name": "feature-table",
+                    "summarize": {
+                        "name": "summarize",
+                        "signature": {
+                            "inputs": [{"name": "table", "type": "input"}],
+                            "parameters": [
+                                {
+                                    "name": "sample_axis",
+                                    "type": "parameter",
+                                    "default": "sample",
+                                }
+                            ],
+                        },
+                    },
+                },
+            }
+        }
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("feature-table", 6, 19),
+            TokenSpan("summarize", 20, 29),
+            TokenSpan("--p-sample-axis", 30, 45),
+            TokenSpan("sample", 46, 52),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=52)
+        issues = validate_command_with_hierarchy(cmd, hierarchy)
+
+        missing_required_issues = [
+            issue
+            for issue in issues
+            if issue.code == "q2lsp-dni/missing-required-option"
+        ]
+        assert len(missing_required_issues) == 1
+        assert "--i-table" in missing_required_issues[0].message
 
     def test_unknown_option_with_same_param_name_suppresses_missing_required(
         self, hierarchy_with_plugins_and_builtins: dict

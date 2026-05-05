@@ -8,6 +8,9 @@ import sys
 import pytest
 
 
+IMPORT_TIMEOUT_SECONDS = 10
+
+
 @pytest.mark.parametrize(
     ("first_module", "second_module"),
     [
@@ -29,6 +32,8 @@ def test_diagnostics_submodules_cold_import_without_circular_dependencies(
         [
             "import importlib",
             "importlib.import_module('q2lsp.lsp.diagnostics.diagnostic_issue')",
+            "from q2lsp.lsp.diagnostics import "
+            "DebounceManager, DiagnosticIssue, validate_command_with_catalog",
             f"importlib.import_module('{first_module}')",
             f"importlib.import_module('{second_module}')",
             "importlib.import_module('q2lsp.lsp.diagnostics.matching')",
@@ -40,6 +45,7 @@ def test_diagnostics_submodules_cold_import_without_circular_dependencies(
         capture_output=True,
         check=False,
         text=True,
+        timeout=IMPORT_TIMEOUT_SECONDS,
     )
 
     assert result.returncode == 0, result.stderr
@@ -48,8 +54,8 @@ def test_diagnostics_submodules_cold_import_without_circular_dependencies(
 def test_diagnostics_public_api_all_is_pinned() -> None:
     from q2lsp.lsp import diagnostics
 
-    assert set(diagnostics.__all__) == {
+    assert diagnostics.__all__ == [
         "DebounceManager",
         "DiagnosticIssue",
         "validate_command_with_catalog",
-    }
+    ]
