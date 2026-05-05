@@ -212,9 +212,9 @@ def _sanitize_help_text(text: str) -> str:
     Returns:
         Sanitized help text safe for LSP hover display.
     """
-    # Remove ANSI escape sequences
-    # Matches: ESC[ followed by any characters until m or K
-    ansi_pattern = re.compile(r"\x1b\[[0-9;]*[mK]")
+    # Remove CSI escape sequences such as colors, line clears, cursor moves,
+    # and private-mode toggles.
+    ansi_pattern = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
     text = ansi_pattern.sub("", text)
 
     # Remove CRLF (normalize to LF)

@@ -16,6 +16,16 @@ from q2lsp.qiime.types import JsonObject
 
 
 class TestQ2CliGatewayPublicSurface:
+    def test_all_exposes_only_owned_public_api(self) -> None:
+        assert set(q2cli_gateway.__all__) == {
+            "build_qiime_catalog",
+            "build_qiime_hierarchy",
+            "create_qiime_help_provider",
+        }
+        assert "RootCommand" not in q2cli_gateway.__all__
+        assert "PluginCommand" not in q2cli_gateway.__all__
+        assert "click" not in q2cli_gateway.__all__
+
     def test_legacy_root_taking_helpers_are_not_public(self) -> None:
         assert not hasattr(q2cli_gateway, "build_command_hierarchy")
         assert not hasattr(q2cli_gateway, "command_hierarchy_json")
@@ -124,41 +134,16 @@ class TestCreateQiimeHelpProvider:
     def test_provider_returns_help_for_subcommand(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Provider returns help text for subcommand with correct Usage path."""
+        """Provider works with Click's default help generation."""
 
-        # Create mock subcommand that respects parent context
-        class MockSubcommand(click.Command):
-            name = "info"
-            help_text = "Display information about current deployment"
-            short_help = "Display deployment info"
-
-            def get_help(self, ctx: click.Context) -> str:
-                # Build usage from context chain
-                usage_parts = []
-                c = ctx
-                while c is not None:
-                    if c.info_name:
-                        usage_parts.append(c.info_name)
-                    c = c.parent
-                usage = " ".join(reversed(usage_parts)) if usage_parts else "info"
-                return f"Usage: {usage} [OPTIONS]\n\n  Display information about current deployment.\n\nOptions:\n  --help  Show this message and exit.\n"
-
-        # Create mock root command with MultiCommand behavior
-        class MockRootCommand(click.MultiCommand):
-            name = "qiime"
-            help_text = "QIIME 2 CLI"
-            short_help = "QIIME 2"
-
-            def get_command(
-                self, ctx: click.Context, cmd_name: str
-            ) -> click.Command | None:
-                if cmd_name == "info":
-                    return MockSubcommand(name=cmd_name)
-                return None
+        root = click.Group("qiime", help="QIIME 2 CLI")
+        root.add_command(
+            click.Command("info", help="Display information about current deployment")
+        )
 
         monkeypatch.setattr(
             "q2lsp.qiime.q2cli_gateway._get_root_command",
-            lambda: MockRootCommand(name="qiime"),
+            lambda: root,
         )
 
         provider = create_qiime_help_provider(max_content_width=80, color=False)
@@ -169,6 +154,36 @@ class TestCreateQiimeHelpProvider:
         # Verify proper command path formatting with parent context
         assert "Usage: qiime info" in help_text
         assert "Display information about current deployment" in help_text
+
+    def test_provider_returns_none_for_leaf_followed_by_extra_component(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = click.Group("qiime")
+        root.add_command(click.Command("info"))
+        monkeypatch.setattr(
+            "q2lsp.qiime.q2cli_gateway._get_root_command",
+            lambda: root,
+        )
+
+        provider = create_qiime_help_provider(max_content_width=80, color=False)
+
+        assert provider(["info", "extra"]) is None
+
+    def test_provider_returns_none_for_unknown_nested_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tools = click.Group("tools")
+        tools.add_command(click.Command("export"))
+        root = click.Group("qiime")
+        root.add_command(tools)
+        monkeypatch.setattr(
+            "q2lsp.qiime.q2cli_gateway._get_root_command",
+            lambda: root,
+        )
+
+        provider = create_qiime_help_provider(max_content_width=80, color=False)
+
+        assert provider(["tools", "missing"]) is None
 
     def test_provider_returns_none_for_invalid_path(
         self, monkeypatch: pytest.MonkeyPatch
@@ -381,6 +396,29 @@ class TestCreateQiimeHelpProvider:
         assert "Usage:" in help_text
         assert "\x1b[31m" not in help_text
         assert "\x1b[0m" not in help_text
+
+    def test_provider_sanitizes_common_csi_escape_variants(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Provider removes non-color CSI sequences from help text."""
+
+        class MockRootCommand(click.Command):
+            name = "qiime"
+            help_text = "QIIME 2 CLI"
+            short_help = "QIIME 2"
+
+            def get_help(self, ctx: click.Context) -> str:
+                return "\x1b[?25l\x1b[2JUsage:\x1b[1A qiime [OPTIONS]\x1b[?25h\n"
+
+        monkeypatch.setattr(
+            "q2lsp.qiime.q2cli_gateway._get_root_command",
+            lambda: MockRootCommand(name="qiime"),
+        )
+
+        provider = create_qiime_help_provider(max_content_width=80, color=False)
+        help_text = provider([])
+
+        assert help_text == "Usage: qiime [OPTIONS]\n"
 
     def test_provider_sanitizes_control_characters(
         self, monkeypatch: pytest.MonkeyPatch
