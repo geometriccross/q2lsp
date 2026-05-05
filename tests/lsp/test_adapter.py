@@ -143,6 +143,17 @@ class TestPositionToOffset:
         offset = position_to_offset(doc, pos)
         assert offset == 3
 
+    def test_position_to_offset_handles_utf16_emoji_via_offset_mapper(self) -> None:
+        """Position(0,3) on "a😀b" -> offset 2 in Python code points."""
+        doc = TextDocument(
+            uri="file:///test.txt",
+            source="a😀b",
+            language_id="shell",
+            version=1,
+        )
+
+        assert position_to_offset(doc, types.Position(line=0, character=3)) == 2
+
 
 class TestOffsetToPosition:
     """Tests for offset_to_position function."""
@@ -170,6 +181,19 @@ class TestOffsetToPosition:
         assert offset_to_position(doc, 3) == types.Position(line=0, character=3)
         assert offset_to_position(doc, 4) == types.Position(line=1, character=0)
 
+    def test_offset_to_position_handles_crlf_boundary_offsets(self) -> None:
+        """CRLF boundary offsets map to previous EOL until after LF."""
+        doc = TextDocument(
+            uri="file:///test.txt",
+            source="abc\r\ndef",
+            language_id="shell",
+            version=1,
+        )
+
+        assert offset_to_position(doc, 3) == types.Position(line=0, character=3)
+        assert offset_to_position(doc, 4) == types.Position(line=0, character=3)
+        assert offset_to_position(doc, 5) == types.Position(line=1, character=0)
+
 
 class TestCompletionKindToLsp:
     """Tests for completion_kind_to_lsp function."""
@@ -193,6 +217,10 @@ class TestCompletionKindToLsp:
         """CompletionKind.BUILTIN -> CompletionItemKind.Class."""
         kind = completion_kind_to_lsp(CompletionKind.BUILTIN)
         assert kind == types.CompletionItemKind.Class
+
+    def test_unknown_maps_to_text(self) -> None:
+        """Unknown completion kinds fall back to plain text."""
+        assert completion_kind_to_lsp("unknown") == types.CompletionItemKind.Text
 
 
 class TestToLspCompletionItem:
@@ -249,6 +277,54 @@ class TestToLspCompletionItem:
         assert lsp_item.text_edit.range.start == types.Position(line=0, character=3)
         assert lsp_item.text_edit.range.end == types.Position(line=0, character=5)
 
+    def test_empty_prefix_does_not_emit_text_edit(self) -> None:
+        """No prefix means normal insert behavior, not a replacement edit."""
+        item = InternalCompletionItem(
+            label="feature-table",
+            detail="test detail",
+            kind=CompletionKind.PLUGIN,
+        )
+
+        lsp_item = to_lsp_completion_item(
+            item, position=types.Position(line=0, character=6), prefix=""
+        )
+
+        assert lsp_item.text_edit is None
+
+    def test_text_edit_start_clamps_to_line_start(self) -> None:
+        """Prefix longer than the position clamps replacement start to 0."""
+        item = InternalCompletionItem(
+            label="qiime",
+            detail="test detail",
+            kind=CompletionKind.BUILTIN,
+        )
+
+        lsp_item = to_lsp_completion_item(
+            item, position=types.Position(line=0, character=2), prefix="qiime"
+        )
+
+        assert lsp_item.text_edit is not None
+        assert isinstance(lsp_item.text_edit, types.TextEdit)
+        assert lsp_item.text_edit.range.start == types.Position(line=0, character=0)
+        assert lsp_item.text_edit.range.end == types.Position(line=0, character=2)
+
+    def test_text_edit_uses_insert_text_as_new_text(self) -> None:
+        """Replacement edit inserts insert_text when it differs from the label."""
+        item = InternalCompletionItem(
+            label="sample_metadata",
+            detail="test detail",
+            kind=CompletionKind.PARAMETER,
+            insert_text="--m-sample-metadata-file",
+        )
+
+        lsp_item = to_lsp_completion_item(
+            item, position=types.Position(line=0, character=4), prefix="--m-"
+        )
+
+        assert lsp_item.text_edit is not None
+        assert isinstance(lsp_item.text_edit, types.TextEdit)
+        assert lsp_item.text_edit.new_text == "--m-sample-metadata-file"
+
     def test_text_edit_start_after_non_bmp_before_ascii_prefix(self) -> None:
         """Prefix replacement uses UTF-16 position units after earlier emoji."""
         item = InternalCompletionItem(
@@ -265,3 +341,20 @@ class TestToLspCompletionItem:
         assert isinstance(lsp_item.text_edit, types.TextEdit)
         assert lsp_item.text_edit.range.start == types.Position(line=0, character=2)
         assert lsp_item.text_edit.range.end == types.Position(line=0, character=4)
+
+    def test_text_edit_prefix_is_ascii_cli_token_text(self) -> None:
+        """QIIME CLI prefixes are ASCII tokens; non-BMP prefix math is out of scope."""
+        item = InternalCompletionItem(
+            label="feature-table",
+            detail="test detail",
+            kind=CompletionKind.PLUGIN,
+        )
+
+        lsp_item = to_lsp_completion_item(
+            item, position=types.Position(line=0, character=9), prefix="fea"
+        )
+
+        assert lsp_item.text_edit is not None
+        assert isinstance(lsp_item.text_edit, types.TextEdit)
+        assert lsp_item.text_edit.range.start == types.Position(line=0, character=6)
+        assert lsp_item.text_edit.range.end == types.Position(line=0, character=9)

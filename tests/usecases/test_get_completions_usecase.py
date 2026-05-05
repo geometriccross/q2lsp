@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from q2lsp.core.types import CompletionKind
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
 from q2lsp.usecases.get_completions_usecase import (
@@ -65,36 +66,82 @@ def test_usecase_connects_adapter_and_core_engine() -> None:
 
 
 @pytest.mark.parametrize(
-    "completion_request",
+    ("completion_request", "expected_labels"),
     [
-        CompletionRequest(
-            mode="root",
-            prefix="",
-            command_tokens=("qiime",),
+        (
+            CompletionRequest(
+                mode="root",
+                prefix="",
+                command_tokens=("qiime",),
+            ),
+            ["info", "feature-table"],
         ),
-        CompletionRequest(
-            mode="root",
-            prefix="i",
-            command_tokens=("qiime",),
+        (
+            CompletionRequest(
+                mode="root",
+                prefix="i",
+                command_tokens=("qiime",),
+            ),
+            ["info"],
         ),
-        CompletionRequest(
-            mode="plugin",
-            prefix="",
-            command_tokens=("qiime", "feature-table"),
+        (
+            CompletionRequest(
+                mode="plugin",
+                prefix="",
+                command_tokens=("qiime", "feature-table"),
+            ),
+            ["summarize"],
         ),
-        CompletionRequest(
-            mode="parameter",
-            prefix="--",
-            command_tokens=("qiime", "feature-table", "summarize", "--i-table"),
+        (
+            CompletionRequest(
+                mode="parameter",
+                prefix="--",
+                command_tokens=("qiime", "feature-table", "summarize", "--i-table"),
+            ),
+            ["--o-output-dir", "--help"],
         ),
-        CompletionRequest(
-            mode="parameter",
-            prefix="table",
-            command_tokens=("qiime", "feature-table", "summarize"),
+        (
+            CompletionRequest(
+                mode="parameter",
+                prefix="table",
+                command_tokens=("qiime", "feature-table", "summarize"),
+            ),
+            ["--i-table"],
         ),
     ],
 )
 def test_catalog_backed_completions_match_baseline(
+    completion_hierarchy: CommandHierarchy,
+    completion_request: CompletionRequest,
+    expected_labels: list[str],
+) -> None:
+    items = get_completions(
+        completion_request,
+        QiimeCatalog.from_hierarchy(completion_hierarchy),
+    )
+
+    assert [item.label for item in items] == expected_labels
+
+
+@pytest.mark.parametrize(
+    "completion_request",
+    [
+        CompletionRequest(mode="none", prefix="", command_tokens=("qiime",)),
+        CompletionRequest(mode="unknown", prefix="", command_tokens=("qiime",)),
+        CompletionRequest(mode="root", prefix="", command_tokens=()),
+        CompletionRequest(
+            mode="plugin",
+            prefix="",
+            command_tokens=("qiime", "unknown-plugin"),
+        ),
+        CompletionRequest(
+            mode="parameter",
+            prefix="",
+            command_tokens=("qiime", "feature-table", "unknown-action"),
+        ),
+    ],
+)
+def test_usecase_boundary_requests_return_no_completions(
     completion_hierarchy: CommandHierarchy,
     completion_request: CompletionRequest,
 ) -> None:
@@ -103,7 +150,24 @@ def test_catalog_backed_completions_match_baseline(
         QiimeCatalog.from_hierarchy(completion_hierarchy),
     )
 
-    assert items
+    assert items == []
+
+
+def test_usecase_preserves_completion_kind_and_detail(
+    completion_hierarchy: CommandHierarchy,
+) -> None:
+    items = get_completions(
+        CompletionRequest(
+            mode="root",
+            prefix="feature",
+            command_tokens=("qiime",),
+        ),
+        QiimeCatalog.from_hierarchy(completion_hierarchy),
+    )
+
+    assert [(item.label, item.detail, item.kind) for item in items] == [
+        ("feature-table", "Feature table operations", CompletionKind.PLUGIN),
+    ]
 
 
 @pytest.mark.parametrize(
