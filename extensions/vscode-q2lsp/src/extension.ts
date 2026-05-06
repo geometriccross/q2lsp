@@ -31,6 +31,7 @@ import {
 	resolveQiimeRunTerminal,
 	toQiimeRunCommandPayload,
 } from './runCommand';
+import { openSetupWizard } from './setupWizard';
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
@@ -61,6 +62,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('q2lsp.diagnoseEnvironment', async () => {
 			await diagnoseEnvironment(context);
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('q2lsp.openSetupWizard', async () => {
+			const activeDocument = vscode.window.activeTextEditor?.document;
+			const { interpreterPath: normalizedInterpreter } = resolveQ2lspConfig(activeDocument);
+			const pythonExtensionInterpreter = normalizedInterpreter ? undefined : await resolvePythonExtensionInterpreter();
+			openSetupWizard({
+				context,
+				outputChannel,
+				interpreterPath: normalizedInterpreter ?? pythonExtensionInterpreter,
+			});
 		})
 	);
 

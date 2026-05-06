@@ -38,6 +38,11 @@
         "category": "q2lsp"
       },
       {
+        "command": "q2lsp.openSetupWizard",
+        "title": "Open Setup Wizard",
+        "category": "q2lsp"
+      },
+      {
         "command": "q2lsp.runCommand",
         "title": "Run QIIME Command",
         "category": "q2lsp"

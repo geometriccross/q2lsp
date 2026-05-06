@@ -144,7 +144,7 @@ const handleRepairSelection = async (params: {
 	}
 };
 
-const confirmAndInstallQ2lsp = async (
+export const confirmAndInstallQ2lsp = async (
 	interpreterPath: string,
 	outputChannel: vscode.OutputChannel | undefined
 ): Promise<void> => {
@@ -194,7 +194,7 @@ const checkPipAvailable = async (
 	});
 };
 
-const selectPythonInterpreter = async (): Promise<void> => {
+export const selectPythonInterpreter = async (): Promise<void> => {
 	const pythonExtension = vscode.extensions.getExtension('ms-python.python');
 	if (!pythonExtension) {
 		vscode.window.showErrorMessage('Install the VS Code Python extension to select a Python interpreter.');
