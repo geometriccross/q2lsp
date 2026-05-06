@@ -172,6 +172,57 @@ def create_server(
             items=lsp_items,
         )
 
+    def _empty_code_lens_list() -> list[types.CodeLens]:
+        return []
+
+    @server.feature(
+        types.TEXT_DOCUMENT_CODE_LENS,
+        types.CodeLensOptions(resolve_provider=False),
+    )
+    @wrap_handler(
+        logger=logger,
+        feature_name="textDocument/codeLens",
+        default_factory=_empty_code_lens_list,
+    )
+    def code_lens(params: types.CodeLensParams) -> list[types.CodeLens]:
+        """Handle textDocument/codeLens requests for runnable QIIME commands."""
+        logger.debug("CodeLens request for %s", params.text_document.uri)
+
+        document = server.workspace.get_text_document(params.text_document.uri)
+        doc = analyze_document(document.source)
+
+        code_lenses: list[types.CodeLens] = []
+        for command in doc.commands:
+            qiime_token = command.tokens[0]
+            original_start = to_original_offset(doc, qiime_token.start)
+            original_end = to_original_offset(doc, qiime_token.end)
+            command_start = to_original_offset(doc, command.start)
+            command_end = to_original_offset(doc, command.end)
+            code_lenses.append(
+                types.CodeLens(
+                    range=types.Range(
+                        start=_offset_to_position(document, original_start),
+                        end=_offset_to_position(document, original_end),
+                    ),
+                    command=types.Command(
+                        title="Run QIIME command",
+                        command="q2lsp.runCommand",
+                        arguments=[
+                            {
+                                "uri": params.text_document.uri,
+                                "commandText": document.source[
+                                    command_start:command_end
+                                ],
+                                "tokens": [token.text for token in command.tokens],
+                            }
+                        ],
+                    ),
+                )
+            )
+
+        logger.debug("Returning %d CodeLens items", len(code_lenses))
+        return code_lenses
+
     def _default_hover() -> types.Hover | None:
         return None
 

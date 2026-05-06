@@ -25,6 +25,12 @@ import {
 	showDiagnoseMessage,
 	showValidationError,
 } from './diagnosis';
+import {
+	executeQiimeRunCommand,
+	formatQiimeRunCommandTokens,
+	resolveQiimeRunTerminal,
+	toQiimeRunCommandPayload,
+} from './runCommand';
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
@@ -55,6 +61,27 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('q2lsp.diagnoseEnvironment', async () => {
 			await diagnoseEnvironment(context);
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('q2lsp.runCommand', (payload: unknown) => {
+			const commandPayload = toQiimeRunCommandPayload(payload);
+			if (!commandPayload) {
+				vscode.window.showErrorMessage('q2lsp.runCommand received an invalid command payload.');
+				return;
+			}
+
+			outputChannel?.appendLine(
+				`QIIME command tokens from ${commandPayload.uri}: ${formatQiimeRunCommandTokens(commandPayload)}`
+			);
+			const terminal = resolveQiimeRunTerminal(
+				vscode.window.activeTerminal,
+				vscode.window.terminals,
+				() => vscode.window.createTerminal('q2lsp')
+			);
+			executeQiimeRunCommand(commandPayload, terminal);
+			outputChannel?.show(true);
 		})
 	);
 

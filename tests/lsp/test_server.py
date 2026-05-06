@@ -33,6 +33,55 @@ class TestCreateServer:
         fm = server.protocol.fm
         assert types.TEXT_DOCUMENT_COMPLETION in fm.features
 
+    def test_registers_code_lens_feature(
+        self, mock_hierarchy: CommandHierarchy
+    ) -> None:
+        """TEXT_DOCUMENT_CODE_LENS is registered."""
+        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+        fm = server.protocol.fm
+        assert types.TEXT_DOCUMENT_CODE_LENS in fm.features
+
+    def test_code_lens_returns_run_command_with_tokens_and_shell_text(
+        self, mock_hierarchy: CommandHierarchy, mocker
+    ) -> None:
+        """CodeLens carries tokens plus raw shell text for runtime expansion."""
+        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+
+        class MockDocument:
+            uri = "file:///test.sh"
+            source = 'qiime feature-table summarize --i-table "$TABLE"'
+            version = 1
+
+        mock_workspace = mocker.Mock()
+        mock_workspace.get_text_document.return_value = MockDocument()
+        server.protocol._workspace = mock_workspace
+
+        code_lens_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_CODE_LENS]
+        code_lenses = code_lens_handler(
+            types.CodeLensParams(
+                text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
+            )
+        )
+
+        assert len(code_lenses) == 1
+        code_lens = code_lenses[0]
+        assert code_lens.command is not None
+        assert code_lens.command.title == "Run QIIME command"
+        assert code_lens.command.command == "q2lsp.runCommand"
+        assert code_lens.command.arguments == [
+            {
+                "uri": "file:///test.sh",
+                "commandText": 'qiime feature-table summarize --i-table "$TABLE"',
+                "tokens": [
+                    "qiime",
+                    "feature-table",
+                    "summarize",
+                    "--i-table",
+                    "$TABLE",
+                ],
+            }
+        ]
+
     def test_completion_trigger_characters(
         self, mock_hierarchy: CommandHierarchy
     ) -> None:

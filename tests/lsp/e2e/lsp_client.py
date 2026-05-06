@@ -157,3 +157,12 @@ class LspTestClient:
                 "position": {"line": line, "character": character},
             },
         )
+
+    async def code_lens(self, *, uri: str) -> dict[str, Any]:
+        """Send textDocument/codeLens request."""
+        return await self.send_request(
+            method="textDocument/codeLens",
+            params={
+                "textDocument": {"uri": uri},
+            },
+        )

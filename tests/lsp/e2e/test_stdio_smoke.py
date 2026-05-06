@@ -113,3 +113,49 @@ class TestStdioE2E:
         assert response["result"]["items"] == []
 
         await lsp_client.shutdown_exit()
+
+    @pytest.mark.asyncio
+    async def test_code_lens_roundtrip_returns_run_command_tokens_and_shell_text(
+        self, lsp_client: LspTestClient
+    ) -> None:
+        """Server returns runnable CodeLens items with tokens and shell text."""
+        await lsp_client.initialize()
+
+        uri = "file:///run.sh"
+        await lsp_client.did_open(
+            uri=uri,
+            language_id="shellscript",
+            version=1,
+            text='qiime feature-table summarize --i-table "$TABLE"',
+        )
+
+        response = await lsp_client.code_lens(uri=uri)
+
+        assert "result" in response
+        assert response["result"] == [
+            {
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": 0, "character": 5},
+                },
+                "command": {
+                    "title": "Run QIIME command",
+                    "command": "q2lsp.runCommand",
+                    "arguments": [
+                        {
+                            "uri": uri,
+                            "commandText": 'qiime feature-table summarize --i-table "$TABLE"',
+                            "tokens": [
+                                "qiime",
+                                "feature-table",
+                                "summarize",
+                                "--i-table",
+                                "$TABLE",
+                            ],
+                        }
+                    ],
+                },
+            }
+        ]
+
+        await lsp_client.shutdown_exit()
