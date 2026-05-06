@@ -19,3 +19,5 @@ build
 sandbox.md
 temp.sh
 .DS_Store
+
+.context
