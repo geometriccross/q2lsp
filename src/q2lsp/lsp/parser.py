@@ -130,7 +130,7 @@ def find_qiime_commands(text: str) -> list[ParsedCommand]:
     Find all QIIME commands in the text.
 
     Splits on command separators (;, &&, ||, |, newline) outside quotes,
-    then looks for commands starting with "qiime".
+    then looks for "qiime" tokens and returns each command from "qiime" onward.
 
     Args:
         text: The full text to parse (already merged).
@@ -147,17 +147,25 @@ def find_qiime_commands(text: str) -> list[ParsedCommand]:
         segment = text[seg_start:seg_end]
         tokens = tokenize_shell_line(segment, seg_start)
 
-        # Check if first token is "qiime"
-        if tokens and tokens[0].text == "qiime":
+        qiime_token_index = _find_qiime_token_index(tokens)
+        if qiime_token_index is not None:
+            qiime_tokens = tokens[qiime_token_index:]
             commands.append(
                 ParsedCommand(
-                    tokens=tokens,
-                    start=tokens[0].start,
+                    tokens=qiime_tokens,
+                    start=qiime_tokens[0].start,
                     end=seg_end,
                 )
             )
 
     return commands
+
+
+def _find_qiime_token_index(tokens: list[TokenSpan]) -> int | None:
+    for index, token in enumerate(tokens):
+        if token.text == "qiime":
+            return index
+    return None
 
 
 def _split_commands(text: str) -> list[tuple[int, int]]:

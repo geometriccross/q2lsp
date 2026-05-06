@@ -150,10 +150,27 @@ class TestFindQiimeCommands:
         assert len(cmds) == 1
         assert cmds[0].tokens[-1].text == "a;b|c"
 
-    def test_non_first_token_qiime(self) -> None:
-        # "sudo qiime" should NOT be detected (first token must be "qiime")
-        cmds = find_qiime_commands("sudo qiime info")
-        assert len(cmds) == 0
+    def test_non_first_token_qiime_extracts_qiime_command_tokens(self) -> None:
+        cmds = find_qiime_commands("run_cmd qiime tools import --input-path input.qza")
+
+        assert len(cmds) == 1
+        assert [token.text for token in cmds[0].tokens] == [
+            "qiime",
+            "tools",
+            "import",
+            "--input-path",
+            "input.qza",
+        ]
+        assert cmds[0].start == len("run_cmd ")
+
+    def test_non_first_token_qiime_preserves_positions_after_prefix(self) -> None:
+        cmds = find_qiime_commands("wrapper --flag qiime info")
+
+        assert len(cmds) == 1
+        assert [(token.text, token.start, token.end) for token in cmds[0].tokens] == [
+            ("qiime", 15, 20),
+            ("info", 21, 25),
+        ]
 
     def test_groups_option_and_value_tokens(self) -> None:
         cmds = find_qiime_commands("qiime feature-table summarize --i-table table.qza")
@@ -290,6 +307,16 @@ class TestGetCompletionContext:
         text, offset = extract_cursor_offset(text_with_cursor="echo hel<CURSOR>lo")
         ctx = get_completion_context(text, offset)
         assert ctx.mode == CompletionMode.NONE
+
+    def test_mode_root_after_wrapped_qiime(self) -> None:
+        text, offset = extract_cursor_offset(
+            text_with_cursor="run_cmd qiime <CURSOR>"
+        )
+        ctx = get_completion_context(text, offset)
+        assert ctx.mode == CompletionMode.ROOT
+        assert ctx.token_index == 1
+        assert ctx.command is not None
+        assert [token.text for token in ctx.command.tokens] == ["qiime"]
 
     def test_mode_none_on_qiime_token(self) -> None:
         text, offset = extract_cursor_offset(text_with_cursor="qii<CURSOR>me info")
