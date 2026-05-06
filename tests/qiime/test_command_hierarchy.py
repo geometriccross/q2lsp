@@ -1,32 +1,34 @@
 from __future__ import annotations
 
-import json
 from typing import cast
 
-from q2cli.commands import RootCommand
+import pytest
 
-from q2lsp.qiime.command_hierarchy import (
-    build_command_hierarchy,
-    command_hierarchy_json,
-)
-from q2lsp.qiime.types import JsonObject
+from q2lsp.qiime.q2cli_gateway import build_qiime_hierarchy
+from q2lsp.qiime.types import CommandHierarchy, JsonObject
 
 
-def test_build_command_hierarchy_root_properties() -> None:
-    root = RootCommand()
-    hierarchy = build_command_hierarchy(root)
-    root_name = root.name or "qiime"
+@pytest.fixture(scope="module")
+def hierarchy() -> CommandHierarchy:
+    return build_qiime_hierarchy()
+
+
+def test_build_qiime_hierarchy_root_properties(hierarchy: CommandHierarchy) -> None:
+    root_name = "qiime"
 
     assert root_name in hierarchy
     root_entry = cast(JsonObject, hierarchy[root_name])
     assert root_entry["name"] == root_name
+    assert isinstance(root_entry["help"], str | None)
+    assert isinstance(root_entry["short_help"], str | None)
     assert isinstance(root_entry["builtins"], list)
+    assert all(isinstance(name, str) for name in root_entry["builtins"])
 
 
-def test_build_command_hierarchy_contains_plugin_action() -> None:
-    root = RootCommand()
-    hierarchy = build_command_hierarchy(root)
-    root_name = root.name or "qiime"
+def test_build_qiime_hierarchy_contains_plugin_action(
+    hierarchy: CommandHierarchy,
+) -> None:
+    root_name = "qiime"
     root_entry = cast(JsonObject, hierarchy[root_name])
 
     builtin_names = set(root_entry.get("builtins", [])) | {
@@ -60,6 +62,7 @@ def test_build_command_hierarchy_contains_plugin_action() -> None:
 
     assert action_entry is not None, "No action entry found in plugin"
 
+    assert isinstance(action_entry["id"], str)
     assert isinstance(action_entry["name"], str)
     assert isinstance(action_entry["type"], str)
     assert isinstance(action_entry["description"], str)
@@ -75,14 +78,17 @@ def test_build_command_hierarchy_contains_plugin_action() -> None:
         assert isinstance(param["type"], str)
 
 
-def test_build_command_hierarchy_contains_tools_subcommands() -> None:
-    root = RootCommand()
-    hierarchy = build_command_hierarchy(root)
-    root_name = root.name or "qiime"
+def test_build_qiime_hierarchy_contains_tools_subcommands(
+    hierarchy: CommandHierarchy,
+) -> None:
+    root_name = "qiime"
     root_entry = cast(JsonObject, hierarchy[root_name])
 
     assert "tools" in root_entry
     tools_entry = cast(JsonObject, root_entry["tools"])
+    assert tools_entry["name"] == "tools"
+    assert isinstance(tools_entry["help"], str | None)
+    assert isinstance(tools_entry["short_help"], str | None)
     assert tools_entry["type"] == "builtin"
 
     expected_subset = {"import", "export", "peek", "validate"}
@@ -97,6 +103,8 @@ def test_build_command_hierarchy_contains_tools_subcommands() -> None:
     action_entry = cast(JsonObject, tools_entry[action_name])
 
     assert isinstance(action_entry["name"], str)
+    assert isinstance(action_entry["help"], str | None)
+    assert isinstance(action_entry["short_help"], str | None)
     assert isinstance(action_entry["type"], str)
     assert action_entry["type"] == "builtin_action"
     assert isinstance(action_entry["signature"], list)
@@ -106,30 +114,20 @@ def test_build_command_hierarchy_contains_tools_subcommands() -> None:
         assert isinstance(param, dict)
         assert isinstance(param["name"], str)
         assert isinstance(param["type"], str)
+        assert isinstance(param["description"], str)
 
 
-def test_build_command_hierarchy_builtin_details() -> None:
-    root = RootCommand()
-    hierarchy = build_command_hierarchy(root)
-    root_name = root.name or "qiime"
+def test_build_qiime_hierarchy_builtin_details(hierarchy: CommandHierarchy) -> None:
+    root_name = "qiime"
     root_entry = cast(JsonObject, hierarchy[root_name])
 
-    # Assert that builtins list exists (existing assertion)
     assert isinstance(root_entry["builtins"], list)
 
-    # For each builtin command, assert the hierarchy has the required metadata
-    for builtin_name in root._builtin_commands.keys():
+    for builtin_name in root_entry["builtins"]:
+        assert isinstance(builtin_name, str)
         assert builtin_name in root_entry
         builtin_entry = cast(JsonObject, root_entry[builtin_name])
         assert builtin_entry["name"] == builtin_name
-        assert "help" in builtin_entry
-        assert "short_help" in builtin_entry
+        assert isinstance(builtin_entry["help"], str | None)
+        assert isinstance(builtin_entry["short_help"], str | None)
         assert builtin_entry["type"] == "builtin"
-
-
-def test_command_hierarchy_json_roundtrip() -> None:
-    root = RootCommand()
-    payload = command_hierarchy_json(root)
-    data = json.loads(payload)
-    root_name = root.name or "qiime"
-    assert root_name in data

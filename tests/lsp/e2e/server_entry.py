@@ -15,18 +15,45 @@ def _stub_hierarchy() -> CommandHierarchy:
     return {
         "qiime": {
             "builtins": ["info", "tools"],
-            "plugins": {
-                "feature-table": {
-                    "actions": {
-                        "summarize": {
-                            "signature": {
-                                "inputs": {"table": "FeatureTable"},
-                                "parameters": {"sample_metadata": "Metadata"},
-                                "outputs": {"visualization": "Visualization"},
-                            }
-                        }
-                    }
-                }
+            "info": {
+                "name": "info",
+                "type": "builtin",
+                "short_help": "Show QIIME 2 information.",
+            },
+            "tools": {
+                "name": "tools",
+                "type": "builtin",
+                "short_help": "Access QIIME 2 tools.",
+            },
+            "feature-table": {
+                "id": "feature-table",
+                "name": "feature-table",
+                "short_description": "Work with feature tables.",
+                "summarize": {
+                    "description": "Summarize a feature table.",
+                    "signature": [
+                        {
+                            "name": "table",
+                            "type": "FeatureTable",
+                            "description": "Feature table to summarize.",
+                            "signature_type": "input",
+                            "required": True,
+                        },
+                        {
+                            "name": "sample_metadata",
+                            "type": "Metadata",
+                            "description": "Sample metadata to summarize by.",
+                            "signature_type": "parameter",
+                        },
+                        {
+                            "name": "visualization",
+                            "type": "Visualization",
+                            "description": "Output visualization.",
+                            "signature_type": "output",
+                            "required": True,
+                        },
+                    ],
+                },
             },
         }
     }

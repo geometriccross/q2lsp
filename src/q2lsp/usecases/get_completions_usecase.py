@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from q2lsp.adapters.completion_adapter import to_completion_data, to_completion_query
+from q2lsp.adapters.completion_adapter import (
+    to_completion_data,
+    to_completion_query,
+)
 from q2lsp.core.completion_engine import get_completions as get_core_completions
 from q2lsp.core.types import CompletionItem
-from q2lsp.qiime.types import CommandHierarchy
+from q2lsp.qiime.catalog import QiimeCatalog
 
 
 class CompletionRequest(NamedTuple):
@@ -20,13 +23,13 @@ class CompletionRequest(NamedTuple):
 
 def get_completions(
     request: CompletionRequest,
-    hierarchy: CommandHierarchy,
+    catalog: QiimeCatalog,
 ) -> list[CompletionItem]:
-    """Return completion suggestions from boundary request and command hierarchy."""
+    """Return completion suggestions from boundary request and command catalog."""
     query = to_completion_query(
         mode=request.mode,
         prefix=request.prefix,
         command_tokens=request.command_tokens,
     )
-    data = to_completion_data(hierarchy)
+    data = to_completion_data(catalog)
     return get_core_completions(query, data)

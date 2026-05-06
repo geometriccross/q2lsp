@@ -57,6 +57,8 @@ def get_context_from_merged(
         CompletionContext with mode, command, current token, etc.
     """
     command = command_at_position(list(commands), merged_offset)
+    if command is None and merged_offset == len(merged_text) and merged_offset > 0:
+        command = command_at_position(list(commands), merged_offset - 1)
 
     if command is None:
         return CompletionContext(

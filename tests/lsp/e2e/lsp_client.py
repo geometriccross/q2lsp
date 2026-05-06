@@ -53,6 +53,7 @@ class LspTestClient:
         self._reader = reader
         self._writer = writer
         self._request_id = 0
+        self.notifications: list[dict[str, Any]] = []
 
     async def send_request(
         self,
@@ -70,8 +71,14 @@ class LspTestClient:
         if params is not None:
             request["params"] = params
 
+        request_id = self._request_id
+
         await write_lsp_message(self._writer, request)
-        return await read_lsp_message(self._reader)
+        while True:
+            message = await read_lsp_message(self._reader)
+            if message.get("id") == request_id:
+                return message
+            self.notifications.append(message)
 
     async def send_notification(
         self,
@@ -89,24 +96,30 @@ class LspTestClient:
 
         await write_lsp_message(self._writer, notification)
 
-    async def initialize(self, *, root_uri: str = "file:///test") -> dict[str, Any]:
+    async def initialize(
+        self,
+        *,
+        root_uri: str = "file:///test",
+        capabilities: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Send initialize request."""
         response = await self.send_request(
             method="initialize",
             params={
                 "processId": None,
                 "rootUri": root_uri,
-                "capabilities": {},
+                "capabilities": capabilities or {},
             },
         )
         # Send initialized notification
         await self.send_notification(method="initialized", params={})
         return response
 
-    async def shutdown_exit(self) -> None:
+    async def shutdown_exit(self) -> dict[str, Any]:
         """Send shutdown request and exit notification."""
-        await self.send_request(method="shutdown")
+        response = await self.send_request(method="shutdown")
         await self.send_notification(method="exit")
+        return response
 
     async def did_open(
         self,

@@ -1,21 +1,21 @@
 """Hover functionality for QIIME2 CLI commands.
 
-Provides hover help text based on cursor position and command hierarchy.
+Provides hover help text based on cursor position and catalog metadata.
 """
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from q2lsp.lsp.types import CompletionContext, TokenSpan
-from q2lsp.qiime.types import CommandHierarchy, JsonObject
+from q2lsp.qiime.catalog import QiimeCatalog
 
 
 def get_hover_help(
     context: CompletionContext,
     *,
-    hierarchy: CommandHierarchy | None = None,
     get_help: Callable[[list[str]], str | None] | None = None,
+    catalog: QiimeCatalog | None = None,
 ) -> str | None:
     """
     Get hover help text for the given completion context.
@@ -24,8 +24,8 @@ def get_hover_help(
 
     Args:
         context: Pre-resolved completion context from document analysis.
-        hierarchy: The QIIME2 command hierarchy (legacy, optional).
         get_help: Callback that takes command path and returns help text (preferred).
+        catalog: Catalog metadata for hover help (preferred after get_help).
 
     Returns:
         Plain text string with help text, or None if no help is available.
@@ -44,30 +44,15 @@ def get_hover_help(
             context.command.tokens, context.token_index, get_help
         )
 
-    # Legacy behavior: use hierarchy
-    if hierarchy is None:
-        return None
-
-    # Determine what to show based on token index
-    token_index = context.token_index
-
-    if token_index == 0:
-        # Hover on "qiime" - show root help
-        return _get_root_help(hierarchy)
-    elif token_index == 1:
-        # Hover on plugin/builtin name - show plugin help
-        plugin_name = context.current_token.text
-        return _get_plugin_help(hierarchy, plugin_name)
-    elif token_index == 2:
-        # Hover on action name - show action help
-        plugin_name = (
-            context.command.tokens[1].text if len(context.command.tokens) > 1 else ""
+    if catalog is not None:
+        return _get_help_via_catalog(
+            context.command.tokens,
+            context.current_token,
+            context.token_index,
+            catalog,
         )
-        action_name = context.current_token.text
-        return _get_action_help(hierarchy, plugin_name, action_name)
-    else:
-        # Hover on parameters or beyond - not implemented
-        return None
+
+    return None
 
 
 def _get_help_via_provider(
@@ -106,107 +91,17 @@ def _get_help_via_provider(
     return get_help(command_path)
 
 
-def _get_root_node(hierarchy: CommandHierarchy) -> JsonObject | None:
-    """Get the root node from hierarchy (usually 'qiime')."""
-    if not hierarchy:
-        return None
-    return next(iter(hierarchy.values()), None)
-
-
-def _get_root_help(hierarchy: CommandHierarchy) -> str | None:
-    """
-    Get root level help text.
-
-    Args:
-        hierarchy: The QIIME2 command hierarchy.
-
-    Returns:
-        Help text for root command, or None if not available.
-    """
-    root_node = _get_root_node(hierarchy)
-    if root_node is None:
-        return None
-
-    # Prefer help, fallback to short_help
-    help_text = root_node.get("help") or root_node.get("short_help")
-    if not isinstance(help_text, str):
-        return None
-
-    return help_text
-
-
-def _get_plugin_help(hierarchy: CommandHierarchy, plugin_name: str) -> str | None:
-    """
-    Get plugin level help text.
-
-    Args:
-        hierarchy: The QIIME2 command hierarchy.
-        plugin_name: Name of the plugin/builtin.
-
-    Returns:
-        Help text for plugin, or None if not available.
-    """
-    root_node = _get_root_node(hierarchy)
-    if root_node is None:
-        return None
-
-    plugin_node = root_node.get(plugin_name)
-    if not isinstance(plugin_node, dict):
-        return None
-
-    # For builtins, prefer help/short_help if present
-    # For plugins, prefer short_description, fallback to description
-    help_text = (
-        plugin_node.get("help")
-        or plugin_node.get("short_help")
-        or plugin_node.get("short_description")
-        or plugin_node.get("description")
-    )
-
-    if not isinstance(help_text, str):
-        return None
-
-    return help_text
-
-
-def _get_action_help(
-    hierarchy: CommandHierarchy, plugin_name: str, action_name: str
+def _get_help_via_catalog(
+    tokens: list[TokenSpan],
+    current_token: TokenSpan,
+    token_index: int,
+    catalog: QiimeCatalog,
 ) -> str | None:
-    """
-    Get action level help text.
-
-    Args:
-        hierarchy: The QIIME2 command hierarchy.
-        plugin_name: Name of the plugin.
-        action_name: Name of the action.
-
-    Returns:
-        Help text for action, or None if not available.
-    """
-    root_node = _get_root_node(hierarchy)
-    if root_node is None:
-        return None
-
-    plugin_node = root_node.get(plugin_name)
-    if not isinstance(plugin_node, dict):
-        return None
-
-    action_node = plugin_node.get(action_name)
-    if not isinstance(action_node, dict):
-        return None
-
-    # Get action description
-    description = action_node.get("description")
-    if not isinstance(description, str) or not description:
-        return None
-
-    help_text = description
-
-    # Append epilog lines if present
-    epilog = action_node.get("epilog")
-    if isinstance(epilog, list) and epilog:
-        epilog_text = "\n".join(str(line) for line in epilog)
-        if epilog_text:
-            help_text = f"{help_text}\n\n{epilog_text}"
-
-    return help_text
+    if token_index == 0:
+        return catalog.root_help()
+    if token_index == 1:
+        return catalog.command_help(current_token.text)
+    if token_index == 2:
+        plugin_name = tokens[1].text
+        return catalog.action_help(plugin_name, current_token.text)
+    return None

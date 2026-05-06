@@ -53,6 +53,23 @@ class TestExtractCursor:
         assert text == "qiime info"
         assert pos == Position(line=0, character=6)
 
+    def test_crlf_line_endings(self) -> None:
+        """Cursor position handles CRLF fixtures by splitting on LF."""
+        text, pos = extract_cursor(text_with_cursor="line1\r\nline2 <CURSOR>text")
+        assert text == "line1\r\nline2 text"
+        assert pos == Position(line=1, character=6)
+
+    def test_non_ascii_character_count(self) -> None:
+        """Character position uses Python codepoint counts for fixtures."""
+        text, pos = extract_cursor(text_with_cursor="α🙂<CURSOR>qiime")
+        assert text == "α🙂qiime"
+        assert pos == Position(line=0, character=2)
+
+    def test_empty_marker_raises(self) -> None:
+        """Empty marker is invalid because it appears multiple times."""
+        with pytest.raises(ValueError, match="Multiple"):
+            extract_cursor(text_with_cursor="qiime info", marker="")
+
     def test_missing_marker_raises(self) -> None:
         """Raises ValueError when marker is missing."""
         with pytest.raises(ValueError, match="not found"):
@@ -90,6 +107,17 @@ class TestExtractCursorOffset:
         text, offset = extract_cursor_offset(text_with_cursor="ab\ncd<CURSOR>ef")
         assert text == "ab\ncdef"
         assert offset == 5  # 'ab\ncd' = 5 characters
+
+    def test_custom_marker(self) -> None:
+        """Can use custom marker."""
+        text, offset = extract_cursor_offset(text_with_cursor="qiime |info", marker="|")
+        assert text == "qiime info"
+        assert offset == 6
+
+    def test_empty_marker_raises(self) -> None:
+        """Empty marker is invalid because it appears multiple times."""
+        with pytest.raises(ValueError, match="Multiple"):
+            extract_cursor_offset(text_with_cursor="qiime info", marker="")
 
     def test_missing_marker_raises(self) -> None:
         """Raises ValueError when marker is missing."""

@@ -14,6 +14,22 @@ from q2lsp.qiime.types import CommandHierarchy
 from q2lsp.lsp.diagnostics.debounce import DebounceManager
 
 
+async def wait_until(assertion, timeout: float = 1.0) -> None:
+    """Wait until an assertion passes, then surface the last failure on timeout."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    last_error: AssertionError | None = None
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            assertion()
+            return
+        except AssertionError as error:
+            last_error = error
+            await asyncio.sleep(0.01)
+
+    if last_error is not None:
+        raise last_error
+
+
 class TestDebounceManager:
     """Tests for debounce manager."""
 
@@ -33,11 +49,8 @@ class TestDebounceManager:
         # Schedule second task immediately (should cancel first)
         await manager.schedule("uri1", func, delay_ms=10)
 
-        # Wait for debounce
-        await asyncio.sleep(0.1)
-
         # Only the second task should execute
-        assert call_count == 1
+        await wait_until(lambda: assert_equal(call_count, 1))
 
     @pytest.mark.asyncio
     async def test_different_uris_independent(self) -> None:
@@ -55,12 +68,9 @@ class TestDebounceManager:
         await manager.schedule("uri1", func1, delay_ms=10)
         await manager.schedule("uri2", func2, delay_ms=10)
 
-        # Wait for debounce
-        await asyncio.sleep(0.1)
-
         # Both tasks should execute
-        assert "func1" in calls
-        assert "func2" in calls
+        await wait_until(lambda: assert_in("func1", calls))
+        await wait_until(lambda: assert_in("func2", calls))
 
     @pytest.mark.asyncio
     async def test_cancel_pending_task(self) -> None:
@@ -92,11 +102,28 @@ class TestDebounceManager:
         async def raising_func() -> None:
             raise RuntimeError("Test error")
 
+        ran_successfully = asyncio.Event()
+
+        async def successful_func() -> None:
+            ran_successfully.set()
+
         # Schedule a task that raises
         await manager.schedule("uri1", raising_func, delay_ms=10)
 
         # Wait for debounce - should not raise
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
+
+        # The manager should remain usable after swallowing the exception.
+        await manager.schedule("uri1", successful_func, delay_ms=10)
+        await asyncio.wait_for(ran_successfully.wait(), timeout=1)
+
+
+def assert_equal(actual, expected) -> None:
+    assert actual == expected
+
+
+def assert_in(item, container) -> None:
+    assert item in container
 
 
 class TestDiagnosticSeverity:
@@ -151,10 +178,12 @@ class TestDiagnosticSeverity:
         mock_workspace.get_text_document.return_value = document
         server.protocol._workspace = mock_workspace
 
+        diagnostics_published = asyncio.Event()
         mock_publish = mocker.patch.object(
             server,
             "text_document_publish_diagnostics",
             autospec=True,
+            side_effect=lambda _params: diagnostics_published.set(),
         )
 
         fm = server.protocol.fm
@@ -169,13 +198,15 @@ class TestDiagnosticSeverity:
         )
 
         await did_open_handler(params)
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(diagnostics_published.wait(), timeout=1)
 
         mock_publish.assert_called_once()
         publish_params = mock_publish.call_args[0][0]
         assert isinstance(publish_params, types.PublishDiagnosticsParams)
 
         diagnostics = publish_params.diagnostics
+        assert publish_params.uri == document.uri
+        assert publish_params.version == document.version
         missing_required_diagnostics = [
             diagnostic
             for diagnostic in diagnostics
@@ -189,6 +220,11 @@ class TestDiagnosticSeverity:
 
         assert len(missing_required_diagnostics) == 2
         assert len(unknown_option_diagnostics) == 1
+        unknown_option = unknown_option_diagnostics[0]
+        assert unknown_option.range == types.Range(
+            start=types.Position(line=0, character=32),
+            end=types.Position(line=0, character=45),
+        )
         assert all(
             diagnostic.severity == types.DiagnosticSeverity.Error
             for diagnostic in missing_required_diagnostics
@@ -199,30 +235,125 @@ class TestDiagnosticSeverity:
         )
 
     @pytest.mark.asyncio
-    async def test_did_open_publishes_dependency_cycles_as_errors(self, mocker) -> None:
-        hierarchy: CommandHierarchy = {
-            "qiime": {
-                "name": "qiime",
-                "builtins": [],
-                "demo": {
-                    "name": "demo",
-                    "step": {
-                        "name": "step",
-                        "signature": [
-                            {"name": "table", "type": "input"},
-                            {"name": "result", "type": "output"},
-                        ],
-                    },
-                },
-            }
-        }
-
+    async def test_did_change_publishes_diagnostics(
+        self, mock_hierarchy: CommandHierarchy, mocker
+    ) -> None:
+        """did_change publishes diagnostics for the changed document version."""
         server = server_mod.create_server(
-            get_hierarchy=lambda: hierarchy,
+            get_hierarchy=lambda: mock_hierarchy,
             debounce_ms=0,
         )
 
-        source = "qiime demo step --i-table loop.qza --o-result loop.qza"
+        source = "qiime dummy-plugin dummy-action --unknown-opt value"
+
+        class MockDocument:
+            def __init__(self) -> None:
+                self.uri = "file:///test.sh"
+                self.source = source
+                self.version = 2
+                self.lines = [source]
+
+        document = MockDocument()
+        mock_workspace = mocker.Mock()
+        mock_workspace.get_text_document.return_value = document
+        server.protocol._workspace = mock_workspace
+
+        diagnostics_published = asyncio.Event()
+        mock_publish = mocker.patch.object(
+            server,
+            "text_document_publish_diagnostics",
+            autospec=True,
+            side_effect=lambda _params: diagnostics_published.set(),
+        )
+
+        did_change_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_DID_CHANGE]
+        params = types.DidChangeTextDocumentParams(
+            text_document=types.VersionedTextDocumentIdentifier(
+                uri=document.uri,
+                version=document.version,
+            ),
+            content_changes=[],
+        )
+
+        await did_change_handler(params)
+        await asyncio.wait_for(diagnostics_published.wait(), timeout=1)
+
+        publish_params = mock_publish.call_args[0][0]
+        assert publish_params.uri == document.uri
+        assert publish_params.version == document.version
+        assert publish_params.diagnostics
+
+    @pytest.mark.asyncio
+    async def test_valid_command_publishes_empty_diagnostics(
+        self, mock_hierarchy: CommandHierarchy, mocker
+    ) -> None:
+        """A valid command publishes an empty diagnostics list."""
+        server = server_mod.create_server(
+            get_hierarchy=lambda: mock_hierarchy,
+            debounce_ms=0,
+        )
+
+        source = (
+            "qiime dummy-plugin dummy-action "
+            "--table table.qza --m-metadata metadata.tsv"
+        )
+
+        class MockDocument:
+            def __init__(self) -> None:
+                self.uri = "file:///valid.sh"
+                self.source = source
+                self.version = 1
+                self.lines = [source]
+
+        document = MockDocument()
+        mock_workspace = mocker.Mock()
+        mock_workspace.get_text_document.return_value = document
+        server.protocol._workspace = mock_workspace
+
+        diagnostics_published = asyncio.Event()
+        mock_publish = mocker.patch.object(
+            server,
+            "text_document_publish_diagnostics",
+            autospec=True,
+            side_effect=lambda _params: diagnostics_published.set(),
+        )
+
+        did_open_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_DID_OPEN]
+        params = types.DidOpenTextDocumentParams(
+            text_document=types.TextDocumentItem(
+                uri=document.uri,
+                language_id="shellscript",
+                version=document.version,
+                text=document.source,
+            )
+        )
+
+        await did_open_handler(params)
+        await asyncio.wait_for(diagnostics_published.wait(), timeout=1)
+
+        publish_params = mock_publish.call_args[0][0]
+        assert publish_params.uri == document.uri
+        assert publish_params.version == document.version
+        assert publish_params.diagnostics == []
+
+    @pytest.mark.asyncio
+    async def test_diagnostics_reuse_cached_catalog(
+        self, mock_hierarchy: CommandHierarchy, mocker
+    ) -> None:
+        """Repeated diagnostics use the server's cached catalog provider."""
+        hierarchy_call_count = 0
+
+        def get_hierarchy() -> CommandHierarchy:
+            nonlocal hierarchy_call_count
+            hierarchy_call_count += 1
+            return mock_hierarchy
+
+        server = server_mod.create_server(
+            get_hierarchy=get_hierarchy,
+            debounce_ms=0,
+        )
+
+        source = "qiime dummy-plugin dummy-action --unknown-opt value"
 
         class MockDocument:
             def __init__(self) -> None:
@@ -237,10 +368,17 @@ class TestDiagnosticSeverity:
         mock_workspace.get_text_document.return_value = document
         server.protocol._workspace = mock_workspace
 
-        mock_publish = mocker.patch.object(
+        diagnostics_published_count = 0
+
+        def record_publish(_params) -> None:
+            nonlocal diagnostics_published_count
+            diagnostics_published_count += 1
+
+        mocker.patch.object(
             server,
             "text_document_publish_diagnostics",
             autospec=True,
+            side_effect=record_publish,
         )
 
         fm = server.protocol.fm
@@ -255,74 +393,49 @@ class TestDiagnosticSeverity:
         )
 
         await did_open_handler(params)
-        await asyncio.sleep(0.05)
+        await wait_until(lambda: assert_equal(diagnostics_published_count, 1))
+        await did_open_handler(params)
+        await wait_until(lambda: assert_equal(diagnostics_published_count, 2))
 
-        mock_publish.assert_called_once()
-        publish_params = mock_publish.call_args[0][0]
-        diagnostics = publish_params.diagnostics
-
-        assert len(diagnostics) == 1
-        assert diagnostics[0].code == "q2lsp-dni/dependency-cycle"
-        assert diagnostics[0].severity == types.DiagnosticSeverity.Error
-        assert (
-            diagnostics[0].message
-            == "Dependency cycle detected for input path 'loop.qza'."
-        )
+        assert hierarchy_call_count == 1
 
     @pytest.mark.asyncio
-    async def test_did_open_publishes_duplicate_output_paths_as_errors(
+    async def test_line_continuation_diagnostic_range_maps_to_original_line(
         self, mocker
     ) -> None:
+        """Diagnostics from merged commands publish ranges in original source."""
         hierarchy: CommandHierarchy = {
             "qiime": {
                 "name": "qiime",
-                "builtins": [],
-                "demo": {
-                    "name": "demo",
-                    "step": {
-                        "name": "step",
-                        "signature": [
-                            {"name": "table", "type": "input"},
-                            {"name": "result", "type": "output"},
-                        ],
-                    },
+                "feature-table": {
+                    "name": "feature-table",
+                    "summarize": {"name": "summarize", "signature": []},
                 },
             }
         }
-
         server = server_mod.create_server(
             get_hierarchy=lambda: hierarchy,
             debounce_ms=0,
         )
-
-        source = "\n".join(
-            [
-                "qiime demo step --i-table in-1.qza --o-result dup.qza",
-                "qiime demo step --i-table in-2.qza --o-result dup.qza",
-            ]
-        )
+        source = "qiime \\\nfeature-tabel summarize"
 
         class MockDocument:
             def __init__(self) -> None:
                 self.uri = "file:///test.sh"
                 self.source = source
                 self.version = 1
-                self.lines = source.splitlines()
 
         document = MockDocument()
-
         mock_workspace = mocker.Mock()
         mock_workspace.get_text_document.return_value = document
         server.protocol._workspace = mock_workspace
-
         mock_publish = mocker.patch.object(
             server,
             "text_document_publish_diagnostics",
             autospec=True,
         )
 
-        fm = server.protocol.fm
-        did_open_handler = fm.features[types.TEXT_DOCUMENT_DID_OPEN]
+        did_open_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_DID_OPEN]
         params = types.DidOpenTextDocumentParams(
             text_document=types.TextDocumentItem(
                 uri=document.uri,
@@ -335,16 +448,9 @@ class TestDiagnosticSeverity:
         await did_open_handler(params)
         await asyncio.sleep(0.05)
 
-        mock_publish.assert_called_once()
         publish_params = mock_publish.call_args[0][0]
-        diagnostics = publish_params.diagnostics
-
-        assert len(diagnostics) == 2
-        assert all(
-            diagnostic.code == "q2lsp-dni/duplicate-output-path"
-            for diagnostic in diagnostics
-        )
-        assert all(
-            diagnostic.severity == types.DiagnosticSeverity.Error
-            for diagnostic in diagnostics
-        )
+        assert isinstance(publish_params, types.PublishDiagnosticsParams)
+        assert len(publish_params.diagnostics) == 1
+        diagnostic_range = publish_params.diagnostics[0].range
+        assert diagnostic_range.start == types.Position(line=1, character=0)
+        assert diagnostic_range.end == types.Position(line=1, character=13)

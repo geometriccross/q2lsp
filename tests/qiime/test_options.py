@@ -62,8 +62,8 @@ class TestQiimeOptionPrefix:
             param: JsonObject = {"type": type_val}
             assert qiime_option_prefix(param) == expected_prefix
 
-    def test_partial_match(self) -> None:
-        """Partial match works for signature_type field."""
+    def test_signature_type_prefix_match_is_retained_for_sdk_derivatives(self) -> None:
+        """signature_type values beginning with known kinds map to that prefix."""
         param: JsonObject = {"signature_type": "input_data"}
         assert qiime_option_prefix(param) == "i"
 
@@ -173,6 +173,14 @@ class TestNormalizeOptionToParamName:
 
     def test_case_insensitive_option(self) -> None:
         assert normalize_option_to_param_name("--I-TABLE") == "table"
+
+    def test_empty_long_option_normalizes_to_empty_name(self) -> None:
+        """Malformed '--' is still a long option but has no param name."""
+        assert normalize_option_to_param_name("--") == ""
+
+    def test_empty_qiime_prefixed_option_normalizes_to_empty_name(self) -> None:
+        """Malformed '--i-' strips the QIIME prefix and leaves no param name."""
+        assert normalize_option_to_param_name("--i-") == ""
 
 
 class TestOptionLabelMatchesPrefix:
@@ -304,6 +312,11 @@ class TestParamIsRequired:
         param: JsonObject = {}
         assert not param_is_required(param)
 
+    def test_unknown_signature_type_without_default_is_required(self) -> None:
+        """Any signature_type currently marks a default-less param required."""
+        param: JsonObject = {"signature_type": "unknown"}
+        assert param_is_required(param)
+
 
 class TestQiimeSignatureKind:
     """Tests for qiime_signature_kind function."""
@@ -333,3 +346,7 @@ class TestQiimeSignatureKind:
         """Both source fields are matched case-insensitively."""
         assert qiime_signature_kind({"type": "Input"}) == "input"
         assert qiime_signature_kind({"signature_type": "OUTPUT"}) == "output"
+
+    def test_unknown_signature_type_is_returned_lowercase(self) -> None:
+        """signature_type is trusted even when it is not a known SDK kind."""
+        assert qiime_signature_kind({"signature_type": "Unknown"}) == "unknown"

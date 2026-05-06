@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import threading
-from typing import Callable, TypeAlias
+from collections.abc import Callable
+from typing import TypeAlias
 
 from q2lsp.logging import get_logger
 from q2lsp.qiime.types import CommandHierarchy
@@ -20,9 +21,9 @@ __all__ = [
 
 def build_qiime_hierarchy() -> CommandHierarchy:
     """Build QIIME2 command hierarchy from q2cli (expensive operation)."""
-    from q2lsp.qiime.q2cli_gateway import build_qiime_hierarchy_via_gateway
+    from q2lsp.qiime.q2cli_gateway import build_qiime_hierarchy as build_hierarchy
 
-    return build_qiime_hierarchy_via_gateway()
+    return build_hierarchy()
 
 
 def make_cached_hierarchy_provider(builder: HierarchyBuilder) -> HierarchyProvider:

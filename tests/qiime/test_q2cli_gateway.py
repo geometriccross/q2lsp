@@ -2,152 +2,100 @@
 
 from __future__ import annotations
 
-import logging
+from typing import cast
 
 import click
 import pytest
+import q2lsp.qiime.q2cli_gateway as q2cli_gateway
 
 from q2lsp.qiime.q2cli_gateway import (
-    Q2CliGateway,
-    build_qiime_hierarchy_via_gateway,
+    build_qiime_hierarchy,
     create_qiime_help_provider,
 )
-from q2lsp.qiime.types import CommandHierarchy
+from q2lsp.qiime.types import JsonObject
 
 
-class TestBuildQIimeHierarchyViaGateway:
-    """Tests for build_qiime_hierarchy_via_gateway function."""
+class TestQ2CliGatewayPublicSurface:
+    def test_all_exposes_only_owned_public_api(self) -> None:
+        assert set(q2cli_gateway.__all__) == {
+            "build_qiime_catalog",
+            "build_qiime_hierarchy",
+            "create_qiime_help_provider",
+        }
+        assert "RootCommand" not in q2cli_gateway.__all__
+        assert "PluginCommand" not in q2cli_gateway.__all__
+        assert "click" not in q2cli_gateway.__all__
 
-    def test_returns_command_hierarchy_structure(
+    def test_legacy_root_taking_helpers_are_not_public(self) -> None:
+        assert not hasattr(q2cli_gateway, "build_command_hierarchy")
+        assert not hasattr(q2cli_gateway, "command_hierarchy_json")
+
+    def test_unused_gateway_indirection_is_not_public(self) -> None:
+        assert not hasattr(q2cli_gateway, "Q2CliGateway")
+        assert not hasattr(q2cli_gateway, "build_qiime_hierarchy_via_gateway")
+        assert not hasattr(q2cli_gateway, "qiime_hierarchy_json")
+
+    def test_q2cli_implementation_types_are_not_public(self) -> None:
+        assert not hasattr(q2cli_gateway, "RootCommand")
+        assert not hasattr(q2cli_gateway, "PluginCommand")
+        assert not hasattr(q2cli_gateway, "click")
+
+
+class TestBuildQiimeHierarchy:
+    def test_build_hierarchy_exposes_click_option_signature_metadata(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Returns a valid CommandHierarchy structure."""
-        # Mock RootCommand and build_command_hierarchy to avoid q2cli import
-        mock_root = type(
-            "MockRoot", (), {"name": "qiime", "help": "Test help", "short_help": "Test"}
-        )
-        mock_hierarchy: CommandHierarchy = {"qiime": {"builtins": []}}
+        """Public hierarchy preserves useful Click option signature details."""
 
-        def mock_build_cmd_hierarchy(root: object) -> CommandHierarchy:
-            return mock_hierarchy
-
-        monkeypatch.setattr(
-            "q2lsp.qiime.q2cli_gateway.RootCommand",
-            lambda: mock_root(),
-        )
-        monkeypatch.setattr(
-            "q2lsp.qiime.q2cli_gateway.build_command_hierarchy",
-            mock_build_cmd_hierarchy,
+        action = click.Command(
+            "inspect",
+            params=[
+                click.Option(["--hidden-token"], hidden=True),
+                click.Option(["--input-path"], required=True, help="Input path."),
+                click.Option(["--threads"], default=4, help="Thread count."),
+                click.Option(["--verbose/--no-verbose"], default=False),
+            ],
         )
 
-        result = build_qiime_hierarchy_via_gateway()
+        class FakeBuiltin(click.MultiCommand):
+            def list_commands(self, ctx: click.Context) -> list[str]:
+                return ["inspect"]
 
-        assert isinstance(result, dict)
-        for key, value in result.items():
-            assert isinstance(key, str)
-            assert isinstance(value, dict)
+            def get_command(
+                self, ctx: click.Context, cmd_name: str
+            ) -> click.Command | None:
+                if cmd_name == "inspect":
+                    return action
+                return None
 
-    def test_delegates_to_build_command_hierarchy(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Delegates to build_command_hierarchy with RootCommand instance."""
-        mock_root = type("MockRoot", (), {"name": "qiime"})
-        received_root = None
+        class FakeRoot(click.MultiCommand):
+            def __init__(self) -> None:
+                super().__init__(name="qiime", help="Fake QIIME root")
+                self._builtin_commands = {
+                    "tools": FakeBuiltin(name="tools", help="Fake tools")
+                }
+                self._plugin_lookup = {}
 
-        def mock_build_cmd_hierarchy(root: object) -> CommandHierarchy:
-            nonlocal received_root
-            received_root = root
-            return {"qiime": {"builtins": []}}
+        monkeypatch.setattr("q2lsp.qiime.q2cli_gateway._RootCommand", FakeRoot)
 
-        monkeypatch.setattr(
-            "q2lsp.qiime.q2cli_gateway.RootCommand",
-            lambda: mock_root(),
-        )
-        monkeypatch.setattr(
-            "q2lsp.qiime.q2cli_gateway.build_command_hierarchy",
-            mock_build_cmd_hierarchy,
-        )
+        hierarchy = build_qiime_hierarchy()
 
-        build_qiime_hierarchy_via_gateway()
+        root_entry = cast(JsonObject, hierarchy["qiime"])
+        tools_entry = cast(JsonObject, root_entry["tools"])
+        inspect_entry = cast(JsonObject, tools_entry["inspect"])
+        signature = cast(list[JsonObject], inspect_entry["signature"])
 
-        assert received_root is not None
-        assert received_root.name == "qiime"
-
-
-class TestQ2CliGateway:
-    """Tests for Q2CliGateway class."""
-
-    def test_build_hierarchy_returns_hierarchy(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """build_hierarchy returns a CommandHierarchy."""
-        mock_hierarchy: CommandHierarchy = {"qiime": {"builtins": []}}
-
-        gateway = Q2CliGateway(logger=logging.getLogger("test"))
-        monkeypatch.setattr(gateway, "_build_hierarchy_impl", lambda: mock_hierarchy)
-
-        result = gateway.build_hierarchy()
-
-        assert result == mock_hierarchy
-
-    def test_build_hierarchy_logs_start_and_end(
-        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """build_hierarchy logs start and end events."""
-        mock_hierarchy: CommandHierarchy = {"qiime": {"builtins": []}}
-        gateway = Q2CliGateway(logger=logging.getLogger("test"))
-
-        monkeypatch.setattr(gateway, "_build_hierarchy_impl", lambda: mock_hierarchy)
-
-        with caplog.at_level(logging.DEBUG):
-            result = gateway.build_hierarchy()
-
-        assert result == mock_hierarchy
-
-        # Check for log messages about build start and end
-        log_messages = [record.message for record in caplog.records]
-        assert any("hierarchy build" in msg.lower() for msg in log_messages)
-        assert any("completed successfully" in msg.lower() for msg in log_messages)
-
-    def test_build_hierarchy_logs_error_on_failure(
-        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """build_hierarchy logs error when build fails."""
-        gateway = Q2CliGateway(logger=logging.getLogger("test"))
-
-        def failing_impl() -> CommandHierarchy:
-            raise RuntimeError("Build failed")
-
-        monkeypatch.setattr(gateway, "_build_hierarchy_impl", failing_impl)
-
-        with pytest.raises(RuntimeError, match="Build failed"):
-            with caplog.at_level(logging.ERROR):
-                gateway.build_hierarchy()
-
-        # Check for error log
-        error_logs = [
-            record for record in caplog.records if record.levelno >= logging.ERROR
+        assert [param["name"] for param in signature] == [
+            "input_path",
+            "threads",
+            "verbose",
         ]
-        assert len(error_logs) > 0
-        assert "failed" in error_logs[0].message.lower()
-
-    def test_build_hierarchy_includes_duration_in_log(
-        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """build_hierarchy logs duration information."""
-        mock_hierarchy: CommandHierarchy = {"qiime": {"builtins": []}}
-        gateway = Q2CliGateway(logger=logging.getLogger("test"))
-
-        monkeypatch.setattr(gateway, "_build_hierarchy_impl", lambda: mock_hierarchy)
-
-        with caplog.at_level(logging.DEBUG):
-            gateway.build_hierarchy()
-
-        # Check for duration in log messages
-        log_messages = [record.message for record in caplog.records]
-        assert any(
-            "duration" in msg.lower() or "ms" in msg.lower() for msg in log_messages
-        )
+        params_by_name = {param["name"]: param for param in signature}
+        assert params_by_name["input_path"]["required"] is True
+        assert "default" not in params_by_name["input_path"]
+        assert params_by_name["threads"]["default"] == 4
+        assert params_by_name["verbose"]["default"] is False
+        assert params_by_name["verbose"]["is_bool_flag"] is True
 
 
 class TestCreateQiimeHelpProvider:
@@ -186,41 +134,16 @@ class TestCreateQiimeHelpProvider:
     def test_provider_returns_help_for_subcommand(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Provider returns help text for subcommand with correct Usage path."""
+        """Provider works with Click's default help generation."""
 
-        # Create mock subcommand that respects parent context
-        class MockSubcommand(click.Command):
-            name = "info"
-            help_text = "Display information about current deployment"
-            short_help = "Display deployment info"
-
-            def get_help(self, ctx: click.Context) -> str:
-                # Build usage from context chain
-                usage_parts = []
-                c = ctx
-                while c is not None:
-                    if c.info_name:
-                        usage_parts.append(c.info_name)
-                    c = c.parent
-                usage = " ".join(reversed(usage_parts)) if usage_parts else "info"
-                return f"Usage: {usage} [OPTIONS]\n\n  Display information about current deployment.\n\nOptions:\n  --help  Show this message and exit.\n"
-
-        # Create mock root command with MultiCommand behavior
-        class MockRootCommand(click.MultiCommand):
-            name = "qiime"
-            help_text = "QIIME 2 CLI"
-            short_help = "QIIME 2"
-
-            def get_command(
-                self, ctx: click.Context, cmd_name: str
-            ) -> click.Command | None:
-                if cmd_name == "info":
-                    return MockSubcommand(name=cmd_name)
-                return None
+        root = click.Group("qiime", help="QIIME 2 CLI")
+        root.add_command(
+            click.Command("info", help="Display information about current deployment")
+        )
 
         monkeypatch.setattr(
             "q2lsp.qiime.q2cli_gateway._get_root_command",
-            lambda: MockRootCommand(name="qiime"),
+            lambda: root,
         )
 
         provider = create_qiime_help_provider(max_content_width=80, color=False)
@@ -231,6 +154,36 @@ class TestCreateQiimeHelpProvider:
         # Verify proper command path formatting with parent context
         assert "Usage: qiime info" in help_text
         assert "Display information about current deployment" in help_text
+
+    def test_provider_returns_none_for_leaf_followed_by_extra_component(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = click.Group("qiime")
+        root.add_command(click.Command("info"))
+        monkeypatch.setattr(
+            "q2lsp.qiime.q2cli_gateway._get_root_command",
+            lambda: root,
+        )
+
+        provider = create_qiime_help_provider(max_content_width=80, color=False)
+
+        assert provider(["info", "extra"]) is None
+
+    def test_provider_returns_none_for_unknown_nested_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tools = click.Group("tools")
+        tools.add_command(click.Command("export"))
+        root = click.Group("qiime")
+        root.add_command(tools)
+        monkeypatch.setattr(
+            "q2lsp.qiime.q2cli_gateway._get_root_command",
+            lambda: root,
+        )
+
+        provider = create_qiime_help_provider(max_content_width=80, color=False)
+
+        assert provider(["tools", "missing"]) is None
 
     def test_provider_returns_none_for_invalid_path(
         self, monkeypatch: pytest.MonkeyPatch
@@ -443,6 +396,29 @@ class TestCreateQiimeHelpProvider:
         assert "Usage:" in help_text
         assert "\x1b[31m" not in help_text
         assert "\x1b[0m" not in help_text
+
+    def test_provider_sanitizes_common_csi_escape_variants(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Provider removes non-color CSI sequences from help text."""
+
+        class MockRootCommand(click.Command):
+            name = "qiime"
+            help_text = "QIIME 2 CLI"
+            short_help = "QIIME 2"
+
+            def get_help(self, ctx: click.Context) -> str:
+                return "\x1b[?25l\x1b[2JUsage:\x1b[1A qiime [OPTIONS]\x1b[?25h\n"
+
+        monkeypatch.setattr(
+            "q2lsp.qiime.q2cli_gateway._get_root_command",
+            lambda: MockRootCommand(name="qiime"),
+        )
+
+        provider = create_qiime_help_provider(max_content_width=80, color=False)
+        help_text = provider([])
+
+        assert help_text == "Usage: qiime [OPTIONS]\n"
 
     def test_provider_sanitizes_control_characters(
         self, monkeypatch: pytest.MonkeyPatch

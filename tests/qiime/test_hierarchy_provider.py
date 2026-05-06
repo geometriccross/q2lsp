@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -17,7 +18,7 @@ from q2lsp.qiime.types import CommandHierarchy
 class TestMakeCachedHierarchyProvider:
     """Tests for make_cached_hierarchy_provider function."""
 
-    def test_builder_called_only_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_builder_called_only_once(self) -> None:
         """Builder is called only once even when provider is called multiple times."""
         build_calls = 0
 
@@ -34,6 +35,25 @@ class TestMakeCachedHierarchyProvider:
         _ = provider()
 
         assert build_calls == 1
+
+    def test_builder_exception_is_not_cached(self) -> None:
+        """Failed builds are retried by the next provider call."""
+        build_calls = 0
+
+        def flaky_builder() -> CommandHierarchy:
+            nonlocal build_calls
+            build_calls += 1
+            if build_calls == 1:
+                raise RuntimeError("temporary hierarchy build failure")
+            return {"qiime": {"builtins": []}}
+
+        provider = make_cached_hierarchy_provider(flaky_builder)
+
+        with pytest.raises(RuntimeError, match="temporary hierarchy build failure"):
+            provider()
+
+        assert provider() == {"qiime": {"builtins": []}}
+        assert build_calls == 2
 
     def test_returns_same_instance(self) -> None:
         """Same instance is returned on subsequent calls."""
@@ -152,6 +172,15 @@ class TestDefaultHierarchyProvider:
 
         assert build_calls == 1, "Builder should be called only once due to caching"
 
+    def test_real_provider_returns_command_hierarchy_structure(self) -> None:
+        """Default provider builds a real QIIME hierarchy without executing commands."""
+        provider = default_hierarchy_provider()
+
+        result = provider()
+
+        assert "qiime" in result
+        assert isinstance(result["qiime"], dict)
+
 
 class TestThreadSafety:
     """Tests for thread-safe cache behavior."""
@@ -190,16 +219,10 @@ class TestThreadSafety:
             result = provider()
             results.append(result)
 
-        # Start all threads
-        threads = [
-            threading.Thread(target=worker, daemon=True) for _ in range(num_threads)
-        ]
-        for t in threads:
-            t.start()
-        # Join with timeout to prevent deadlocks in test failures
-        for t in threads:
-            t.join(timeout=5.0)
-            assert not t.is_alive(), f"Thread {t.name} timed out (potential deadlock)"
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = [executor.submit(worker) for _ in range(num_threads)]
+            for future in futures:
+                future.result(timeout=5.0)
 
         # Verify exactly one build occurred
         assert build_calls == 1, (
@@ -232,11 +255,10 @@ class TestThreadSafety:
             result = provider()
             results.append(result)
 
-        threads = [threading.Thread(target=worker, daemon=True) for _ in range(3)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=5.0)
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(worker) for _ in range(3)]
+            for future in futures:
+                future.result(timeout=5.0)
 
         # All calls should use the same cached result
         assert build_calls == 1

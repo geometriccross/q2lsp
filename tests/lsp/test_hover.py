@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import pytest
 
@@ -10,6 +10,7 @@ from tests.helpers.cursor import extract_cursor_offset
 
 from q2lsp.lsp.completion_context import get_completion_context
 from q2lsp.lsp.hover import get_hover_help
+from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
 
 
@@ -49,88 +50,87 @@ def hover_hierarchy() -> CommandHierarchy:
 class TestGetHoverHelp:
     """Tests for get_hover_help function."""
 
-    def test_hover_on_qiime_root(self, hover_hierarchy: CommandHierarchy) -> None:
+    @pytest.fixture
+    def hover_catalog(self, hover_hierarchy: CommandHierarchy) -> QiimeCatalog:
+        return QiimeCatalog.from_hierarchy(hover_hierarchy)
+
+    def test_hover_on_qiime_root(self, hover_catalog: QiimeCatalog) -> None:
         """Hover on 'qiime' token shows root help."""
         text, offset = extract_cursor_offset(text_with_cursor="qii<CURSOR>me info")
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hover_hierarchy)
+        help_text = get_hover_help(ctx, catalog=hover_catalog)
         assert help_text is not None
         assert "QIIME 2 command-line interface" in help_text
 
-    def test_hover_on_plugin(self, hover_hierarchy: CommandHierarchy) -> None:
+    def test_hover_on_plugin(self, hover_catalog: QiimeCatalog) -> None:
         """Hover on plugin token shows plugin help."""
         text, offset = extract_cursor_offset(
             text_with_cursor="qiime fe<CURSOR>ature-table summarize"
         )
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hover_hierarchy)
+        help_text = get_hover_help(ctx, catalog=hover_catalog)
         assert help_text is not None
-        assert (
-            "feature-table" in help_text
-            or "Plugin for working with feature tables" in help_text
-        )
+        assert help_text == "Plugin for working with feature tables"
 
-    def test_hover_on_action(self, hover_hierarchy: CommandHierarchy) -> None:
+    def test_hover_on_action(self, hover_catalog: QiimeCatalog) -> None:
         """Hover on action token shows action help."""
         text, offset = extract_cursor_offset(
             text_with_cursor="qiime feature-table sum<CURSOR>marize"
         )
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hover_hierarchy)
+        help_text = get_hover_help(ctx, catalog=hover_catalog)
         assert help_text is not None
         assert "Summarize a feature table" in help_text
 
-    def test_hover_with_epilog(self, hover_hierarchy: CommandHierarchy) -> None:
+    def test_hover_with_epilog(self, hover_catalog: QiimeCatalog) -> None:
         """Hover on action includes epilog if present."""
         text, offset = extract_cursor_offset(
             text_with_cursor="qiime feature-table summarize<CURSOR>"
         )
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hover_hierarchy)
+        help_text = get_hover_help(ctx, catalog=hover_catalog)
         assert help_text is not None
         # epilog lines should be appended
         assert "Example:" in help_text or "qiime feature-table summarize" in help_text
 
     def test_hover_on_whitespace_returns_none(
-        self, hover_hierarchy: CommandHierarchy
+        self, hover_catalog: QiimeCatalog
     ) -> None:
         """Hover on whitespace returns None."""
         text, offset = extract_cursor_offset(text_with_cursor="qiime  <CURSOR> info")
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hover_hierarchy)
+        help_text = get_hover_help(ctx, catalog=hover_catalog)
         assert help_text is None
 
     def test_hover_on_non_qiime_command_returns_none(
-        self, hover_hierarchy: CommandHierarchy
+        self, hover_catalog: QiimeCatalog
     ) -> None:
         """Hover on non-qiime command returns None."""
         text, offset = extract_cursor_offset(text_with_cursor="echo <CURSOR>hello")
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hover_hierarchy)
+        help_text = get_hover_help(ctx, catalog=hover_catalog)
         assert help_text is None
 
-    def test_hover_on_builtin_plugin(self, hover_hierarchy: CommandHierarchy) -> None:
+    def test_hover_on_builtin_plugin(self, hover_catalog: QiimeCatalog) -> None:
         """Hover on builtin command shows builtin help."""
         text, offset = extract_cursor_offset(text_with_cursor="qiime in<CURSOR>fo")
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hover_hierarchy)
+        help_text = get_hover_help(ctx, catalog=hover_catalog)
         assert help_text is not None
         assert "info" in help_text.lower()
 
     def test_hover_with_line_continuation(
-        self, hover_hierarchy: CommandHierarchy
+        self, hover_catalog: QiimeCatalog
     ) -> None:
         """Hover works correctly with line continuations."""
         text, offset = extract_cursor_offset(
             text_with_cursor="qiime \\\nfe<CURSOR>ature-table summarize"
         )
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hover_hierarchy)
+        help_text = get_hover_help(ctx, catalog=hover_catalog)
         assert help_text is not None
 
-    def test_hover_root_short_help_fallback(
-        self, hover_hierarchy: CommandHierarchy
-    ) -> None:
+    def test_hover_root_short_help_fallback(self) -> None:
         """Root hover uses short_help if help is None."""
         hierarchy = {
             "qiime": {
@@ -142,13 +142,11 @@ class TestGetHoverHelp:
         }
         text, offset = extract_cursor_offset(text_with_cursor="qii<CURSOR>me")
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hierarchy)
+        help_text = get_hover_help(ctx, catalog=QiimeCatalog.from_hierarchy(hierarchy))
         assert help_text is not None
         assert "QIIME 2 CLI" in help_text
 
-    def test_hover_plugin_description_fallback(
-        self, hover_hierarchy: CommandHierarchy
-    ) -> None:
+    def test_hover_plugin_description_fallback(self) -> None:
         """Plugin hover uses description if short_description is None."""
         hierarchy = {
             "qiime": {
@@ -168,30 +166,90 @@ class TestGetHoverHelp:
             text_with_cursor="qiime test-<CURSOR>plugin"
         )
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hierarchy)
+        help_text = get_hover_help(ctx, catalog=QiimeCatalog.from_hierarchy(hierarchy))
         assert help_text is not None
         assert "Full plugin description" in help_text
 
     def test_hover_on_parameter_returns_none(
-        self, hover_hierarchy: CommandHierarchy
+        self, hover_catalog: QiimeCatalog
     ) -> None:
         """Hover on parameter token returns None (not implemented)."""
         text, offset = extract_cursor_offset(
             text_with_cursor="qiime feature-table summarize --<CURSOR>help"
         )
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hover_hierarchy)
+        help_text = get_hover_help(ctx, catalog=hover_catalog)
         assert help_text is None
 
     def test_hover_after_command_returns_none(
-        self, hover_hierarchy: CommandHierarchy
+        self, hover_catalog: QiimeCatalog
     ) -> None:
         """Hover after the command returns None."""
         text, offset = extract_cursor_offset(
             text_with_cursor="qiime feature-table summarize --help <CURSOR>"
         )
         ctx = get_completion_context(text, offset)
-        help_text = get_hover_help(ctx, hierarchy=hover_hierarchy)
+        help_text = get_hover_help(ctx, catalog=hover_catalog)
+        assert help_text is None
+
+
+class TestGetHoverHelpWithCatalog:
+    """Tests for get_hover_help function with catalog metadata."""
+
+    @pytest.mark.parametrize(
+        ("text_with_cursor", "expected"),
+        [
+            ("qii<CURSOR>me info", "QIIME 2 command-line interface"),
+            (
+                "qiime fe<CURSOR>ature-table summarize",
+                "Plugin for working with feature tables",
+            ),
+            (
+                "qiime feature-table sum<CURSOR>marize",
+                "Summarize a feature table",
+            ),
+        ],
+    )
+    def test_catalog_hover_uses_narrow_help_accessors(
+        self,
+        hover_hierarchy: CommandHierarchy,
+        monkeypatch: pytest.MonkeyPatch,
+        text_with_cursor: str,
+        expected: str,
+    ) -> None:
+        def fail_thaw(*_args: object) -> None:
+            raise AssertionError("catalog hover should not thaw nodes")
+
+        monkeypatch.setattr("q2lsp.qiime.catalog._thaw_json", fail_thaw)
+        text, offset = extract_cursor_offset(text_with_cursor=text_with_cursor)
+        ctx = get_completion_context(text, offset)
+        catalog = QiimeCatalog.from_hierarchy(hover_hierarchy)
+
+        help_text = get_hover_help(ctx, catalog=catalog)
+
+        assert help_text is not None
+        assert expected in help_text
+
+    @pytest.mark.parametrize(
+        "text_with_cursor",
+        [
+            "qiime unknow<CURSOR>n-plugin",
+            "qiime feature-table unknow<CURSOR>n-action",
+        ],
+    )
+    def test_catalog_hover_unknown_plugin_or_action_returns_none(
+        self,
+        hover_hierarchy: CommandHierarchy,
+        text_with_cursor: str,
+    ) -> None:
+        text, offset = extract_cursor_offset(text_with_cursor=text_with_cursor)
+        ctx = get_completion_context(text, offset)
+
+        help_text = get_hover_help(
+            ctx,
+            catalog=QiimeCatalog.from_hierarchy(hover_hierarchy),
+        )
+
         assert help_text is None
 
 
@@ -280,6 +338,31 @@ Options:
         assert "Usage:" in help_text
         assert "qiime feature-table" in help_text
         assert "Plugin for working with feature tables" in help_text
+
+    def test_provider_takes_precedence_over_catalog(
+        self, hover_hierarchy: CommandHierarchy, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Help provider wins when both provider and catalog are supplied."""
+        text, offset = extract_cursor_offset(
+            text_with_cursor="qiime fe<CURSOR>ature-table summarize"
+        )
+        ctx = get_completion_context(text, offset)
+        catalog = QiimeCatalog.from_hierarchy(hover_hierarchy)
+
+        def fail_command_help(_catalog: QiimeCatalog, _command_name: str) -> None:
+            raise AssertionError("catalog command help should not be used")
+
+        monkeypatch.setattr(QiimeCatalog, "command_help", fail_command_help)
+
+        help_text = get_hover_help(
+            ctx,
+            get_help=lambda command_path: (
+                "Provider plugin help" if command_path == ["feature-table"] else None
+            ),
+            catalog=catalog,
+        )
+
+        assert help_text == "Provider plugin help"
 
     def test_hover_on_action_returns_full_help(
         self, stub_help_provider: Callable[[list[str]], str | None]

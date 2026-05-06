@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from lsprotocol import types
 
 from tests.helpers.cursor import extract_cursor_offset
 from tests.helpers.completions import (
@@ -13,12 +14,15 @@ from tests.helpers.completions import (
 )
 
 from q2lsp.core.types import CompletionItem
+from q2lsp.lsp.adapter import to_lsp_completion_item
 from q2lsp.lsp.types import (
     CompletionContext,
     CompletionMode,
     ParsedCommand,
     TokenSpan,
 )
+from q2lsp.qiime.catalog import QiimeCatalog
+from q2lsp.qiime.types import CommandHierarchy
 from q2lsp.usecases.get_completions_usecase import (
     CompletionRequest,
     get_completions as get_usecase_completions,
@@ -26,7 +30,7 @@ from q2lsp.usecases.get_completions_usecase import (
 
 
 def _get_completions_via_usecase(
-    ctx: CompletionContext, hierarchy: dict
+    ctx: CompletionContext, hierarchy: CommandHierarchy
 ) -> list[CompletionItem]:
     """Call the usecase completion path from a CompletionContext."""
     command_tokens: tuple[str, ...] = ()
@@ -37,7 +41,7 @@ def _get_completions_via_usecase(
         prefix=ctx.prefix,
         command_tokens=command_tokens,
     )
-    return get_usecase_completions(request, hierarchy)
+    return get_usecase_completions(request, QiimeCatalog.from_hierarchy(hierarchy))
 
 
 def labels(items: list[CompletionItem]) -> list[str]:
@@ -53,6 +57,16 @@ def assert_labels(
     expected = set(expected_labels)
     actual = set(labels(items))
     assert actual == expected, f"Expected {expected}, got {actual}"
+
+
+def _to_lsp_items(
+    items: list[CompletionItem], *, offset: int, prefix: str
+) -> list[types.CompletionItem]:
+    position = types.Position(line=0, character=offset)
+    return [
+        to_lsp_completion_item(item, position=position, prefix=prefix)
+        for item in items
+    ]
 
 
 @pytest.fixture
@@ -607,6 +621,28 @@ class TestCompletionPipeline:
         items = _get_completions_via_usecase(ctx, hierarchy_with_plugins)
         assert_labels(items, {"feature-table"})
 
+    def test_root_partial_prefix_lsp_item_replaces_prefix(
+        self, hierarchy_with_plugins: dict
+    ) -> None:
+        """Partial plugin completion includes LSP replacement edit and metadata."""
+        from q2lsp.lsp.completion_context import get_completion_context
+
+        text, offset = extract_cursor_offset(text_with_cursor="qiime feat<CURSOR>")
+        ctx = get_completion_context(text, offset)
+        items = _get_completions_via_usecase(ctx, hierarchy_with_plugins)
+        lsp_items = _to_lsp_items(items, offset=offset, prefix=ctx.prefix)
+
+        item = next(item for item in lsp_items if item.label == "feature-table")
+        assert item.kind == types.CompletionItemKind.Module
+        assert item.detail == "Plugin for working with feature tables"
+        assert item.text_edit == types.TextEdit(
+            range=types.Range(
+                start=types.Position(line=0, character=6),
+                end=types.Position(line=0, character=10),
+            ),
+            new_text="feature-table",
+        )
+
     def test_plugin_mode_pipeline(self, hierarchy_with_plugins: dict) -> None:
         """Text with cursor -> context -> completions at plugin mode."""
         from q2lsp.lsp.completion_context import get_completion_context
@@ -636,6 +672,47 @@ class TestCompletionPipeline:
         item_labels = labels(items)
         assert "--i-table" in item_labels
         assert "--help" in item_labels
+
+    def test_parameter_partial_prefix_lsp_item_replaces_prefix(
+        self, hierarchy_with_parameters: dict
+    ) -> None:
+        """Partial parameter completion includes LSP replacement edit and metadata."""
+        from q2lsp.lsp.completion_context import get_completion_context
+
+        text, offset = extract_cursor_offset(
+            text_with_cursor="qiime feature-table summarize --p-s<CURSOR>"
+        )
+        ctx = get_completion_context(text, offset)
+        items = _get_completions_via_usecase(ctx, hierarchy_with_parameters)
+        lsp_items = _to_lsp_items(items, offset=offset, prefix=ctx.prefix)
+
+        item = next(item for item in lsp_items if item.label == "--p-sample-metadata")
+        assert item.kind == types.CompletionItemKind.Field
+        assert item.detail == "[Metadata] Sample metadata"
+        assert item.text_edit == types.TextEdit(
+            range=types.Range(
+                start=types.Position(line=0, character=30),
+                end=types.Position(line=0, character=35),
+            ),
+            new_text="--p-sample-metadata",
+        )
+
+    def test_parameter_completion_counts_later_tokens_as_used(
+        self, hierarchy_with_parameters: dict
+    ) -> None:
+        """Parameters after the cursor still count as used in completion filtering."""
+        from q2lsp.lsp.completion_context import get_completion_context
+
+        text, offset = extract_cursor_offset(
+            text_with_cursor=(
+                "qiime feature-table summarize --<CURSOR> --i-table table.qza"
+            )
+        )
+        ctx = get_completion_context(text, offset)
+        items = _get_completions_via_usecase(ctx, hierarchy_with_parameters)
+
+        assert "--i-table" not in labels(items)
+        assert "--p-sample-metadata" in labels(items)
 
     def test_none_mode_pipeline(self, hierarchy_with_plugins: dict) -> None:
         """Text with cursor -> context -> completions at none mode (outside qiime)."""

@@ -5,17 +5,21 @@ from __future__ import annotations
 from lsprotocol import types
 from pygls.workspace import TextDocument
 
+from q2lsp.core.document import DocumentSnapshot
 from q2lsp.core.types import (
     CompletionItem as InternalCompletionItem,
     CompletionKind,
 )
 
 __all__ = [
+    "LSP_POSITION_ENCODING",
     "completion_kind_to_lsp",
     "offset_to_position",
     "position_to_offset",
     "to_lsp_completion_item",
 ]
+
+LSP_POSITION_ENCODING = types.PositionEncodingKind.Utf16
 
 _COMPLETION_KIND_TO_LSP: dict[str, types.CompletionItemKind] = {
     CompletionKind.PLUGIN: types.CompletionItemKind.Module,
@@ -36,16 +40,8 @@ def position_to_offset(document: TextDocument, position: types.Position) -> int:
     Returns:
         0-based offset in the document
     """
-    lines = document.lines
-    offset = 0
-
-    for i in range(min(position.line, len(lines))):
-        offset += len(lines[i])
-
-    if position.line < len(lines):
-        offset += min(position.character, len(lines[position.line]))
-
-    return offset
+    snapshot = _document_snapshot(document)
+    return snapshot.offset_mapper().position_to_offset(position.line, position.character)
 
 
 def offset_to_position(document: TextDocument, offset: int) -> types.Position:
@@ -59,24 +55,13 @@ def offset_to_position(document: TextDocument, offset: int) -> types.Position:
     Returns:
         LSP Position with 0-based line and character
     """
-    lines = document.lines
-    current_offset = 0
-    line = 0
-    character = 0
-
-    for i, line_text in enumerate(lines):
-        line_end = current_offset + len(line_text)
-        if offset < line_end:
-            line = i
-            character = offset - current_offset
-            break
-        current_offset = line_end
-    else:
-        # Offset is beyond the last line
-        line = len(lines) - 1 if lines else 0
-        character = len(lines[line]) if lines else 0
-
+    snapshot = _document_snapshot(document)
+    line, character = snapshot.offset_mapper().offset_to_position(offset)
     return types.Position(line=line, character=character)
+
+
+def _document_snapshot(document: TextDocument) -> DocumentSnapshot:
+    return DocumentSnapshot(uri=document.uri, text=document.source, version=document.version)
 
 
 def completion_kind_to_lsp(kind: CompletionKind | str) -> types.CompletionItemKind:
