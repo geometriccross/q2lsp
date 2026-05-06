@@ -8,8 +8,10 @@ import {
 	buildInterpreterPathNotAbsoluteMessage,
 	buildInterpreterValidationMessage,
 	buildMissingInterpreterMessage,
+	extractPythonExecutablePath,
 	formatOutputSnippet,
 	getUnsupportedPlatformMessage,
+	isPythonExtensionApi,
 	isAbsolutePath,
 	shouldRestartOnConfigChange,
 	type InterpreterCandidate,
@@ -189,12 +191,26 @@ const resolvePythonExtensionInterpreter = async (): Promise<string | undefined> 
 	}
 
 	try {
+		const pythonApi = pythonExtension.exports;
+		if (isPythonExtensionApi(pythonApi)) {
+			const activeEnvironmentPath = pythonApi.environments.getActiveEnvironmentPath();
+			const resolvedEnvironment = await pythonApi.environments.resolveEnvironment(activeEnvironmentPath);
+			const interpreter = extractPythonExecutablePath(resolvedEnvironment, activeEnvironmentPath);
+			if (interpreter) {
+				return interpreter;
+			}
+		}
+	} catch (error) {
+		outputChannel?.appendLine(`Failed to query Python extension environment API: ${String(error)}`);
+	}
+
+	try {
 		const interpreter = await vscode.commands.executeCommand<string>('python.interpreterPath');
 		if (interpreter && interpreter.trim()) {
 			return interpreter.trim();
 		}
 	} catch (error) {
-		outputChannel?.appendLine(`Failed to query Python interpreter path: ${String(error)}`);
+		outputChannel?.appendLine(`Failed to query legacy Python interpreter path command: ${String(error)}`);
 	}
 
 	const pythonConfig = vscode.workspace.getConfiguration('python');

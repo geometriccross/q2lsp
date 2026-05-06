@@ -20,6 +20,13 @@ export type InterpreterValidationDetails = {
 	version: string;
 };
 
+export type PythonExtensionApi = {
+	environments: {
+		getActiveEnvironmentPath: () => unknown;
+		resolveEnvironment: (environmentPath: unknown) => Promise<unknown>;
+	};
+};
+
 const normalizePath = (value: string | undefined): string | undefined => {
 	const trimmed = value?.trim();
 	if (!trimmed) {
@@ -165,4 +172,44 @@ export const buildInterpreterPathNotAbsoluteMessage = (): string => {
 
 export const shouldRestartOnConfigChange = (affectsConfiguration: (section: string) => boolean): boolean => {
 	return affectsConfiguration('q2lsp.interpreterPath') || affectsConfiguration('q2lsp.serverEnv');
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+	return typeof value === 'object' && value !== null;
+};
+
+const pathFromUnknown = (value: unknown): string | undefined => {
+	return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+};
+
+export const isPythonExtensionApi = (value: unknown): value is PythonExtensionApi => {
+	if (!isRecord(value) || !isRecord(value.environments)) {
+		return false;
+	}
+
+	return (
+		typeof value.environments.getActiveEnvironmentPath === 'function' &&
+		typeof value.environments.resolveEnvironment === 'function'
+	);
+};
+
+export const extractPythonExecutablePath = (
+	resolvedEnvironment: unknown,
+	activeEnvironmentPath: unknown
+): string | undefined => {
+	if (isRecord(resolvedEnvironment) && isRecord(resolvedEnvironment.executable)) {
+		const executableUri = resolvedEnvironment.executable.uri;
+		if (isRecord(executableUri)) {
+			const fsPath = pathFromUnknown(executableUri.fsPath);
+			if (fsPath) {
+				return fsPath;
+			}
+		}
+	}
+
+	if (isRecord(activeEnvironmentPath)) {
+		return pathFromUnknown(activeEnvironmentPath.path);
+	}
+
+	return undefined;
 };

@@ -4,7 +4,9 @@ import {
 	buildInterpreterPathNotAbsoluteMessage,
 	buildInterpreterValidationMessage,
 	buildInterpreterValidationSnippet,
+	extractPythonExecutablePath,
 	formatOutputSnippet,
+	isPythonExtensionApi,
 	parseInterpreterValidationStdout,
 	buildServerCommand,
 	DEFAULT_PATH_CANDIDATES,
@@ -109,5 +111,41 @@ suite('q2lsp helper tests', () => {
 	test('validation stdout parse fails on unexpected output', () => {
 		assert.strictEqual(parseInterpreterValidationStdout('WARNING: something'), null);
 		assert.strictEqual(parseInterpreterValidationStdout(''), null);
+	});
+
+	test('python extension API guard accepts environment resolver shape', () => {
+		assert.strictEqual(
+			isPythonExtensionApi({
+				environments: {
+					getActiveEnvironmentPath: () => ({ path: '/opt/python' }),
+					resolveEnvironment: async () => ({}),
+				},
+			}),
+			true
+		);
+		assert.strictEqual(isPythonExtensionApi({ environments: {} }), false);
+	});
+
+	test('extractPythonExecutablePath prefers resolved executable uri', () => {
+		const executablePath = extractPythonExecutablePath(
+			{
+				executable: {
+					uri: {
+						fsPath: '/opt/qiime/bin/python',
+					},
+				},
+			},
+			{ path: '/opt/qiime' }
+		);
+
+		assert.strictEqual(executablePath, '/opt/qiime/bin/python');
+	});
+
+	test('extractPythonExecutablePath falls back to active environment path', () => {
+		assert.strictEqual(
+			extractPythonExecutablePath(undefined, { path: ' /opt/qiime/bin/python ' }),
+			'/opt/qiime/bin/python'
+		);
+		assert.strictEqual(extractPythonExecutablePath(undefined, { path: '   ' }), undefined);
 	});
 });
