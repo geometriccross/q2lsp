@@ -78,7 +78,7 @@ def to_completion_data(catalog: QiimeCatalog) -> CompletionData:
     return CompletionData(root_items=tuple(root_items), commands=tuple(commands))
 
 
-def get_used_parameters(command_tokens: tuple[str, ...] | ParsedCommand) -> set[str]:
+def get_used_parameters(command_tokens: Any) -> set[str]:
     """Extract normalized parameter names from command tokens."""
     used: set[str] = set()
     option_groups = _group_command_options(command_tokens)
@@ -92,6 +92,19 @@ def get_used_parameters(command_tokens: tuple[str, ...] | ParsedCommand) -> set[
 def option_matches_prefix(option_name: str, prefix_filter: str) -> bool:
     """Match completion option names with user prefix text."""
     return option_label_matches_prefix(option_name, prefix_filter)
+
+
+def _group_command_options(
+    command_tokens: Any,
+) -> tuple[OptionGroup[Any], ...]:
+    options = getattr(command_tokens, "options", None)
+    if options is not None:
+        return cast(tuple[OptionGroup[Any], ...], options)
+    return group_option_tokens(
+        cast(tuple[str, ...], command_tokens),
+        lambda token: token,
+        start_index=3,
+    )
 
 
 def _to_completion_mode(mode: str) -> CompletionMode:
