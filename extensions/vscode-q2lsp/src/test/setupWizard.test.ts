@@ -66,6 +66,17 @@ suite('q2lsp setup wizard tests', () => {
 		assert.ok(!distributionSelect.includes('amplicon'));
 	});
 
+	test('wizard html shows pixi commands for the current workspace', () => {
+		const html = buildSetupWizardHtml({ nonce: 'test-nonce' });
+
+		assert.ok(html.includes('pixi init && pixi import '));
+		assert.ok(html.includes(' && pixi install'));
+		assert.ok(!html.includes('--format pyproject'));
+		assert.ok(html.includes('pixi run python -m pip install -U q2lsp'));
+		assert.ok(!html.includes('mkdir -p .qiime2'));
+		assert.ok(!html.includes('cd .qiime2'));
+	});
+
 	test('wizard html omits the log action', () => {
 		const html = buildSetupWizardHtml({ nonce: 'test-nonce' });
 
