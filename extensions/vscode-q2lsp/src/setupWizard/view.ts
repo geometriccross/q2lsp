@@ -45,10 +45,10 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 	const environments = options.environments ?? [];
 	const stepButtons = SETUP_WIZARD_FLOW_STEPS.map(
 		(step, index) => `
-			<button type="button" class="step" data-step-index="${index}">
+			<div class="step" data-step-index="${index}">
 				<span class="step-index">${index + 1}</span>
 				<span>${escapeHtml(step.label.replace(/^\d\s/, ''))}</span>
-			</button>`
+			</div>`
 	).join('');
 	const managerCards = SETUP_WIZARD_MANAGERS.map(
 		(manager) => `
@@ -132,7 +132,6 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 			background: transparent;
 			border: 1px solid var(--vscode-widget-border);
 			color: var(--vscode-descriptionForeground);
-			cursor: pointer;
 			display: flex;
 			gap: 8px;
 			min-height: 34px;
@@ -314,6 +313,9 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 		.action.primary {
 			background: var(--vscode-button-background);
 			color: var(--vscode-button-foreground);
+		}
+		.action[data-back] {
+			margin-right: auto;
 		}
 		.action:disabled {
 			cursor: not-allowed;
@@ -625,12 +627,6 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 		for (const card of document.querySelectorAll('[data-manager]')) {
 			card.addEventListener('click', () => {
 				state.manager = card.dataset.manager;
-				render();
-			});
-		}
-		for (const step of document.querySelectorAll('[data-step-index]')) {
-			step.addEventListener('click', () => {
-				state.stepIndex = Number(step.dataset.stepIndex);
 				render();
 			});
 		}
