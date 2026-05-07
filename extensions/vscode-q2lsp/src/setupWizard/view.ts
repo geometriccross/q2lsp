@@ -11,12 +11,16 @@ export const SETUP_WIZARD_FLOW_STEPS = [
 	{ id: 'installQ2lsp', label: '4 Install q2lsp' },
 ] as const;
 
+const minicondaInstallerPlatform = process.platform === 'darwin' ? 'MacOSX' : 'Linux';
+const MINICONDA_INSTALL_COMMAND =
+	`curl -fsSLo Miniconda3.sh "https://repo.anaconda.com/miniconda/Miniconda3-latest-${minicondaInstallerPlatform}-$(uname -m).sh" && bash Miniconda3.sh`;
+
 export const SETUP_WIZARD_MANAGERS = [
 	{
 		id: 'conda',
-		label: 'Conda / Miniforge',
-		description: 'Recommended for QIIME 2',
-		command: 'Open Miniforge installer before continuing',
+		label: 'Conda / Miniconda',
+		description: 'Recommended by QIIME 2',
+		command: MINICONDA_INSTALL_COMMAND,
 	},
 	{
 		id: 'pixi',
@@ -340,7 +344,7 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 				</div>
 				<div class="actions">
 					<button type="button" class="action" data-command="selectPythonInterpreter">Select existing QIIME 2 interpreter</button>
-					<button type="button" class="action primary" data-next>Continue</button>
+					<button type="button" class="action primary" data-next>Select</button>
 				</div>
 			</section>
 			<section class="screen" data-screen="1" hidden>
@@ -361,7 +365,7 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 				<div class="status-line" id="managerStatusMessage"></div>
 				<div class="actions">
 					<button type="button" class="action" data-back>Back</button>
-					<button type="button" class="action" data-command="checkManager">I installed it, check again</button>
+					<button type="button" class="action" data-command="checkManager">I installed it, skip it</button>
 					<button type="button" class="action primary" id="installManagerPrimaryAction" data-command="installManager">Install in Terminal</button>
 				</div>
 			</section>
@@ -512,10 +516,12 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 		const environmentName = () => selectedEnvironment()?.environmentName || '';
 		const environmentUrl = () => selectedEnvironment()?.url || '';
 		const inferredInterpreterPath = () => state.interpreterPath ||
-			'/opt/miniforge/envs/' + environmentName() + '/bin/python';
+			'/opt/miniconda3/envs/' + environmentName() + '/bin/python';
+		const pixiEnvironmentName = () => 'q2:' + state.distribution + ':' + state.version;
 		const qiimeCommand = () => {
 			if (state.manager === 'pixi') {
-				return 'pixi init && pixi import ' + environmentUrl() + ' && pixi install';
+				return 'pixi init && pixi import --format conda-env ' + environmentUrl() +
+					' -e ' + pixiEnvironmentName() + ' && pixi install';
 			}
 			if (state.manager === 'manual') {
 				return 'Open QIIME 2 Quickstart, then return to validate the selected interpreter.';
@@ -540,7 +546,7 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 			if (state.stepIndex >= 1) {
 				chips.push({
 					kind: 'neutral',
-					label: 'Manager: ' + managerById[state.manager].label.replace(' / Miniforge', ''),
+					label: 'Manager: ' + managerById[state.manager].label.replace(' / Miniconda', ''),
 				});
 			}
 			if (state.stepIndex >= 2) {
@@ -580,7 +586,7 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 			document.getElementById('managerCommand').textContent = manager.command;
 			document.getElementById('installManagerPrimaryAction').textContent =
 				state.manager === 'conda'
-					? 'Open Miniforge Installer'
+					? 'Install Miniconda in Terminal'
 					: state.manager === 'pixi'
 						? 'Install Pixi in Terminal'
 						: 'Open QIIME 2 Quickstart';

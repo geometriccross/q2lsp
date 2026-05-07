@@ -6,7 +6,6 @@ import { execFileForValidation, validateInterpreter } from '../interpreter';
 
 import { buildSetupWizardHtml } from './view';
 import {
-	MINIFORGE_INSTALL_URL,
 	QIIME_QUICKSTART_URL,
 	type QiimePlatform,
 } from './qiimeConstants';
@@ -587,10 +586,6 @@ const formatStatusDetail = (value: string | undefined): string => {
 const confirmAndRunInTerminal = async (action: string, commandText: unknown): Promise<void> => {
 	const command = toNonEmptyString(commandText);
 	if (!command || command.startsWith('Open ')) {
-		if (command?.includes('Miniforge')) {
-			await vscode.env.openExternal(vscode.Uri.parse(MINIFORGE_INSTALL_URL));
-			return;
-		}
 		if (command?.includes('QIIME 2 Quickstart')) {
 			await vscode.env.openExternal(vscode.Uri.parse(QIIME_QUICKSTART_URL));
 			return;

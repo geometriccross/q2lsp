@@ -38,6 +38,19 @@ suite('q2lsp setup wizard tests', () => {
 		assert.strictEqual(environmentUrlSelect, '');
 	});
 
+	test('conda manager installs miniconda from the terminal', () => {
+		const condaManager = SETUP_WIZARD_MANAGERS.find((manager) => manager.id === 'conda');
+		const html = buildSetupWizardHtml({ nonce: 'test-nonce' });
+
+		assert.ok(condaManager);
+		assert.ok(condaManager?.command.startsWith('curl -fsSLo Miniconda3.sh '));
+		assert.ok(condaManager.command.includes('https://repo.anaconda.com/miniconda/Miniconda3-latest-'));
+		assert.ok(condaManager.command.includes(' && bash Miniconda3.sh'));
+		assert.ok(html.includes('Conda / Miniconda'));
+		assert.ok(html.includes('Install Miniconda in Terminal'));
+		assert.ok(!html.includes('Miniforge'));
+	});
+
 	test('wizard html starts with distributions for the initial version only', () => {
 		const platform = resolveQiimePlatform('linux', 'x64');
 		const html = buildSetupWizardHtml({
@@ -93,9 +106,21 @@ suite('q2lsp setup wizard tests', () => {
 	});
 
 	test('wizard html shows pixi commands for the current workspace', () => {
-		const html = buildSetupWizardHtml({ nonce: 'test-nonce' });
+		const html = buildSetupWizardHtml({
+			nonce: 'test-nonce',
+			environments: [
+				{
+					version: '2026.4',
+					distribution: 'qiime2',
+					platform: 'linux-64',
+					fileName: 'rachis-qiime2-linux-64-conda.yml',
+					url: 'https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/2026.4/qiime2/released/rachis-qiime2-linux-64-conda.yml',
+					environmentName: 'rachis-qiime2',
+				},
+			],
+		});
 
-		assert.ok(html.includes('pixi init && pixi import '));
+		assert.ok(html.includes('pixi init && pixi import --format conda-env https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/2026.4/qiime2/released/rachis-qiime2-linux-64-conda.yml -e q2:qiime2:2026.4 && pixi install'));
 		assert.ok(html.includes(' && pixi install'));
 		assert.ok(!html.includes('--format pyproject'));
 		assert.ok(html.includes('pixi run python -m pip install -U q2lsp'));
