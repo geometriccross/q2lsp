@@ -387,24 +387,6 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 						</select>
 					</label>
 				</div>
-				<div class="summary-grid">
-					<div class="summary-row">
-						<span class="row-label">Manager</span>
-						<span class="row-value" id="qiimeManagerLabel"></span>
-					</div>
-					<div class="summary-row">
-						<span class="row-label">Host platform</span>
-						<span class="row-value" id="platformLabel"></span>
-					</div>
-					<div class="summary-row">
-						<span class="row-label">Environment name</span>
-						<span class="row-value" id="environmentName"></span>
-					</div>
-					<div class="summary-row">
-						<span class="row-label">Environment file</span>
-						<span class="row-value" id="environmentFile"></span>
-					</div>
-				</div>
 				<div class="command-box">
 					<code id="qiimeCommand"></code>
 					<span class="note">Official environment file will be opened or downloaded before running.</span>
@@ -526,7 +508,6 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 			environment.url === state.environmentUrl
 		) || firstEnvironmentForDistribution() || firstEnvironmentForVersion();
 		const environmentName = () => selectedEnvironment()?.environmentName || '';
-		const environmentFile = () => selectedEnvironment()?.fileName || '';
 		const environmentUrl = () => selectedEnvironment()?.url || '';
 		const inferredInterpreterPath = () => state.interpreterPath ||
 			'/opt/miniforge/envs/' + environmentName() + '/bin/python';
@@ -553,34 +534,16 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 
 		const renderChips = () => {
 			const chips = [];
-			if (state.stepIndex === 0) {
-				if (state.qiimeStatus !== 'ready') {
-					chips.push({ kind: 'warning', label: 'QIIME 2 env not found' });
-				}
-				chips.push({ kind: 'neutral', label: 'Manager: ' + managerById[state.manager].label.replace(' / Miniforge', '') });
-			} else {
-				const manager = managerById[state.manager];
-				if (state.qiimeStatus === 'ready' || state.stepIndex >= 3) {
-					chips.push({ kind: 'success', label: 'QIIME 2 ready' });
-				}
+			chips.push({ kind: 'neutral', label: 'OS: ' + state.platform.label });
+			if (state.stepIndex >= 1) {
+				chips.push({
+					kind: 'neutral',
+					label: 'Manager: ' + managerById[state.manager].label.replace(' / Miniforge', ''),
+				});
+			}
+			if (state.stepIndex >= 2) {
 				chips.push({ kind: 'neutral', label: 'Distribution: ' + state.distribution });
 				chips.push({ kind: 'neutral', label: 'Version: ' + state.version });
-				chips.push({ kind: 'neutral', label: 'Manager: ' + manager.label.replace(' / Miniforge', '') });
-				if (state.interpreterPath || state.stepIndex >= 3) {
-					chips.push({ kind: 'neutral', label: 'Interpreter selected' });
-				}
-				if (state.q2lspStatus === 'ready') {
-					chips.push({ kind: 'success', label: 'q2lsp ready' });
-				}
-				if (state.savedInterpreterPath) {
-					chips.push({ kind: 'success', label: 'Path saved' });
-				}
-			}
-			if (state.statusMessage) {
-				chips.push({
-					kind: state.statusMessage.includes('missing') || state.statusMessage.includes('not found') || state.statusMessage.includes('failed') ? 'warning' : 'neutral',
-					label: state.statusMessage,
-				});
 			}
 			document.getElementById('contextChips').innerHTML = chips
 				.map((chip) => '<span class="chip ' + chip.kind + '">' + chip.label + '</span>')
@@ -619,10 +582,6 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 					: state.manager === 'pixi'
 						? 'Install Pixi in Terminal'
 						: 'Open QIIME 2 Quickstart';
-			document.getElementById('qiimeManagerLabel').textContent = manager.label;
-			document.getElementById('platformLabel').textContent = state.platform.label;
-			document.getElementById('environmentName').textContent = environmentName();
-			document.getElementById('environmentFile').textContent = environmentFile();
 			document.getElementById('qiimeCommand').textContent = qiimeCommand();
 			document.getElementById('q2lspCommand').textContent = q2lspInstallCommand();
 			document.getElementById('managerStatusMessage').textContent =
