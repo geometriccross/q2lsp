@@ -17,10 +17,8 @@ export type QiimeEnvironmentOption = {
 	environmentName: string;
 };
 
-export const QIIME_MANIFEST_TREE_URL =
-	'https://api.github.com/repos/qiime2/distributions/git/trees/dev?recursive=1';
-export const QIIME_MANIFEST_CONTENTS_URL =
-	'https://api.github.com/repos/qiime2/distributions/contents';
 export const QIIME_PACKAGES_BASE_URL = 'https://packages.qiime2.org/qiime2';
+export const QIIME_DISTRIBUTIONS_TREE_URL =
+	'https://api.github.com/repos/qiime2/distributions/git/trees/dev?recursive=1';
 export const QIIME_QUICKSTART_URL = 'https://library.qiime2.org/quickstart/qiime2';
 export const MINIFORGE_INSTALL_URL = 'https://github.com/conda-forge/miniforge#download';

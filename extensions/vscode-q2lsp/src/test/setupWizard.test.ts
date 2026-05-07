@@ -1,16 +1,15 @@
 import * as assert from 'assert';
 import {
-	QIIME_DISTRIBUTIONS,
-	QIIME_VERSIONS,
 	SETUP_WIZARD_FLOW_STEPS,
 	SETUP_WIZARD_MANAGERS,
 	buildFallbackQiimeEnvironments,
+	buildQiimeEnvironmentsFromTree,
 	buildSetupWizardHtml,
 	buildSyntheticQiimeEnvironment,
 	mergeQiimeEnvironments,
 	parseQiimeEnvironmentPath,
 	resolveQiimePlatform,
-} from '../setupWizard';
+} from '../setupWizard/index';
 
 suite('q2lsp setup wizard tests', () => {
 	test('wizard html shows the setup flow steps', () => {
@@ -21,18 +20,22 @@ suite('q2lsp setup wizard tests', () => {
 		}
 	});
 
-	test('wizard html shows package managers and qiime selectors', () => {
+	test('wizard html shows package managers and empty qiime selectors before fetch', () => {
 		const html = buildSetupWizardHtml({ nonce: 'test-nonce' });
 
 		for (const manager of SETUP_WIZARD_MANAGERS) {
 			assert.ok(html.includes(manager.label));
 		}
-		for (const distribution of QIIME_DISTRIBUTIONS) {
-			assert.ok(html.includes(distribution));
-		}
-		for (const version of QIIME_VERSIONS) {
-			assert.ok(html.includes(version));
-		}
+		const versionSelect = html.match(/<select id="versionSelect">(?<options>[\s\S]*?)<\/select>/)
+			?.groups?.options.trim() ?? '';
+		const distributionSelect = html.match(/<select id="distributionSelect">(?<options>[\s\S]*?)<\/select>/)
+			?.groups?.options.trim() ?? '';
+		const environmentUrlSelect = html.match(/<select id="environmentUrlSelect">(?<options>[\s\S]*?)<\/select>/)
+			?.groups?.options.trim() ?? '';
+
+		assert.strictEqual(versionSelect, '');
+		assert.strictEqual(distributionSelect, '');
+		assert.strictEqual(environmentUrlSelect, '');
 	});
 
 	test('wizard html starts with distributions for the initial version only', () => {
@@ -64,6 +67,29 @@ suite('q2lsp setup wizard tests', () => {
 
 		assert.ok(distributionSelect.includes('qiime2'));
 		assert.ok(!distributionSelect.includes('amplicon'));
+	});
+
+	test('wizard html shows selectable environment file urls for qiime install', () => {
+		const platform = resolveQiimePlatform('linux', 'x64');
+		const html = buildSetupWizardHtml({
+			nonce: 'test-nonce',
+			platform,
+			environments: [
+				{
+					version: '2026.4',
+					distribution: 'tiny',
+					platform: 'linux-64',
+					fileName: 'rachis-tiny-linux-64-conda.yml',
+					url: 'https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/2026.4/tiny/released/rachis-tiny-linux-64-conda.yml',
+					environmentName: 'rachis-tiny',
+				},
+			],
+		});
+
+		assert.ok(html.includes('Environment file URL'));
+		assert.ok(html.includes('id="environmentUrlSelect"'));
+		assert.ok(html.includes('https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/2026.4/tiny/released/rachis-tiny-linux-64-conda.yml'));
+		assert.ok(html.includes('>rachis-tiny-linux-64-conda.yml</option>'));
 	});
 
 	test('wizard html shows pixi commands for the current workspace', () => {
@@ -135,12 +161,13 @@ suite('q2lsp setup wizard tests', () => {
 		assert.ok(mergedEnvironments.some((environment) => environment.version === '2025.7'));
 	});
 
-	test('remote qiime environment paths reject mismatched rachis files for legacy versions', () => {
+	test('remote qiime environment paths accept files without version naming assumptions', () => {
 		const environment = parseQiimeEnvironmentPath(
 			'2025.10/qiime2/released/rachis-qiime2-linux-64-conda.yml'
 		);
 
-		assert.strictEqual(environment, undefined);
+		assert.strictEqual(environment?.fileName, 'rachis-qiime2-linux-64-conda.yml');
+		assert.strictEqual(environment?.version, '2025.10');
 	});
 
 	test('remote qiime environment paths accept version-matched legacy distributions', () => {
@@ -156,5 +183,45 @@ suite('q2lsp setup wizard tests', () => {
 		const platform = resolveQiimePlatform('linux', 'x64');
 
 		assert.strictEqual(buildSyntheticQiimeEnvironment('2025.10', 'qiime2', platform), undefined);
+	});
+
+	test('git tree parser extracts released qiime environment files', () => {
+		const environments = buildQiimeEnvironmentsFromTree([
+			{ type: 'tree', path: '2026.4/qiime2/released' },
+			{ type: 'blob', path: '2026.4/qiime2/released/rachis-qiime2-linux-64-conda.yml' },
+			{ type: 'blob', path: '2026.4/qiime2/dev/rachis-qiime2-linux-64-conda.yml' },
+			{ type: 'blob', path: '2025.10/amplicon/released/qiime2-amplicon-2025.10-py310-osx-conda.yml' },
+			{ type: 'blob', path: '2025.10/amplicon/released/README.md' },
+		]);
+
+		assert.deepStrictEqual(
+			environments.map((environment) => ({
+				version: environment.version,
+				distribution: environment.distribution,
+				platform: environment.platform,
+				fileName: environment.fileName,
+			})),
+			[
+				{
+					version: '2026.4',
+					distribution: 'qiime2',
+					platform: 'linux-64',
+					fileName: 'rachis-qiime2-linux-64-conda.yml',
+				},
+				{
+					version: '2025.10',
+					distribution: 'amplicon',
+					platform: 'osx-64',
+					fileName: 'qiime2-amplicon-2025.10-py310-osx-conda.yml',
+				},
+			]
+		);
+	});
+
+	test('synthetic qiime environments use packages.qiime2.org urls', () => {
+		const platform = resolveQiimePlatform('linux', 'x64');
+		const environment = buildSyntheticQiimeEnvironment('2026.4', 'tiny', platform);
+
+		assert.ok(environment?.url.startsWith('https://packages.qiime2.org/qiime2/2026.4/tiny/released/'));
 	});
 });

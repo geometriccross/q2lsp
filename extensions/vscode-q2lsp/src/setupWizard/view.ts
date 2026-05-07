@@ -1,12 +1,8 @@
 import {
-	QIIME_VERSIONS,
 	type QiimeEnvironmentOption,
 	type QiimePlatform,
 } from './qiimeConstants';
-import {
-	buildFallbackQiimeEnvironments,
-	resolveQiimePlatform,
-} from './qiimeMetadata';
+import { resolveQiimePlatform } from './qiimeMetadata';
 
 export const SETUP_WIZARD_FLOW_STEPS = [
 	{ id: 'packageManager', label: '1 Package Manager' },
@@ -46,7 +42,7 @@ type SetupWizardOptions = {
 export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 	const initialInterpreterPath = options.interpreterPath ?? '';
 	const platform = options.platform ?? resolveQiimePlatform(process.platform, process.arch);
-	const environments = options.environments ?? buildFallbackQiimeEnvironments(platform);
+	const environments = options.environments ?? [];
 	const stepButtons = SETUP_WIZARD_FLOW_STEPS.map(
 		(step, index) => `
 			<button type="button" class="step" data-step-index="${index}">
@@ -63,22 +59,29 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 	).join('');
 	const initialVersion = resolveInitialQiimeVersion(environments);
 	const initialDistributions = uniqueQiimeDistributions(environments.filter(
-		(environment) => environment.version === initialVersion && environment.platform === platform.id
+		(environment) => environment.version === initialVersion
 	));
+	const initialEnvironmentOptions = environments
+		.filter((environment) => environment.version === initialVersion)
+		.filter((environment) => environment.distribution === (initialDistributions[0] ?? ''))
+		.sort((left, right) => left.fileName.localeCompare(right.fileName));
 	const distributionOptions = initialDistributions.map(
 		(distribution) => `<option value="${escapeHtml(distribution)}">${escapeHtml(distribution)}</option>`
+	).join('');
+	const environmentUrlOptions = initialEnvironmentOptions.map(
+		(environment) => `<option value="${escapeHtml(environment.url)}">${escapeHtml(environment.fileName)}</option>`
 	).join('');
 	const initialVersions = uniqueQiimeVersions(environments);
 	const versionOptions = initialVersions.map((version) => `<option value="${version}">${escapeHtml(version)}</option>`).join('');
 
 	const bootstrapState = JSON.stringify({
 		interpreterPath: initialInterpreterPath,
-		versions: QIIME_VERSIONS,
 		managers: SETUP_WIZARD_MANAGERS,
 		platform,
 		environments,
 		initialVersion,
 		initialDistribution: initialDistributions[0] ?? '',
+		initialEnvironmentUrl: initialEnvironmentOptions[0]?.url ?? '',
 	});
 
 	return `<!DOCTYPE html>
@@ -224,6 +227,9 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 			gap: 10px;
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
+		.field-row.single {
+			grid-template-columns: minmax(0, 1fr);
+		}
 		label {
 			display: grid;
 			gap: 5px;
@@ -361,15 +367,23 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 				<h2>Install QIIME 2 environment</h2>
 				<div class="field-row">
 					<label>
+						Version
+						<select id="versionSelect">
+							${versionOptions}
+						</select>
+					</label>
+					<label>
 						Distribution
 						<select id="distributionSelect">
 							${distributionOptions}
 						</select>
 					</label>
+				</div>
+				<div class="field-row single">
 					<label>
-						Version
-						<select id="versionSelect">
-							${versionOptions}
+						Environment file URL
+						<select id="environmentUrlSelect">
+							${environmentUrlOptions}
 						</select>
 					</label>
 				</div>
@@ -379,7 +393,7 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 						<span class="row-value" id="qiimeManagerLabel"></span>
 					</div>
 					<div class="summary-row">
-						<span class="row-label">Platform</span>
+						<span class="row-label">Host platform</span>
 						<span class="row-value" id="platformLabel"></span>
 					</div>
 					<div class="summary-row">
@@ -438,6 +452,7 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 			manager: 'conda',
 			distribution: bootstrap.initialDistribution,
 			version: bootstrap.initialVersion,
+			environmentUrl: bootstrap.initialEnvironmentUrl,
 			interpreterPath: bootstrap.interpreterPath,
 			managerStatus: 'unknown',
 			qiimeStatus: 'unknown',
@@ -452,10 +467,13 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 			right.localeCompare(left, undefined, { numeric: true })
 		);
 		const availableEnvironmentsForVersion = () => state.environments
-			.filter((environment) => environment.version === state.version)
-			.filter((environment) => environment.platform === state.platform.id);
+			.filter((environment) => environment.version === state.version);
 		const firstEnvironmentForVersion = () => availableEnvironmentsForVersion()
 			.sort((left, right) => left.distribution.localeCompare(right.distribution))[0];
+		const availableEnvironmentsForDistribution = () => availableEnvironmentsForVersion()
+			.filter((environment) => environment.distribution === state.distribution);
+		const firstEnvironmentForDistribution = () => availableEnvironmentsForDistribution()
+			.sort((left, right) => left.url.localeCompare(right.url))[0];
 		const normalizeDistributionForVersion = () => {
 			const distributionsForVersion = new Set(availableEnvironmentsForVersion()
 				.map((environment) => environment.distribution));
@@ -463,16 +481,22 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 				state.distribution = firstEnvironmentForVersion()?.distribution || '';
 			}
 		};
+		const normalizeEnvironmentUrlForDistribution = () => {
+			const urlsForDistribution = new Set(availableEnvironmentsForDistribution()
+				.map((environment) => environment.url));
+			if (!urlsForDistribution.has(state.environmentUrl)) {
+				state.environmentUrl = firstEnvironmentForDistribution()?.url || '';
+			}
+		};
 		const updateSelectors = () => {
 			const availableVersions = uniqueValues(state.environments
-				.filter((environment) => environment.platform === state.platform.id)
 				.map((environment) => environment.version));
 			const versionSelect = document.getElementById('versionSelect');
 			versionSelect.innerHTML = availableVersions
 				.map((version) => '<option value="' + version + '">' + version + '</option>')
 				.join('');
 			if (!availableVersions.includes(state.version)) {
-				state.version = availableVersions[0] || bootstrap.versions[0];
+				state.version = availableVersions[0] || '';
 			}
 			versionSelect.value = state.version;
 			normalizeDistributionForVersion();
@@ -485,25 +509,31 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 				.join('');
 			normalizeDistributionForVersion();
 			distributionSelect.value = state.distribution;
+			normalizeEnvironmentUrlForDistribution();
+
+			const environmentUrlSelect = document.getElementById('environmentUrlSelect');
+			environmentUrlSelect.innerHTML = availableEnvironmentsForDistribution()
+				.sort((left, right) => left.fileName.localeCompare(right.fileName))
+				.map((environment) => '<option value="' + environment.url + '">' + environment.fileName + '</option>')
+				.join('');
+			normalizeEnvironmentUrlForDistribution();
+			environmentUrlSelect.value = state.environmentUrl;
 		};
 
 		const selectedEnvironment = () => state.environments.find((environment) =>
 			environment.distribution === state.distribution &&
 			environment.version === state.version &&
-			environment.platform === state.platform.id
-		) || state.environments.find((environment) =>
-			environment.version === state.version &&
-			environment.platform === state.platform.id
-		) || firstEnvironmentForVersion();
+			environment.url === state.environmentUrl
+		) || firstEnvironmentForDistribution() || firstEnvironmentForVersion();
 		const environmentName = () => selectedEnvironment()?.environmentName || '';
 		const environmentFile = () => selectedEnvironment()?.fileName || '';
 		const environmentUrl = () => selectedEnvironment()?.url || '';
 		const inferredInterpreterPath = () => state.interpreterPath ||
 			'/opt/miniforge/envs/' + environmentName() + '/bin/python';
-			const qiimeCommand = () => {
-				if (state.manager === 'pixi') {
-					return 'pixi init && pixi import ' + environmentUrl() + ' && pixi install';
-				}
+		const qiimeCommand = () => {
+			if (state.manager === 'pixi') {
+				return 'pixi init && pixi import ' + environmentUrl() + ' && pixi install';
+			}
 			if (state.manager === 'manual') {
 				return 'Open QIIME 2 Quickstart, then return to validate the selected interpreter.';
 			}
@@ -620,11 +650,17 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 
 		document.getElementById('distributionSelect').addEventListener('change', (event) => {
 			state.distribution = event.target.value;
+			normalizeEnvironmentUrlForDistribution();
+			render();
+		});
+		document.getElementById('environmentUrlSelect').addEventListener('change', (event) => {
+			state.environmentUrl = event.target.value;
 			render();
 		});
 		document.getElementById('versionSelect').addEventListener('change', (event) => {
 			state.version = event.target.value;
 			normalizeDistributionForVersion();
+			normalizeEnvironmentUrlForDistribution();
 			render();
 		});
 		for (const card of document.querySelectorAll('[data-manager]')) {
@@ -677,6 +713,7 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 				state.environments = event.data.environments;
 				state.statusMessage = event.data.message;
 				normalizeDistributionForVersion();
+				normalizeEnvironmentUrlForDistribution();
 				render();
 				return;
 			}
@@ -709,7 +746,7 @@ const uniqueQiimeVersions = (environments: QiimeEnvironmentOption[]): string[] =
 };
 
 const resolveInitialQiimeVersion = (environments: QiimeEnvironmentOption[]): string => {
-	return uniqueQiimeVersions(environments)[0] ?? QIIME_VERSIONS[0];
+	return uniqueQiimeVersions(environments)[0] ?? '';
 };
 
 const escapeHtml = (value: string): string => {

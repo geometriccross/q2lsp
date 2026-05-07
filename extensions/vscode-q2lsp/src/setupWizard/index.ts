@@ -10,10 +10,7 @@ import {
 	QIIME_QUICKSTART_URL,
 	type QiimePlatform,
 } from './qiimeConstants';
-import {
-	buildFallbackQiimeEnvironments,
-	resolveQiimePlatform,
-} from './qiimeMetadata';
+import { resolveQiimePlatform } from './qiimeMetadata';
 import { refreshQiimeManifest } from './qiimeRemote';
 
 export {
@@ -23,8 +20,6 @@ export {
 } from './view';
 export {
 	QIIME_DISTRIBUTIONS,
-	QIIME_MANIFEST_CONTENTS_URL,
-	QIIME_MANIFEST_TREE_URL,
 	QIIME_PACKAGES_BASE_URL,
 	QIIME_QUICKSTART_URL,
 	QIIME_VERSIONS,
@@ -36,6 +31,7 @@ export {
 	parseQiimeEnvironmentPath,
 	resolveQiimePlatform,
 } from './qiimeMetadata';
+export { buildQiimeEnvironmentsFromTree } from './qiimeRemote';
 
 type SetupWizardMessage = {
 	command?: unknown;
@@ -56,16 +52,15 @@ export const openSetupWizard = (params: {
 }): void => {
 	const { context, outputChannel, interpreterPath } = params;
 	const platform = resolveQiimePlatform(process.platform, process.arch);
-	const fallbackEnvironments = buildFallbackQiimeEnvironments(platform);
 	if (currentPanel) {
 		currentPanel.reveal(vscode.ViewColumn.One);
 		currentPanel.webview.html = buildSetupWizardHtml({
 			nonce: createNonce(),
 			interpreterPath,
 			platform,
-			environments: fallbackEnvironments,
+			environments: [],
 		});
-		void refreshQiimeManifest(currentPanel.webview, platform);
+		void refreshQiimeManifest(currentPanel.webview);
 		return;
 	}
 
@@ -82,9 +77,9 @@ export const openSetupWizard = (params: {
 		nonce: createNonce(),
 		interpreterPath,
 		platform,
-		environments: fallbackEnvironments,
+		environments: [],
 	});
-	void refreshQiimeManifest(panel.webview, platform);
+	void refreshQiimeManifest(panel.webview);
 
 	const messageDisposable = panel.webview.onDidReceiveMessage(
 		async (message: SetupWizardMessage) => {

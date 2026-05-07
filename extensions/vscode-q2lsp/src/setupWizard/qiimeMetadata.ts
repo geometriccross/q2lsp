@@ -1,5 +1,6 @@
 import {
 	QIIME_DISTRIBUTIONS,
+	QIIME_PACKAGES_BASE_URL,
 	QIIME_VERSIONS,
 	type QiimeEnvironmentOption,
 	type QiimePlatform,
@@ -17,7 +18,7 @@ export const buildSyntheticQiimeEnvironment = (
 			distribution,
 			platform: platform.id,
 			fileName,
-			url: `https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/${version}/${distribution}/released/${fileName}`,
+			url: `${QIIME_PACKAGES_BASE_URL}/${version}/${distribution}/released/${fileName}`,
 			environmentName: fileName.replace(/-(linux-64|osx-64|osx-arm64|linux|osx)-conda\.yml$/, ''),
 		};
 	}
@@ -32,76 +33,25 @@ export const buildSyntheticQiimeEnvironment = (
 		distribution,
 		platform: platform.id,
 		fileName,
-		url: `https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/${version}/${distribution}/released/${fileName}`,
+		url: `${QIIME_PACKAGES_BASE_URL}/${version}/${distribution}/released/${fileName}`,
 		environmentName: `qiime2-${distribution}-${version}`,
 	};
 };
 
 export const parseQiimeEnvironmentPath = (entryPath: string): QiimeEnvironmentOption | undefined => {
-	const match = /^(?<version>\d{4}\.\d+)\/(?<distribution>[^/]+)\/released\/(?<fileName>.+-(?<platform>linux-64|osx-64|osx-arm64|linux|osx)-conda\.yml)$/.exec(entryPath);
+	const match = /^(?<version>\d{4}\.\d+)\/(?<distribution>[^/]+)\/released\/(?<fileName>.+\.ya?ml)$/.exec(entryPath);
 	const groups = match?.groups;
 	if (!groups) {
 		return undefined;
-	}
-	const platform = normalizeQiimePlatformId(groups.platform);
-	const fileMetadata = parseQiimeEnvironmentFileName(groups.fileName);
-	if (!fileMetadata) {
-		return undefined;
-	}
-	if (fileMetadata.platform !== platform || fileMetadata.distribution !== groups.distribution) {
-		return undefined;
-	}
-	if (fileMetadata.kind === 'rachis' && !isRachisQiimeVersion(groups.version)) {
-		return undefined;
-	}
-	if (fileMetadata.kind === 'legacy') {
-		if (isRachisQiimeVersion(groups.version) || fileMetadata.version !== groups.version) {
-			return undefined;
-		}
 	}
 
 	return {
 		version: groups.version,
 		distribution: groups.distribution,
-		platform,
+		platform: inferQiimePlatformId(groups.fileName),
 		fileName: groups.fileName,
-		url: `https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/${entryPath}`,
-		environmentName: groups.fileName.replace(/-(linux-64|osx-64|osx-arm64|linux|osx)-conda\.yml$/, ''),
-	};
-};
-
-type QiimeEnvironmentFileMetadata =
-	| {
-		kind: 'rachis';
-		distribution: string;
-		platform: string;
-	}
-	| {
-		kind: 'legacy';
-		distribution: string;
-		version: string;
-		platform: string;
-	};
-
-const parseQiimeEnvironmentFileName = (fileName: string): QiimeEnvironmentFileMetadata | undefined => {
-	const rachisMatch = /^rachis-(?<distribution>.+)-(?<platform>linux-64|osx-64|osx-arm64)-conda\.yml$/.exec(fileName);
-	if (rachisMatch?.groups) {
-		return {
-			kind: 'rachis',
-			distribution: rachisMatch.groups.distribution,
-			platform: normalizeQiimePlatformId(rachisMatch.groups.platform),
-		};
-	}
-
-	const legacyMatch = /^qiime2-(?<distribution>.+)-(?<version>\d{4}\.\d+)-py\d+-(?<platform>linux|osx)-conda\.yml$/.exec(fileName);
-	if (!legacyMatch?.groups) {
-		return undefined;
-	}
-	return {
-		kind: 'legacy',
-		distribution: legacyMatch.groups.distribution,
-		version: legacyMatch.groups.version,
-		platform: normalizeQiimePlatformId(legacyMatch.groups.platform),
+		url: `${QIIME_PACKAGES_BASE_URL}/${entryPath}`,
+		environmentName: formatQiimeEnvironmentName(groups.fileName),
 	};
 };
 
@@ -110,14 +60,29 @@ const isRachisQiimeVersion = (version: string): boolean => {
 	return Number.isFinite(year) && year >= 2026;
 };
 
-const normalizeQiimePlatformId = (platform: string): string => {
-	if (platform === 'linux') {
+export const inferQiimePlatformId = (fileName: string): string => {
+	if (/(^|-)linux-64(-|\.|_)/.test(fileName) || /(^|-)linux(-|\.|_)/.test(fileName)) {
 		return 'linux-64';
 	}
-	if (platform === 'osx') {
+	if (/(^|-)osx-64(-|\.|_)/.test(fileName) || /(^|-)osx(-|\.|_)/.test(fileName)) {
 		return 'osx-64';
 	}
-	return platform;
+	if (/(^|-)osx-arm64(-|\.|_)/.test(fileName)) {
+		return 'osx-arm64';
+	}
+	if (fileName.includes('ubuntu-latest')) {
+		return 'ubuntu-latest';
+	}
+	if (fileName.includes('macos-latest')) {
+		return 'macos-latest';
+	}
+	return 'unknown';
+};
+
+export const formatQiimeEnvironmentName = (fileName: string): string => {
+	return fileName
+		.replace(/-conda\.ya?ml$/, '')
+		.replace(/\.ya?ml$/, '');
 };
 
 export const compareQiimeEnvironmentOptions = (
@@ -151,7 +116,7 @@ export const buildFallbackQiimeEnvironments = (platform: QiimePlatform): QiimeEn
 				distribution: 'qiime2',
 				platform: platform.id,
 				fileName,
-				url: `https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/${version}/qiime2/released/${fileName}`,
+				url: `${QIIME_PACKAGES_BASE_URL}/${version}/qiime2/released/${fileName}`,
 				environmentName: fileName.replace(/-(linux-64|osx-64|osx-arm64|linux|osx)-conda\.yml$/, ''),
 			});
 			continue;
@@ -165,7 +130,7 @@ export const buildFallbackQiimeEnvironments = (platform: QiimePlatform): QiimeEn
 				distribution,
 				platform: platform.id,
 				fileName,
-				url: `https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/${version}/${distribution}/released/${fileName}`,
+				url: `${QIIME_PACKAGES_BASE_URL}/${version}/${distribution}/released/${fileName}`,
 				environmentName: `qiime2-${distribution}-${version}`,
 			});
 		}

@@ -31,7 +31,7 @@ import {
 	resolveQiimeRunTerminal,
 	toQiimeRunCommandPayload,
 } from './runCommand';
-import { openSetupWizard } from './setupWizard';
+import { openSetupWizard } from './setupWizard/index';
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
