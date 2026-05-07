@@ -274,32 +274,6 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 			white-space: pre-wrap;
 			word-break: break-word;
 		}
-		.progress {
-			border: 1px solid var(--vscode-widget-border);
-			display: grid;
-		}
-		.progress-row {
-			align-items: center;
-			border-bottom: 1px solid var(--vscode-widget-border);
-			display: flex;
-			gap: 8px;
-			padding: 8px 10px;
-		}
-		.progress-row:last-child {
-			border-bottom: 0;
-		}
-		.dot {
-			background: var(--vscode-descriptionForeground);
-			border-radius: 50%;
-			height: 8px;
-			width: 8px;
-		}
-		.dot.active {
-			background: var(--vscode-focusBorder);
-		}
-		.dot.success {
-			background: var(--vscode-testing-iconPassed);
-		}
 		.actions {
 			align-items: center;
 			display: flex;
@@ -398,11 +372,6 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 					<span class="note">Official environment file will be opened or downloaded before running.</span>
 				</div>
 				<div class="status-line" id="qiimeStatusMessage"></div>
-				<div class="progress">
-					<div class="progress-row"><span class="dot active" data-progress="createEnvironment"></span>Create environment</div>
-					<div class="progress-row"><span class="dot" data-progress="qiimeInfo"></span>Run qiime info</div>
-					<div class="progress-row"><span class="dot" data-progress="locateInterpreter"></span>Locate Python interpreter</div>
-				</div>
 				<div class="actions">
 					<button type="button" class="action" data-back>Back</button>
 					<button type="button" class="action" data-command="validateEnvironment">Validate Environment</button>
@@ -416,12 +385,6 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 					<span class="note">Installs only the language server package into the selected QIIME 2 environment.</span>
 				</div>
 				<div class="status-line" id="q2lspStatusMessage"></div>
-				<div class="progress">
-					<div class="progress-row"><span class="dot active" data-progress="installQ2lsp"></span>Install q2lsp</div>
-					<div class="progress-row"><span class="dot" data-progress="validateQ2lsp"></span>Validate q2lsp import</div>
-					<div class="progress-row"><span class="dot" data-progress="saveInterpreter"></span>Save q2lsp.interpreterPath</div>
-					<div class="progress-row"><span class="dot"></span>Restart q2lsp server</div>
-				</div>
 				<div class="actions">
 					<button type="button" class="action" data-back>Back</button>
 					<button type="button" class="action" data-command="validateQ2lsp">Validate q2lsp</button>
@@ -600,18 +563,6 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 				state.stepIndex === 3 ? state.statusMessage : '';
 			document.getElementById('saveInterpreterPathAction').disabled = state.q2lspStatus !== 'ready';
 			document.getElementById('restartServerAction').disabled = !state.savedInterpreterPath;
-			document.querySelector('[data-progress="createEnvironment"]').className =
-				'dot ' + (state.qiimeStatus === 'ready' ? 'success' : 'active');
-			document.querySelector('[data-progress="qiimeInfo"]').className =
-				'dot ' + (state.qiimeStatus === 'ready' ? 'success' : '');
-			document.querySelector('[data-progress="locateInterpreter"]').className =
-				'dot ' + (state.interpreterPath ? 'success' : '');
-			document.querySelector('[data-progress="installQ2lsp"]').className =
-				'dot ' + (state.q2lspStatus === 'ready' ? 'success' : 'active');
-			document.querySelector('[data-progress="validateQ2lsp"]').className =
-				'dot ' + (state.q2lspStatus === 'ready' ? 'success' : '');
-			document.querySelector('[data-progress="saveInterpreter"]').className =
-				'dot ' + (state.savedInterpreterPath ? 'success' : '');
 			renderChips();
 		};
 
@@ -672,7 +623,6 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 		window.addEventListener('message', (event) => {
 			if (event.data?.type === 'qiimeManifest') {
 				state.environments = event.data.environments;
-				state.statusMessage = event.data.message;
 				normalizeDistributionForVersion();
 				normalizeEnvironmentUrlForDistribution();
 				render();

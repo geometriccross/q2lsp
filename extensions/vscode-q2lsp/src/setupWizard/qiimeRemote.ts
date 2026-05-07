@@ -15,7 +15,6 @@ export const refreshQiimeManifest = async (webview: vscode.Webview): Promise<voi
 		await webview.postMessage({
 			type: 'qiimeManifest',
 			environments: remoteEnvironments,
-			message: 'Refreshed QIIME 2 versions and environment files.',
 		});
 		return;
 	}
@@ -23,7 +22,6 @@ export const refreshQiimeManifest = async (webview: vscode.Webview): Promise<voi
 	await webview.postMessage({
 		type: 'qiimeManifest',
 		environments: [],
-		message: 'Could not refresh QIIME 2 versions.',
 	});
 };
 
