@@ -15,8 +15,9 @@ suite('q2lsp setup wizard tests', () => {
 	test('wizard html shows the setup flow steps', () => {
 		const html = buildSetupWizardHtml({ nonce: 'test-nonce' });
 
-		for (const step of SETUP_WIZARD_FLOW_STEPS) {
-			assert.ok(html.includes(step.label));
+		for (const [index, step] of SETUP_WIZARD_FLOW_STEPS.entries()) {
+			assert.ok(html.includes(`<span class="step-index">${index + 1}</span>`));
+			assert.ok(html.includes(step.label.replace(/^\d\s/, '')));
 		}
 	});
 
@@ -120,8 +121,9 @@ suite('q2lsp setup wizard tests', () => {
 			],
 		});
 
-		assert.ok(html.includes('pixi init && pixi import --format conda-env https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/2026.4/qiime2/released/rachis-qiime2-linux-64-conda.yml -e q2:qiime2:2026.4 && pixi install'));
-		assert.ok(html.includes(' && pixi install'));
+		assert.ok(html.includes('https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/2026.4/qiime2/released/rachis-qiime2-linux-64-conda.yml'));
+		assert.ok(html.includes('pixi init && pixi import --format conda-env'));
+		assert.ok(html.includes("' -e ' + pixiEnvironmentName() + ' && pixi install'"));
 		assert.ok(!html.includes('--format pyproject'));
 		assert.ok(html.includes('pixi run python -m pip install -U q2lsp'));
 		assert.ok(!html.includes('mkdir -p .qiime2'));
