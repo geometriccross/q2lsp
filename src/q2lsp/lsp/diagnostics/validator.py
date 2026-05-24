@@ -16,6 +16,15 @@ from q2lsp.lsp.diagnostics.stages import (
 )
 from q2lsp.lsp.types import ParsedCommand
 from q2lsp.qiime.catalog import QiimeCatalog
+from q2lsp.qiime.types import CommandHierarchy
+
+
+def validate_command(
+    command: ParsedCommand, hierarchy: CommandHierarchy
+) -> list[DiagnosticIssue]:
+    return validate_command_with_catalog(
+        command, QiimeCatalog.from_hierarchy(hierarchy)
+    )
 
 
 def validate_command_with_catalog(

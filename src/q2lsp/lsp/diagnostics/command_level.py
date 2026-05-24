@@ -8,7 +8,6 @@ from q2lsp.lsp.diagnostics.models import (
     DependencyReference,
 )
 from q2lsp.lsp.diagnostics.codes import UNKNOWN_OPTION
-from q2lsp.lsp.diagnostics.hierarchy import _get_root_node
 from q2lsp.lsp.diagnostics.stages import _has_help_invocation
 from q2lsp.lsp.diagnostics.validator import validate_command
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
@@ -71,6 +70,12 @@ def extract_command_dependencies(
             outputs.extend(_iter_option_value_references(option, source_text))
 
     return CommandDependencies(inputs=tuple(inputs), outputs=tuple(outputs))
+
+
+def _get_root_node(hierarchy: CommandHierarchy) -> JsonObject | None:
+    if not hierarchy:
+        return None
+    return next(iter(hierarchy.values()), None)
 
 
 def _get_action_node(

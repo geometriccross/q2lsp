@@ -208,3 +208,44 @@ def _validate_required_options_with_catalog(
     return _validate_required_options_for_action(
         tokens, action_node, unknown_option_suggestions
     )
+
+
+def _has_help_invocation(
+    option_tokens: list[TokenSpan],
+    option_groups: tuple[OptionGroup[TokenSpan], ...],
+    action_node: JsonObject,
+) -> bool:
+    flag_option_labels = _get_flag_option_labels(action_node)
+
+    for option in option_groups:
+        if option.option_text == "--help":
+            return True
+
+        for index, value_token in enumerate(option.value_tokens):
+            if value_token.text != "-h":
+                continue
+            if option.option_text in flag_option_labels:
+                return True
+            if index == 0 and option.inline_value is None:
+                continue
+            return True
+
+    if not option_groups:
+        return any(token.text == "-h" for token in option_tokens)
+
+    for token in option_tokens:
+        token_text = token.text
+        if token_text.startswith("--"):
+            break
+        if token_text == "-h":
+            return True
+
+    return False
+
+
+def _get_flag_option_labels(action_node: JsonObject) -> set[str]:
+    return {
+        format_qiime_option_label(option_prefix, name)
+        for name, option_prefix, param in iter_signature_params(action_node)
+        if param.get("is_bool_flag") is True
+    }

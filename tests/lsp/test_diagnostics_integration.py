@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pytest
 
+from q2lsp.lsp.diagnostics import validate_command_with_catalog
+from q2lsp.lsp.document_commands import analyze_document
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
 
@@ -56,19 +58,10 @@ class TestDiagnosticsParserValidatorIntegration:
     ) -> None:
         """Test that a typo in a plugin name produces a validation issue."""
 
-        # Create mock document with typo
-        class MockDocument:
-            uri = "file:///test.sh"
-            version = 1
-            source = "qiime feature-tabel summarize"
-
-        from q2lsp.lsp.diagnostics import validate_command_with_catalog
-        from q2lsp.lsp.parser import find_qiime_commands, merge_line_continuations
-
-        doc = analyze_document(MockDocument.source)
+        doc = analyze_document("qiime feature-tabel summarize")
 
         issues = validate_command_with_catalog(
-            commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
+            doc.commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
         )
 
         assert len(issues) == 1
@@ -79,16 +72,10 @@ class TestDiagnosticsParserValidatorIntegration:
 
     def test_valid_command_no_issues(self, mock_hierarchy: CommandHierarchy) -> None:
         """Test that a valid command produces no validation issues."""
-        from q2lsp.lsp.diagnostics import validate_command_with_catalog
-        from q2lsp.lsp.parser import find_qiime_commands, merge_line_continuations
-
-        class MockDocument:
-            source = "qiime feature-table summarize --i-table table.qza"
-
-        doc = analyze_document(MockDocument.source)
+        doc = analyze_document("qiime feature-table summarize --i-table table.qza")
 
         issues = validate_command_with_catalog(
-            commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
+            doc.commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
         )
 
         assert issues == []
@@ -97,16 +84,10 @@ class TestDiagnosticsParserValidatorIntegration:
         self, mock_hierarchy: CommandHierarchy
     ) -> None:
         """Test that an option typo produces a validation issue with correct code."""
-        from q2lsp.lsp.diagnostics import validate_command_with_catalog
-        from q2lsp.lsp.parser import find_qiime_commands, merge_line_continuations
-
-        class MockDocument:
-            source = "qiime feature-table summarize --i-tabel"
-
-        doc = analyze_document(MockDocument.source)
+        doc = analyze_document("qiime feature-table summarize --i-tabel")
 
         issues = validate_command_with_catalog(
-            commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
+            doc.commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
         )
 
         assert len(issues) == 1
