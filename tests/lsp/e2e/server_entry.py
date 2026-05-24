@@ -7,6 +7,7 @@ without loading the full QIIME2 command hierarchy.
 from __future__ import annotations
 
 from q2lsp.lsp.server import create_server
+from q2lsp.qiime.catalog import make_catalog_provider
 from q2lsp.qiime.types import CommandHierarchy
 
 
@@ -66,7 +67,9 @@ def _stub_hierarchy_provider() -> CommandHierarchy:
 
 def main() -> None:
     """Start the test LSP server."""
-    server = create_server(get_hierarchy=_stub_hierarchy_provider)
+    server = create_server(
+        get_catalog=make_catalog_provider(_stub_hierarchy_provider)
+    )
     server.start_io()
 
 

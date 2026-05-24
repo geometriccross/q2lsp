@@ -228,9 +228,9 @@ class TestCompletionsDiagnosticsConsistency:
         catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
 
         completion_names = _labels(complete_root(root_node, ""))
-        valid_plugins, valid_builtins = catalog.valid_plugins_and_builtins()
+        valid_command_names = {command.name for command in catalog.commands()}
 
-        assert completion_names == (valid_plugins | valid_builtins)
+        assert completion_names == valid_command_names
 
     def test_action_names_match_between_features(
         self, shared_hierarchy: CommandHierarchy
@@ -240,9 +240,9 @@ class TestCompletionsDiagnosticsConsistency:
         catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
 
         completion_action_names = _labels(complete_plugin(root_node, "diversity", ""))
-        valid_actions = set(catalog.valid_actions("diversity"))
+        valid_action_names = {action.name for action in catalog.actions("diversity")}
 
-        assert completion_action_names == valid_actions
+        assert completion_action_names == valid_action_names
 
         for action_name in completion_action_names:
             command = _build_parsed_command(["qiime", "diversity", action_name])

@@ -29,7 +29,10 @@ def test_catalog_provider_builds_catalog_once() -> None:
     assert hierarchy_calls == 1
     assert catalog_1 is catalog_2
     assert isinstance(catalog_1, QiimeCatalog)
-    assert catalog_1.root_name == "qiime"
-    assert catalog_1.builtin_names == ("info",)
-    assert catalog_1.command_names == ("info", "feature-table")
-    assert catalog_1.is_builtin("info") is True
+    assert catalog_1.root().name == "qiime"
+    assert [command.name for command in catalog_1.commands()] == [
+        "info",
+        "feature-table",
+    ]
+    assert catalog_1.command("info") is not None
+    assert catalog_1.command("info").kind == "builtin"  # type: ignore[union-attr]

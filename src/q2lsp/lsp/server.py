@@ -34,8 +34,7 @@ from q2lsp.lsp.document_commands import (
 )
 from q2lsp.lsp.error_handling import wrap_async_handler, wrap_handler
 from q2lsp.lsp.hover import get_hover_help
-from q2lsp.qiime.catalog import make_catalog_provider
-from q2lsp.qiime.hierarchy_provider import HierarchyProvider
+from q2lsp.qiime.catalog import CatalogProvider
 from q2lsp.usecases.get_completions_usecase import (
     CompletionRequest,
     get_completions,
@@ -92,7 +91,7 @@ class Utf16LanguageServerProtocol(LanguageServerProtocol):
 
 def create_server(
     *,
-    get_hierarchy: HierarchyProvider,
+    get_catalog: CatalogProvider,
     get_help: Callable[[list[str]], str | None] | None = None,
     logger: logging.Logger | None = None,
     debounce_ms: int = 400,
@@ -101,7 +100,7 @@ def create_server(
     Create and configure the LSP server.
 
     Args:
-        get_hierarchy: Provider function for QIIME2 command hierarchy.
+        get_catalog: Provider function for QIIME2 command catalog.
         get_help: Provider function for hover help text (takes command path).
         logger: Optional logger instance. If None, uses default q2lsp.lsp logger.
         debounce_ms: Debounce delay in milliseconds for diagnostics. Default 400.
@@ -114,7 +113,6 @@ def create_server(
 
     server = LanguageServer("q2lsp", "v0.1.0", protocol_cls=Utf16LanguageServerProtocol)
     debounce_manager = DebounceManager()
-    get_catalog = make_catalog_provider(get_hierarchy)
 
     def _empty_completion_list() -> types.CompletionList:
         return types.CompletionList(is_incomplete=False, items=[])

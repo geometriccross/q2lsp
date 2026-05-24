@@ -6,10 +6,7 @@ import pytest
 
 from q2lsp.lsp.diagnostics import codes
 from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
-from q2lsp.lsp.diagnostics.validator import (
-    validate_command,
-    validate_command_with_catalog,
-)
+from q2lsp.lsp.diagnostics.validator import validate_command_with_catalog
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
@@ -447,6 +444,35 @@ class TestValidateCommand:
 class TestValidateOptions:
     """Tests for option validation."""
 
+    def test_unknown_option_on_valid_action_with_empty_signature_emits_diagnostic(self) -> None:
+        hierarchy = {
+            "qiime": {
+                "name": "qiime",
+                "builtins": [],
+                "demo": {
+                    "name": "demo",
+                    "step": {
+                        "name": "step",
+                        "signature": [],
+                    },
+                },
+            }
+        }
+        tokens = [
+            TokenSpan("qiime", 0, 5),
+            TokenSpan("demo", 6, 10),
+            TokenSpan("step", 11, 15),
+            TokenSpan("--bad", 16, 21),
+            TokenSpan("x", 22, 23),
+        ]
+        cmd = ParsedCommand(tokens=tokens, start=0, end=23)
+        catalog = QiimeCatalog.from_hierarchy(hierarchy)
+
+        issues = validate_command_with_catalog(cmd, catalog)
+
+        assert [issue.code for issue in issues] == [codes.UNKNOWN_OPTION]
+        assert "--bad" in issues[0].message
+
     def test_option_typo_with_suggestion(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:
@@ -651,7 +677,9 @@ class TestValidateRequiredOptions:
             TokenSpan("-h", 47, 49),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=49)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(
+            cmd, hierarchy_with_plugins_and_builtins
+        )
 
         missing = [
             issue
@@ -673,7 +701,9 @@ class TestValidateRequiredOptions:
             TokenSpan("-h", 51, 53),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=53)
-        issues = validate_command(cmd, hierarchy_with_plugins_and_builtins)
+        issues = validate_command_with_hierarchy(
+            cmd, hierarchy_with_plugins_and_builtins
+        )
 
         assert issues == []
 
@@ -710,7 +740,7 @@ class TestValidateRequiredOptions:
             TokenSpan("-h", 46, 48),
         ]
         cmd = ParsedCommand(tokens=tokens, start=0, end=48)
-        issues = validate_command(cmd, hierarchy)
+        issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         assert issues == []
 

@@ -3,41 +3,43 @@ from __future__ import annotations
 import pytest
 
 from q2lsp.qiime.catalog import QiimeCatalog
+from q2lsp.qiime.catalog_facts import (
+    QiimeActionFact,
+    QiimeCommandFact,
+    QiimeOptionFact,
+    QiimeRootFact,
+)
 from q2lsp.qiime.q2cli_gateway import build_qiime_catalog
 from q2lsp.qiime.types import CommandHierarchy
 
 
 def test_qiime_catalog_wraps_hierarchy_immutably() -> None:
-    hierarchy: CommandHierarchy = {"qiime": {"builtins": []}}
+    hierarchy: CommandHierarchy = {
+        "qiime": {
+            "name": "qiime",
+            "short_help": "QIIME summary",
+            "builtins": ["info"],
+            "info": {"short_help": "Display information", "type": "builtin"},
+        }
+    }
 
     catalog = QiimeCatalog.from_hierarchy(hierarchy)
 
     hierarchy["other"] = {"builtins": []}
-
-    assert catalog.root_name == "qiime"
-    assert "other" not in catalog.hierarchy
-    with pytest.raises(TypeError):
-        catalog.hierarchy["new"] = {"builtins": []}  # type: ignore[index]
-
-
-def test_qiime_catalog_deep_freezes_hierarchy() -> None:
-    hierarchy: CommandHierarchy = {
-        "qiime": {"builtins": ["info"], "plugin": {"actions": {"act": {}}}}
-    }
-
-    catalog = QiimeCatalog.from_hierarchy(hierarchy)
     hierarchy["qiime"]["builtins"] = ["changed"]
-    plugin = hierarchy["qiime"]["plugin"]
-    assert isinstance(plugin, dict)
-    plugin["actions"] = {}
+    hierarchy["qiime"]["info"] = {"short_help": "Changed", "type": "builtin"}
 
-    qiime = catalog.hierarchy["qiime"]
-    assert qiime["builtins"] == ("info",)
-    assert isinstance(qiime["builtins"], tuple)
-    with pytest.raises(AttributeError):
-        qiime["builtins"].append("changed")  # type: ignore[attr-defined,union-attr]
-    with pytest.raises(TypeError):
-        qiime["plugin"]["actions"] = {}  # type: ignore[index]
+    assert catalog.root() == QiimeRootFact(
+        name="qiime", summary="QIIME summary", help_text="QIIME summary"
+    )
+    assert [command.name for command in catalog.commands()] == ["info"]
+    assert catalog.command("info") == QiimeCommandFact(
+        name="info",
+        kind="builtin",
+        summary="Display information",
+        help_text="Display information",
+        has_actions=False,
+    )
 
 
 def test_build_qiime_catalog_uses_owned_catalog(
@@ -52,146 +54,33 @@ def test_build_qiime_catalog_uses_owned_catalog(
     catalog = build_qiime_catalog()
 
     assert isinstance(catalog, QiimeCatalog)
-    assert catalog.hierarchy["qiime"]["builtins"] == ()
+    assert catalog.root().name == "qiime"
+    assert catalog.commands() == ()
 
 
-def test_qiime_catalog_exposes_completion_accessors_without_mutable_leaks() -> None:
-    hierarchy: CommandHierarchy = {
-        "qiime": {
-            "builtins": ["info"],
-            "info": {"short_help": "Display information"},
-            "feature-table": {
-                "short_description": "Feature table operations",
-                "summarize": {"description": "Summarize feature table"},
-            },
-        }
-    }
-
-    catalog = QiimeCatalog.from_hierarchy(hierarchy)
-    info = catalog.command_node("info")
-    assert info is not None
-    info["short_help"] = "changed"
-
-    assert catalog.builtin_names == ("info",)
-    assert catalog.command_names == ("info", "feature-table")
-    assert catalog.is_builtin("info") is True
-    assert catalog.is_builtin("feature-table") is False
-    assert catalog.command_node("info") == {"short_help": "Display information"}
-    assert catalog.command_node("missing") is None
+def test_qiime_catalog_rejects_malformed_hierarchy_without_qiime_root() -> None:
+    with pytest.raises(ValueError, match="QIIME root command"):
+        QiimeCatalog.from_hierarchy({})
 
 
-def test_qiime_catalog_root_node_returns_owned_thawed_copy() -> None:
-    hierarchy: CommandHierarchy = {
-        "qiime": {
-            "builtins": ["info"],
-            "feature-table": {"actions": {"summarize": {}}},
-        }
-    }
-    catalog = QiimeCatalog.from_hierarchy(hierarchy)
-
-    root = catalog.root_node()
-    assert root is not None
-    root["builtins"] = ["changed"]
-    feature_table = root["feature-table"]
-    assert isinstance(feature_table, dict)
-    feature_table["actions"] = {}
-
-    assert catalog.root_node() == {
-        "builtins": ["info"],
-        "feature-table": {"actions": {"summarize": {}}},
-    }
-
-
-def test_qiime_catalog_action_node_returns_owned_thawed_copy() -> None:
-    hierarchy: CommandHierarchy = {
-        "qiime": {
-            "builtins": [],
-            "feature-table": {
-                "summarize": {"epilog": ["example"], "inputs": {"table": {}}}
-            },
-        }
-    }
-    catalog = QiimeCatalog.from_hierarchy(hierarchy)
-
-    action = catalog.action_node("feature-table", "summarize")
-    assert action is not None
-    action["epilog"] = ["changed"]
-    inputs = action["inputs"]
-    assert isinstance(inputs, dict)
-    inputs["table"] = {"changed": True}
-
-    assert catalog.action_node("feature-table", "summarize") == {
-        "epilog": ["example"],
-        "inputs": {"table": {}},
-    }
-
-
-def test_qiime_catalog_accessors_handle_absent_root() -> None:
-    catalog = QiimeCatalog.from_hierarchy({})
-
-    assert catalog.root_node() is None
-    assert catalog.command_node("info") is None
-    assert catalog.action_node("feature-table", "summarize") is None
-    assert catalog.builtin_names == ()
-    assert catalog.command_names == ()
-    assert catalog.valid_plugins_and_builtins() == (set(), set())
-    assert catalog.valid_actions("feature-table") == []
-    assert catalog.is_builtin("info") is False
-    assert catalog.is_builtin_leaf("info") is False
-    assert catalog.root_help() is None
-    assert catalog.command_help("info") is None
-    assert catalog.action_help("feature-table", "summarize") is None
-
-
-def test_qiime_catalog_accessors_handle_empty_root() -> None:
-    catalog = QiimeCatalog.from_hierarchy({"qiime": {}})
-
-    assert catalog.root_node() == {}
-    assert catalog.command_node("info") is None
-    assert catalog.action_node("feature-table", "summarize") is None
-    assert catalog.builtin_names == ()
-    assert catalog.command_names == ()
-    assert catalog.valid_plugins_and_builtins() == (set(), set())
-    assert catalog.valid_actions("feature-table") == []
-
-
-def test_qiime_catalog_returns_valid_plugins_and_builtins() -> None:
+def test_qiime_catalog_returns_root_fact() -> None:
     hierarchy: CommandHierarchy = {
         "qiime": {
             "name": "qiime",
             "help": "Root help",
-            "builtins": ["info"],
-            "info": {"type": "builtin"},
-            "feature-table": {"description": "Feature table operations"},
-            "metadata": "not a command node",
-        }
-    }
-
-    catalog = QiimeCatalog.from_hierarchy(hierarchy)
-
-    assert catalog.valid_plugins_and_builtins() == ({"feature-table"}, {"info"})
-
-
-def test_qiime_catalog_returns_valid_actions_for_command() -> None:
-    hierarchy: CommandHierarchy = {
-        "qiime": {
+            "short_help": "Root summary",
             "builtins": [],
-            "feature-table": {
-                "name": "feature-table",
-                "description": "Feature table operations",
-                "actions": {},
-                "summarize": {"description": "Summarize feature table"},
-                "metadata": "not an action node",
-            },
         }
     }
 
     catalog = QiimeCatalog.from_hierarchy(hierarchy)
 
-    assert catalog.valid_actions("feature-table") == ["summarize"]
+    assert catalog.root() == QiimeRootFact(
+        name="qiime", summary="Root summary", help_text="Root help"
+    )
 
 
-def test_qiime_catalog_matches_builtin_leaf_semantics() -> None:
+def test_qiime_catalog_returns_command_facts_for_builtins_and_plugins() -> None:
     hierarchy: CommandHierarchy = {
         "qiime": {
             "builtins": ["info", "tools"],
@@ -201,50 +90,155 @@ def test_qiime_catalog_matches_builtin_leaf_semantics() -> None:
             },
             "tools": {
                 "type": "builtin",
-                "export": {"short_help": "Export data"},
+                "short_help": "Tools",
+                "import": {"description": "Import data"},
             },
             "feature-table": {
+                "short_description": "Feature table operations",
                 "summarize": {"description": "Summarize feature table"},
             },
+            "metadata": "not a command node",
         }
     }
 
     catalog = QiimeCatalog.from_hierarchy(hierarchy)
 
-    assert catalog.is_builtin_leaf("info") is True
-    assert catalog.is_builtin_leaf("tools") is False
-    assert catalog.is_builtin_leaf("feature-table") is False
+    assert catalog.commands() == (
+        QiimeCommandFact(
+            name="info",
+            kind="builtin",
+            summary="Display information",
+            help_text="Display information",
+            has_actions=False,
+        ),
+        QiimeCommandFact(
+            name="tools",
+            kind="builtin",
+            summary="Tools",
+            help_text="Tools",
+            has_actions=True,
+        ),
+        QiimeCommandFact(
+            name="feature-table",
+            kind="plugin",
+            summary="Feature table operations",
+            help_text="Feature table operations",
+            has_actions=True,
+        ),
+    )
+    assert catalog.command("missing") is None
 
 
-def test_qiime_catalog_exposes_hover_help_accessors() -> None:
+def test_qiime_catalog_returns_action_facts_for_plugins_and_builtin_groups() -> None:
     hierarchy: CommandHierarchy = {
         "qiime": {
-            "help": "Root help",
-            "short_help": "Root short help",
-            "builtins": ["info"],
-            "info": {"short_help": "Info short help"},
+            "builtins": ["tools"],
+            "tools": {
+                "type": "builtin",
+                "import": {"description": "Import data"},
+            },
             "feature-table": {
-                "short_description": "Feature table short description",
-                "description": "Feature table description",
+                "name": "feature-table",
+                "description": "Feature table operations",
+                "actions": {},
                 "summarize": {
                     "description": "Summarize feature table",
                     "epilog": ["Example command"],
                 },
+                "metadata": "not an action node",
             },
         }
     }
 
     catalog = QiimeCatalog.from_hierarchy(hierarchy)
 
-    assert catalog.root_help() == "Root help"
-    assert catalog.command_help("info") == "Info short help"
-    assert catalog.command_help("feature-table") == "Feature table short description"
-    assert catalog.action_help("feature-table", "summarize") == (
-        "Summarize feature table\n\nExample command"
+    assert catalog.actions("tools") == (
+        QiimeActionFact(
+            command_name="tools",
+            name="import",
+            summary="Import data",
+            help_text="Import data",
+        ),
     )
+    assert catalog.actions("feature-table") == (
+        QiimeActionFact(
+            command_name="feature-table",
+            name="summarize",
+            summary="Summarize feature table",
+            help_text="Summarize feature table\n\nExample command",
+        ),
+    )
+    assert catalog.action("feature-table", "missing") is None
+    assert catalog.actions("missing") == ()
 
 
-def test_qiime_catalog_help_accessors_use_fallback_precedence() -> None:
+def test_qiime_catalog_returns_option_facts_from_action_signature() -> None:
+    hierarchy: CommandHierarchy = {
+        "qiime": {
+            "builtins": [],
+            "feature-table": {
+                "summarize": {
+                    "description": "Summarize feature table",
+                    "signature": [
+                        {
+                            "name": "table",
+                            "type": "FeatureTable",
+                            "description": "Input table",
+                            "signature_type": "input",
+                        },
+                        {
+                            "name": "sampling_depth",
+                            "type": "Int",
+                            "description": "Reads per sample",
+                            "signature_type": "parameter",
+                            "default": 1000,
+                        },
+                        {
+                            "name": "metadata_file",
+                            "type": "Metadata",
+                            "description": "Sample metadata",
+                            "signature_type": "metadata",
+                            "is_bool_flag": True,
+                        },
+                    ],
+                }
+            },
+        }
+    }
+
+    catalog = QiimeCatalog.from_hierarchy(hierarchy)
+
+    assert catalog.action_options("feature-table", "summarize") == (
+        QiimeOptionFact(
+            name="table",
+            label="--i-table",
+            kind="input",
+            required=True,
+            description="Input table",
+            value_type="FeatureTable",
+        ),
+        QiimeOptionFact(
+            name="sampling_depth",
+            label="--p-sampling-depth",
+            kind="parameter",
+            required=False,
+            description="Reads per sample",
+            value_type="Int",
+        ),
+        QiimeOptionFact(
+            name="metadata_file",
+            label="--m-metadata-file",
+            kind="metadata",
+            required=True,
+            description="Sample metadata",
+            value_type="Metadata",
+            is_bool_flag=True,
+        ),
+    )
+    assert catalog.action_options("feature-table", "missing") == ()
+
+
+def test_qiime_catalog_action_help_uses_description_and_epilog_only() -> None:
     hierarchy: CommandHierarchy = {
         "qiime": {
             "short_help": "Root short help",
@@ -263,9 +257,14 @@ def test_qiime_catalog_help_accessors_use_fallback_precedence() -> None:
     }
     catalog = QiimeCatalog.from_hierarchy(hierarchy)
 
-    assert catalog.root_help() == "Root short help"
-    assert catalog.command_help("info") == "Info help"
-    assert catalog.command_help("tools") == "Tools description"
-    assert catalog.command_help("feature-table") == "Feature table description"
-    assert catalog.action_help("feature-table", "summarize") is None
-    assert catalog.action_help("feature-table", "tabulate") == "Tabulate description"
+    assert catalog.root().help_text == "Root short help"
+    assert catalog.command("info") is not None
+    assert catalog.command("info").help_text == "Info help"  # type: ignore[union-attr]
+    assert catalog.command("tools") is not None
+    assert catalog.command("tools").help_text == "Tools description"  # type: ignore[union-attr]
+    assert catalog.action("feature-table", "summarize") is not None
+    assert catalog.action("feature-table", "summarize").help_text == ""  # type: ignore[union-attr]
+    assert catalog.action("feature-table", "tabulate") is not None
+    assert (
+        catalog.action("feature-table", "tabulate").help_text == "Tabulate description"
+    )  # type: ignore[union-attr]

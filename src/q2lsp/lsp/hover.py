@@ -98,10 +98,16 @@ def _get_help_via_catalog(
     catalog: QiimeCatalog,
 ) -> str | None:
     if token_index == 0:
-        return catalog.root_help()
+        return catalog.root().help_text or None
     if token_index == 1:
-        return catalog.command_help(current_token.text)
+        command = catalog.command(current_token.text)
+        if command is None:
+            return None
+        return command.help_text or None
     if token_index == 2:
         plugin_name = tokens[1].text
-        return catalog.action_help(plugin_name, current_token.text)
+        action = catalog.action(plugin_name, current_token.text)
+        if action is None:
+            return None
+        return action.help_text or None
     return None

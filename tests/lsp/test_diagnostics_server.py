@@ -10,6 +10,7 @@ import pytest
 from lsprotocol import types
 
 import q2lsp.lsp.server as server_mod
+from q2lsp.qiime.catalog import QiimeCatalog, make_catalog_provider
 from q2lsp.qiime.types import CommandHierarchy
 from q2lsp.lsp.diagnostics.debounce import DebounceManager
 
@@ -159,7 +160,7 @@ class TestDiagnosticSeverity:
     ) -> None:
         """did_open publishes Error for missing required and Warning for unknown option."""
         server = server_mod.create_server(
-            get_hierarchy=lambda: mock_hierarchy,
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy),
             debounce_ms=0,
         )
 
@@ -240,7 +241,7 @@ class TestDiagnosticSeverity:
     ) -> None:
         """did_change publishes diagnostics for the changed document version."""
         server = server_mod.create_server(
-            get_hierarchy=lambda: mock_hierarchy,
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy),
             debounce_ms=0,
         )
 
@@ -289,7 +290,7 @@ class TestDiagnosticSeverity:
     ) -> None:
         """A valid command publishes an empty diagnostics list."""
         server = server_mod.create_server(
-            get_hierarchy=lambda: mock_hierarchy,
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy),
             debounce_ms=0,
         )
 
@@ -348,8 +349,9 @@ class TestDiagnosticSeverity:
             hierarchy_call_count += 1
             return mock_hierarchy
 
+        get_catalog = make_catalog_provider(get_hierarchy)
         server = server_mod.create_server(
-            get_hierarchy=get_hierarchy,
+            get_catalog=get_catalog,
             debounce_ms=0,
         )
 
@@ -414,7 +416,7 @@ class TestDiagnosticSeverity:
             }
         }
         server = server_mod.create_server(
-            get_hierarchy=lambda: hierarchy,
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(hierarchy),
             debounce_ms=0,
         )
         source = "qiime \\\nfeature-tabel summarize"

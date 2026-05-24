@@ -9,20 +9,28 @@ from q2lsp.lsp.diagnostics.models import (
 )
 from q2lsp.lsp.diagnostics.codes import UNKNOWN_OPTION
 from q2lsp.lsp.diagnostics.stages import _has_help_invocation
-from q2lsp.lsp.diagnostics.validator import validate_command
+from q2lsp.lsp.diagnostics.validator import validate_command_with_catalog
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
+from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.options import OptionGroup
-from q2lsp.qiime.types import CommandHierarchy, JsonObject
 
 
 def analyze_command(
-    command: ParsedCommand, hierarchy: CommandHierarchy, source_text: str
+    command: ParsedCommand, catalog: QiimeCatalog, source_text: str
 ) -> CommandAnalysis:
     """Collect command-level issues and dependency references."""
-    issues = tuple(validate_command(command, hierarchy))
+    issues = tuple(validate_command_with_catalog(command, catalog))
 
-    action_node = _get_action_node(command, hierarchy)
-    if action_node is None:
+    if len(command.tokens) < 3:
+        return CommandAnalysis(
+            command=command,
+            issues=issues,
+            dependencies=CommandDependencies(),
+        )
+
+    command_name = command.tokens[1].text
+    action_name = command.tokens[2].text
+    if catalog.action(command_name, action_name) is None:
         return CommandAnalysis(
             command=command,
             issues=issues,
@@ -31,7 +39,14 @@ def analyze_command(
 
     option_tokens = command.tokens[3:]
     option_groups = command.options
-    if _has_help_invocation(option_tokens, option_groups, action_node):
+    flag_option_labels = {
+        option.label
+        for option in catalog.action_options(command_name, action_name)
+        if option.is_bool_flag
+    }
+    if _has_help_invocation(
+        option_tokens, option_groups, flag_option_labels
+    ):
         return CommandAnalysis(
             command=command,
             issues=issues,
@@ -70,51 +85,6 @@ def extract_command_dependencies(
             outputs.extend(_iter_option_value_references(option, source_text))
 
     return CommandDependencies(inputs=tuple(inputs), outputs=tuple(outputs))
-
-
-def _get_root_node(hierarchy: CommandHierarchy) -> JsonObject | None:
-    if not hierarchy:
-        return None
-    return next(iter(hierarchy.values()), None)
-
-
-def _get_action_node(
-    command: ParsedCommand, hierarchy: CommandHierarchy
-) -> JsonObject | None:
-    if len(command.tokens) < 3:
-        return None
-
-    plugin_token = command.tokens[1]
-    action_token = command.tokens[2]
-    if plugin_token.text.startswith("-") or action_token.text.startswith("-"):
-        return None
-
-    root_node = _get_root_node(hierarchy)
-    if not isinstance(root_node, dict):
-        return None
-
-    plugin_node = _get_case_insensitive_child(root_node, plugin_token.text)
-    if not isinstance(plugin_node, dict):
-        return None
-
-    action_node = _get_case_insensitive_child(plugin_node, action_token.text)
-    if not isinstance(action_node, dict):
-        return None
-
-    return action_node
-
-
-def _get_case_insensitive_child(node: JsonObject, key: str) -> object | None:
-    exact = node.get(key)
-    if exact is not None:
-        return exact
-
-    key_lower = key.lower()
-    for candidate, value in node.items():
-        if candidate.lower() == key_lower:
-            return value
-
-    return None
 
 
 def _is_dependency_input_option(option_text: str) -> bool:

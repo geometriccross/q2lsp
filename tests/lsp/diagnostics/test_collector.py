@@ -16,6 +16,7 @@ from q2lsp.lsp.document_commands import (
     to_original_offset,
 )
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
+from q2lsp.qiime.catalog import QiimeCatalog
 
 
 @pytest.fixture
@@ -76,9 +77,9 @@ def test_collect_diagnostics_runs_command_level_before_document_level(mocker) ->
     ]
 
     def fake_analyze_command(
-        command: ParsedCommand, hierarchy: dict, source_text: str
+        command: ParsedCommand, catalog: QiimeCatalog, source_text: str
     ) -> CommandAnalysis:
-        del hierarchy, source_text
+        del catalog, source_text
         call_order.append(("command", command))
         return analyses[len(call_order) - 1]
 
@@ -97,7 +98,7 @@ def test_collect_diagnostics_runs_command_level_before_document_level(mocker) ->
         side_effect=fake_collect_document_diagnostics,
     )
 
-    issues = collect_diagnostics(document, {"qiime": {}})
+    issues = collect_diagnostics(document, QiimeCatalog.from_hierarchy({"qiime": {}}))
 
     assert issues == [issue1, issue2, document_issue]
     assert call_order == [
@@ -158,7 +159,9 @@ def test_collect_diagnostics_detects_two_command_cycle(
     )
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
     cycle_issues = [issue for issue in issues if issue.code == DEPENDENCY_CYCLE]
 
     assert len(cycle_issues) == 2
@@ -179,7 +182,9 @@ def test_collect_diagnostics_reports_duplicate_o_output_paths(
     )
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
     duplicate_issues = [
         issue
         for issue in issues
@@ -210,7 +215,9 @@ def test_collect_diagnostics_reports_duplicate_output_path_option(
     )
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
     duplicate_issues = [
         issue
         for issue in issues
@@ -243,7 +250,9 @@ def test_collect_diagnostics_skips_help_commands_for_duplicate_output_detection(
     )
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
 
     assert [
         issue
@@ -263,7 +272,9 @@ def test_collect_diagnostics_anchors_duplicate_output_on_value_token(
     )
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
     duplicate_issues = [
         issue
         for issue in issues
@@ -287,7 +298,9 @@ def test_collect_diagnostics_reports_duplicate_outputs_alongside_dependency_cycl
     )
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
 
     duplicate_issues = [
         issue
@@ -318,7 +331,9 @@ def test_collect_diagnostics_deduplicates_same_command_duplicate_output_path(
     )
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
     duplicate_issues = [
         issue
         for issue in issues
@@ -347,7 +362,9 @@ def test_collect_diagnostics_detects_three_command_cycle(
     )
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
     cycle_issues = [issue for issue in issues if issue.code == DEPENDENCY_CYCLE]
 
     assert len(cycle_issues) == 3
@@ -364,7 +381,9 @@ def test_collect_diagnostics_reports_self_loop_on_input_value_span(
     source = "qiime demo step --i-table loop.qza --o-result loop.qza"
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
     cycle_issues = [issue for issue in issues if issue.code == DEPENDENCY_CYCLE]
 
     start = source.index("loop.qza")
@@ -384,7 +403,9 @@ def test_collect_diagnostics_skips_help_commands_for_cycle_detection(
     source = "qiime demo step --help --i-table loop.qza --o-result loop.qza"
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
 
     assert [issue for issue in issues if issue.code == DEPENDENCY_CYCLE] == []
 
@@ -400,7 +421,9 @@ def test_collect_diagnostics_ignores_invalid_dependency_like_options(
     )
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
 
     assert [issue for issue in issues if issue.code == DEPENDENCY_CYCLE] == []
     unknown_option_issues = [
@@ -423,7 +446,9 @@ def test_collect_diagnostics_maps_cycle_input_span_across_line_continuations(
     )
     document = analyze_document(source)
 
-    issues = collect_diagnostics(document, dependency_hierarchy)
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
+    )
     cycle_issues = [issue for issue in issues if issue.code == DEPENDENCY_CYCLE]
 
     first_input_start = source.index("b.qza")

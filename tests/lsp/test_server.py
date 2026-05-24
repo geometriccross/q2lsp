@@ -8,7 +8,7 @@ import pytest
 from lsprotocol import types
 
 import q2lsp.lsp.server as server_mod
-from q2lsp.qiime.catalog import QiimeCatalog
+from q2lsp.qiime.catalog import QiimeCatalog, make_catalog_provider
 from q2lsp.qiime.types import CommandHierarchy
 
 
@@ -18,18 +18,22 @@ class TestCreateServer:
     @pytest.fixture
     def mock_hierarchy(self) -> CommandHierarchy:
         """Create a mock hierarchy for testing."""
-        return {"plugins": {}}
+        return {"qiime": {"name": "qiime"}}
 
     def test_returns_language_server(self, mock_hierarchy: CommandHierarchy) -> None:
         """Returns LanguageServer instance."""
-        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
         assert isinstance(server, server_mod.LanguageServer)
 
     def test_registers_completion_feature(
         self, mock_hierarchy: CommandHierarchy
     ) -> None:
         """TEXT_DOCUMENT_COMPLETION is registered."""
-        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
         fm = server.protocol.fm
         assert types.TEXT_DOCUMENT_COMPLETION in fm.features
 
@@ -37,7 +41,9 @@ class TestCreateServer:
         self, mock_hierarchy: CommandHierarchy
     ) -> None:
         """TEXT_DOCUMENT_CODE_LENS is registered."""
-        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
         fm = server.protocol.fm
         assert types.TEXT_DOCUMENT_CODE_LENS in fm.features
 
@@ -45,7 +51,9 @@ class TestCreateServer:
         self, mock_hierarchy: CommandHierarchy, mocker
     ) -> None:
         """CodeLens carries tokens plus raw shell text for runtime expansion."""
-        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
 
         class MockDocument:
             uri = "file:///test.sh"
@@ -86,13 +94,15 @@ class TestCreateServer:
         self, mock_hierarchy: CommandHierarchy
     ) -> None:
         """Trigger chars are [" ", "-"]."""
-        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
         fm = server.protocol.fm
         completion_options = fm.feature_options[types.TEXT_DOCUMENT_COMPLETION]
         assert completion_options.trigger_characters == [" ", "-"]
 
     def test_completion_uses_catalog_backed_usecase(self, mocker) -> None:
-        """Completion converts hierarchy to catalog before querying completions."""
+        """Completion receives catalog directly from the provider."""
         hierarchy: CommandHierarchy = {
             "qiime": {
                 "name": "qiime",
@@ -104,7 +114,9 @@ class TestCreateServer:
                 },
             }
         }
-        server = server_mod.create_server(get_hierarchy=lambda: hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(hierarchy)
+        )
 
         class MockDocument:
             uri = "file:///test.sh"
@@ -137,13 +149,13 @@ class TestCreateServer:
         assert request.command_tokens == ("qiime",)
         catalog = mock_get_completions.call_args.args[1]
         assert isinstance(catalog, QiimeCatalog)
-        assert (
-            catalog.command_names
-            == QiimeCatalog.from_hierarchy(hierarchy).command_names
-        )
+        assert [command.name for command in catalog.commands()] == [
+            command.name
+            for command in QiimeCatalog.from_hierarchy(hierarchy).commands()
+        ]
 
     def test_completion_and_hover_share_cached_catalog(self, mocker) -> None:
-        """Completion builds the catalog once; later catalog hover reuses it."""
+        """A cached catalog provider is reused between completion and hover."""
         hierarchy: CommandHierarchy = {
             "qiime": {
                 "name": "qiime",
@@ -162,7 +174,8 @@ class TestCreateServer:
             calls += 1
             return hierarchy
 
-        server = server_mod.create_server(get_hierarchy=get_hierarchy)
+        get_catalog = make_catalog_provider(get_hierarchy)
+        server = server_mod.create_server(get_catalog=get_catalog)
 
         class MockDocument:
             uri = "file:///test.sh"
@@ -209,7 +222,9 @@ class TestCreateServer:
                 },
             }
         }
-        server = server_mod.create_server(get_hierarchy=lambda: hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(hierarchy)
+        )
 
         class MockDocument:
             uri = "file:///test.sh"
@@ -241,7 +256,9 @@ class TestCreateServer:
 
     def test_completion_returns_empty_list_on_handler_failure(self, mocker) -> None:
         """Completion handler failures return the default empty list."""
-        server = server_mod.create_server(get_hierarchy=lambda: {"plugins": {}})
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy({"qiime": {"name": "qiime"}})
+        )
         mock_workspace = mocker.Mock()
         mock_workspace.get_text_document.side_effect = RuntimeError("boom")
         server.protocol._workspace = mock_workspace
@@ -258,7 +275,9 @@ class TestCreateServer:
 
     def test_registers_hover_feature(self, mock_hierarchy: CommandHierarchy) -> None:
         """TEXT_DOCUMENT_HOVER is registered."""
-        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
         fm = server.protocol.fm
         assert types.TEXT_DOCUMENT_HOVER in fm.features
 
@@ -306,7 +325,9 @@ class TestCreateServer:
                 },
             }
         }
-        server = server_mod.create_server(get_hierarchy=lambda: hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(hierarchy)
+        )
 
         class MockDocument:
             uri = "file:///test.sh"
@@ -335,13 +356,13 @@ class TestCreateServer:
         assert expected in hover.contents.value
 
     def test_hover_with_help_provider_does_not_build_catalog(self, mocker) -> None:
-        """Hover uses get_help without calling the catalog hierarchy provider."""
+        """Hover uses get_help without calling the catalog provider."""
 
-        def get_hierarchy() -> CommandHierarchy:
+        def get_catalog() -> QiimeCatalog:
             raise AssertionError("catalog should not be requested")
 
         server = server_mod.create_server(
-            get_hierarchy=get_hierarchy,
+            get_catalog=get_catalog,
             get_help=lambda command_path: "Root help" if not command_path else None,
         )
 
@@ -366,21 +387,74 @@ class TestCreateServer:
         assert isinstance(hover.contents, types.MarkupContent)
         assert "Root help" in hover.contents.value
 
+    def test_create_server_accepts_catalog_provider_without_hierarchy(
+        self, mocker
+    ) -> None:
+        """create_server accepts a catalog provider and does not call hierarchy."""
+        catalog = QiimeCatalog.from_hierarchy(
+            {
+                "qiime": {
+                    "name": "qiime",
+                    "help": "QIIME root help",
+                    "builtins": [],
+                }
+            }
+        )
+        server = server_mod.create_server(get_catalog=lambda: catalog)
+
+        class MockDocument:
+            uri = "file:///test.sh"
+            source = "qiime "
+            version = 1
+
+        mock_workspace = mocker.Mock()
+        mock_workspace.get_text_document.return_value = MockDocument()
+        server.protocol._workspace = mock_workspace
+
+        completion_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_COMPLETION]
+        completion = completion_handler(
+            types.CompletionParams(
+                text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
+                position=types.Position(line=0, character=6),
+            )
+        )
+
+        assert completion is not None
+        assert completion.items == []
+
+        hover_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_HOVER]
+        hover = hover_handler(
+            types.HoverParams(
+                text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
+                position=types.Position(line=0, character=2),
+            )
+        )
+
+        assert hover is not None
+        assert isinstance(hover.contents, types.MarkupContent)
+        assert "QIIME root help" in hover.contents.value
+
     def test_registers_did_open(self, mock_hierarchy: CommandHierarchy) -> None:
         """TEXT_DOCUMENT_DID_OPEN is registered."""
-        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
         fm = server.protocol.fm
         assert types.TEXT_DOCUMENT_DID_OPEN in fm.features
 
     def test_registers_did_change(self, mock_hierarchy: CommandHierarchy) -> None:
         """TEXT_DOCUMENT_DID_CHANGE is registered."""
-        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
         fm = server.protocol.fm
         assert types.TEXT_DOCUMENT_DID_CHANGE in fm.features
 
     def test_registers_did_close(self, mock_hierarchy: CommandHierarchy) -> None:
         """TEXT_DOCUMENT_DID_CLOSE is registered."""
-        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
         fm = server.protocol.fm
         assert types.TEXT_DOCUMENT_DID_CLOSE in fm.features
 
@@ -389,7 +463,9 @@ class TestCreateServer:
         self, mock_hierarchy: CommandHierarchy, mocker
     ) -> None:
         """did_close publishes empty diagnostics via text_document_publish_diagnostics."""
-        server = server_mod.create_server(get_hierarchy=lambda: mock_hierarchy)
+        server = server_mod.create_server(
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
+        )
 
         # Mock the text_document_publish_diagnostics method
         mock_publish = mocker.patch.object(
@@ -425,7 +501,7 @@ class TestCreateServer:
         """did_close prevents debounced did_open/did_change diagnostics from publishing."""
         debounce_ms = 20
         server = server_mod.create_server(
-            get_hierarchy=lambda: mock_hierarchy,
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy),
             debounce_ms=debounce_ms,
         )
 

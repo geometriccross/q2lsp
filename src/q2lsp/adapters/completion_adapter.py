@@ -15,17 +15,13 @@ from q2lsp.core.types import (
     ParameterCandidate,
 )
 from q2lsp.qiime.catalog import QiimeCatalog
-from q2lsp.qiime.hierarchy_keys import COMMAND_METADATA_KEYS
+from q2lsp.qiime.catalog_facts import QiimeOptionFact
 from q2lsp.qiime.options import (
-    format_qiime_option_label,
     group_option_tokens,
     OptionGroup,
     normalize_option_to_param_name,
     option_label_matches_prefix,
-    param_is_required,
 )
-from q2lsp.qiime.signature_params import iter_signature_params
-from q2lsp.qiime.types import JsonObject
 
 
 def to_completion_query(
@@ -50,28 +46,36 @@ def to_completion_query(
 
 
 def to_completion_data(catalog: QiimeCatalog) -> CompletionData:
-    """Normalize catalog command data into core completion data."""
+    """Normalize catalog command facts into core completion data."""
     root_items: list[CompletionItem] = []
     commands: list[CommandCandidate] = []
 
-    for command_name in catalog.command_names:
-        command_node = catalog.command_node(command_name)
-        if command_node is None:
-            continue
-
-        is_builtin = catalog.is_builtin(command_name)
+    for command in catalog.commands():
+        is_builtin = command.kind == "builtin"
         root_items.append(
             CompletionItem(
-                label=command_name,
-                detail=_command_detail(command_node, is_builtin=is_builtin),
+                label=command.name,
+                detail=_command_detail(command.summary, is_builtin=is_builtin),
                 kind=CompletionKind.BUILTIN if is_builtin else CompletionKind.PLUGIN,
             )
         )
         commands.append(
-            _to_command_candidate(
-                name=command_name,
-                command_node=command_node,
+            CommandCandidate(
+                name=command.name,
                 is_builtin=is_builtin,
+                actions=tuple(
+                    ActionCandidate(
+                        item=CompletionItem(
+                            label=action.name,
+                            detail=action.summary or "Action",
+                            kind=CompletionKind.ACTION,
+                        ),
+                        parameters=_to_parameter_candidates(
+                            catalog.action_options(command.name, action.name)
+                        ),
+                    )
+                    for action in catalog.actions(command.name)
+                ),
             )
         )
 
@@ -123,78 +127,37 @@ def _get_token_text(command_tokens: tuple[str, ...], index: int) -> str:
     return command_tokens[index]
 
 
-def _command_detail(command_node: JsonObject, *, is_builtin: bool) -> str:
+def _command_detail(summary: str, *, is_builtin: bool) -> str:
+    if summary:
+        return summary
     if is_builtin:
-        return (
-            str(command_node.get("short_help", ""))
-            or str(command_node.get("help", ""))
-            or "Built-in command"
-        )
-    return (
-        str(command_node.get("short_description", ""))
-        or str(command_node.get("description", ""))
-        or "Plugin"
-    )
+        return "Built-in command"
+    return "Plugin"
 
 
-def _to_command_candidate(
-    *,
-    name: str,
-    command_node: JsonObject,
-    is_builtin: bool,
-) -> CommandCandidate:
-    actions: list[ActionCandidate] = []
-    for key, value in command_node.items():
-        if key in COMMAND_METADATA_KEYS:
-            continue
-        if not isinstance(value, dict):
-            continue
-        value_json = cast(JsonObject, value)
-
-        detail = str(value_json.get("description", ""))
-        actions.append(
-            ActionCandidate(
-                item=CompletionItem(
-                    label=key,
-                    detail=detail or "Action",
-                    kind=CompletionKind.ACTION,
-                ),
-                parameters=_to_parameter_candidates(value_json),
-            )
-        )
-
-    return CommandCandidate(
-        name=name,
-        is_builtin=is_builtin,
-        actions=tuple(actions),
-    )
-
-
-def _to_parameter_candidates(action_node: JsonObject) -> tuple[ParameterCandidate, ...]:
+def _to_parameter_candidates(
+    option_facts: tuple[QiimeOptionFact, ...],
+) -> tuple[ParameterCandidate, ...]:
     parameters: list[ParameterCandidate] = []
-    for name, option_prefix, param in iter_signature_params(action_node):
-        option_name = format_qiime_option_label(option_prefix, name)
-
+    for option in option_facts:
         detail_parts: list[str] = []
-        param_type = param.get("type", "")
-        if param_type:
-            detail_parts.append(f"[{param_type}]")
-        description = param.get("description", "")
-        if description:
-            detail_parts.append(str(description))
+        if option.value_type:
+            detail_parts.append(f"[{option.value_type}]")
+        if option.description:
+            detail_parts.append(option.description)
 
-        if param_is_required(param):
+        if option.required:
             detail_parts.insert(0, "(required)")
 
         parameters.append(
             ParameterCandidate(
-                name=name,
+                name=option.name,
                 item=CompletionItem(
-                    label=option_name,
+                    label=option.label,
                     detail=" ".join(detail_parts) if detail_parts else "Parameter",
                     kind=CompletionKind.PARAMETER,
                 ),
-                match_texts=_to_parameter_match_texts(option_name),
+                match_texts=_to_parameter_match_texts(option.label),
             )
         )
     return tuple(parameters)

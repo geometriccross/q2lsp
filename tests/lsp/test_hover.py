@@ -192,6 +192,19 @@ class TestGetHoverHelp:
 class TestGetHoverHelpWithCatalog:
     """Tests for get_hover_help function with catalog metadata."""
 
+    def test_root_hover_uses_qiime_root_fact(
+        self, hover_hierarchy: CommandHierarchy
+    ) -> None:
+        text, offset = extract_cursor_offset(text_with_cursor="qii<CURSOR>me info")
+        ctx = get_completion_context(text, offset)
+
+        help_text = get_hover_help(
+            ctx, catalog=QiimeCatalog.from_hierarchy(hover_hierarchy)
+        )
+
+        assert help_text is not None
+        assert "QIIME 2 command-line interface" in help_text
+
     @pytest.mark.parametrize(
         ("text_with_cursor", "expected"),
         [
@@ -345,10 +358,10 @@ Options:
         ctx = get_completion_context(text, offset)
         catalog = QiimeCatalog.from_hierarchy(hover_hierarchy)
 
-        def fail_command_help(_catalog: QiimeCatalog, _command_name: str) -> None:
-            raise AssertionError("catalog command help should not be used")
+        def fail_command(_catalog: QiimeCatalog, _command_name: str) -> None:
+            raise AssertionError("catalog command fact should not be used")
 
-        monkeypatch.setattr(QiimeCatalog, "command_help", fail_command_help)
+        monkeypatch.setattr(QiimeCatalog, "command", fail_command)
 
         help_text = get_hover_help(
             ctx,

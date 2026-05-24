@@ -6,15 +6,15 @@ from q2lsp.lsp.diagnostics.command_level import analyze_command
 from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
 from q2lsp.lsp.diagnostics.document_level import collect_document_diagnostics
 from q2lsp.lsp.document_commands import AnalyzedDocument
-from q2lsp.qiime.types import CommandHierarchy
+from q2lsp.qiime.catalog import QiimeCatalog
 
 
 def collect_diagnostics(
-    document: AnalyzedDocument, hierarchy: CommandHierarchy
+    document: AnalyzedDocument, catalog: QiimeCatalog
 ) -> list[DiagnosticIssue]:
     """Collect command-level diagnostics, then document-level diagnostics."""
     command_analyses = tuple(
-        analyze_command(command, hierarchy, document.merged_text)
+        analyze_command(command, catalog, document.merged_text)
         for command in document.commands
     )
 

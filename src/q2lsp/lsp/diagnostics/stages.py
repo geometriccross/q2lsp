@@ -8,26 +8,19 @@ from q2lsp.lsp.diagnostics.matching import (
 )
 from q2lsp.lsp.types import TokenSpan
 from q2lsp.qiime.catalog import QiimeCatalog
+from q2lsp.qiime.catalog_facts import QiimeOptionFact
 from q2lsp.qiime.options import (
-    format_qiime_option_label,
     group_option_tokens,
     normalize_option_to_param_name,
     OptionGroup,
-    param_is_required,
 )
-from q2lsp.qiime.signature_params import (
-    get_all_option_labels,
-    iter_signature_params,
-)
-from q2lsp.qiime.types import JsonObject
 
 
 def _validate_plugin_or_builtin_with_catalog(
     token: TokenSpan, catalog: QiimeCatalog
 ) -> DiagnosticIssue | None:
     token_text = token.text
-    valid_plugins, valid_builtins = catalog.valid_plugins_and_builtins()
-    all_valid_names = list(valid_plugins | valid_builtins)
+    all_valid_names = [command.name for command in catalog.commands()]
 
     if _is_exact_match(token_text, all_valid_names):
         return None
@@ -51,21 +44,20 @@ def _validate_action_with_catalog(
 ) -> DiagnosticIssue | None:
     token_text = token.text
 
-    if catalog.command_node(plugin_name) is None:
+    command = catalog.command(plugin_name)
+    if command is None:
         return None
 
-    if catalog.is_builtin_leaf(plugin_name):
+    if command.kind == "builtin" and not command.has_actions:
         return None
 
-    valid_actions = catalog.valid_actions(plugin_name)
+    valid_actions = [action.name for action in catalog.actions(plugin_name)]
 
     if _is_exact_match(token_text, valid_actions):
         return None
 
     code = (
-        codes.UNKNOWN_SUBCOMMAND
-        if catalog.is_builtin(plugin_name)
-        else codes.UNKNOWN_ACTION
+        codes.UNKNOWN_SUBCOMMAND if command.kind == "builtin" else codes.UNKNOWN_ACTION
     )
     suggestions = _get_suggestions(token_text, valid_actions, limit=3)
     if suggestions:
@@ -84,14 +76,20 @@ def _validate_action_with_catalog(
     )
 
 
-def _validate_options_for_action(
-    tokens: list[TokenSpan], action_node: JsonObject
+def _validate_options_with_catalog(
+    tokens: list[TokenSpan],
+    catalog: QiimeCatalog,
+    plugin_name: str,
+    action_name: str,
 ) -> tuple[list[DiagnosticIssue], dict[str, list[str]]]:
+    """Validate option tokens for a catalog-backed valid command path."""
+    if catalog.action(plugin_name, action_name) is None:
+        return [], {}
+
+    option_facts = catalog.action_options(plugin_name, action_name)
     issues: list[DiagnosticIssue] = []
     unknown_option_suggestions: dict[str, list[str]] = {}
-
-    # Get valid options from the action signature
-    valid_options = get_all_option_labels(action_node)
+    valid_options = [option.label for option in option_facts]
 
     for option in group_option_tokens(tokens, lambda token: token.text):
         option_name = option.option_text
@@ -118,23 +116,26 @@ def _validate_options_for_action(
     return issues, unknown_option_suggestions
 
 
-def _validate_options_with_catalog(
+def _validate_required_options_with_catalog(
     tokens: list[TokenSpan],
     catalog: QiimeCatalog,
     plugin_name: str,
     action_name: str,
-) -> tuple[list[DiagnosticIssue], dict[str, list[str]]]:
-    """Validate option tokens for a catalog-backed valid command path."""
-    action_node = catalog.action_node(plugin_name, action_name)
-    if action_node is None:
-        return [], {}
+    unknown_option_suggestions: Mapping[str, Sequence[str]],
+) -> list[DiagnosticIssue]:
+    """Validate required options for a catalog-backed valid command path."""
+    option_facts = catalog.action_options(plugin_name, action_name)
+    if not option_facts:
+        return []
 
-    return _validate_options_for_action(tokens, action_node)
+    return _validate_required_options_for_facts(
+        tokens, option_facts, unknown_option_suggestions
+    )
 
 
-def _validate_required_options_for_action(
+def _validate_required_options_for_facts(
     tokens: list[TokenSpan],
-    action_node: JsonObject,
+    option_facts: tuple[QiimeOptionFact, ...],
     unknown_option_suggestions: Mapping[str, Sequence[str]],
 ) -> list[DiagnosticIssue]:
     issues: list[DiagnosticIssue] = []
@@ -145,7 +146,10 @@ def _validate_required_options_for_action(
     option_tokens = tokens[3:]
     option_groups = group_option_tokens(option_tokens, lambda token: token.text)
 
-    if _has_help_invocation(option_tokens, option_groups, action_node):
+    flag_option_labels = {
+        option.label for option in option_facts if option.is_bool_flag
+    }
+    if _has_help_invocation(option_tokens, option_groups, flag_option_labels):
         return issues
 
     present_param_names: set[str] = set()
@@ -156,9 +160,7 @@ def _validate_required_options_for_action(
         present_param_names.add(param_name.lower())
 
     required_param_options = {
-        name.lower(): format_qiime_option_label(option_prefix, name)
-        for name, option_prefix, param in iter_signature_params(action_node)
-        if param_is_required(param)
+        option.name.lower(): option.label for option in option_facts if option.required
     }
     missing_param_options = {
         param_name: option_label
@@ -193,30 +195,11 @@ def _validate_required_options_for_action(
     return issues
 
 
-def _validate_required_options_with_catalog(
-    tokens: list[TokenSpan],
-    catalog: QiimeCatalog,
-    plugin_name: str,
-    action_name: str,
-    unknown_option_suggestions: Mapping[str, Sequence[str]],
-) -> list[DiagnosticIssue]:
-    """Validate required options for a catalog-backed valid command path."""
-    action_node = catalog.action_node(plugin_name, action_name)
-    if action_node is None:
-        return []
-
-    return _validate_required_options_for_action(
-        tokens, action_node, unknown_option_suggestions
-    )
-
-
 def _has_help_invocation(
     option_tokens: list[TokenSpan],
     option_groups: tuple[OptionGroup[TokenSpan], ...],
-    action_node: JsonObject,
+    flag_option_labels: set[str],
 ) -> bool:
-    flag_option_labels = _get_flag_option_labels(action_node)
-
     for option in option_groups:
         if option.option_text == "--help":
             return True
@@ -241,11 +224,3 @@ def _has_help_invocation(
             return True
 
     return False
-
-
-def _get_flag_option_labels(action_node: JsonObject) -> set[str]:
-    return {
-        format_qiime_option_label(option_prefix, name)
-        for name, option_prefix, param in iter_signature_params(action_node)
-        if param.get("is_bool_flag") is True
-    }
