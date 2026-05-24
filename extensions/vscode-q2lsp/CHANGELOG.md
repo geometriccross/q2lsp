@@ -8,6 +8,30 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - No changes yet.
 
+## [4.0.0] - 2026-05-20
+
+### Added
+- Setup Wizard webview for guided QIIME 2 environment configuration
+- QIIME CodeLens commands (runnable actions directly in the editor)
+- Dependency cycle diagnostics across QIIME commands
+- Duplicate output path detection
+- Document snapshot model with UTF-16 offset mapping
+- Catalog-backed q2cli metadata layer
+- GitHub tree manifest fetching for QIIME plugin discovery
+
+### Changed
+- Restructured parser to group option/value tokens into units
+- Integrated completion flow into usecase layer (layered completion architecture)
+- Split diagnostics into command/document analysis modules
+- Derive used params from grouped options in completion
+- Overhauled interpreter resolution and setup flow while keeping `q2lsp.interpreterPath` as an explicit override
+
+### Fixed
+- Disambiguated `-h` as help flag vs option value
+- Clarified command boundary and continuation mapping
+- Fixed completion option grouping
+- Fixed q2lsp Python interpreter resolution
+
 ## [3.1.0] - 2026-03-04
 
 ### Changed
