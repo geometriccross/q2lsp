@@ -99,28 +99,46 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 │       ├── pnpm-lock.yaml
 │       ├── README.md
 │       ├── src/
+│       │   ├── client.ts
+│       │   ├── config.ts
+│       │   ├── diagnosis.ts
 │       │   ├── extension.ts
 │       │   ├── helpers.ts
+│       │   ├── interpreter.ts
+│       │   ├── runCommand.ts
+│       │   ├── setupWizard/
 │       │   └── test/
-│       │       └── extension.test.ts
+│       │       ├── client.test.ts
+│       │       ├── config.test.ts
+│       │       ├── diagnosis.test.ts
+│       │       ├── extension.test.ts
+│       │       ├── interpreter.test.ts
+│       │       ├── runCommand.test.ts
+│       │       └── setupWizard.test.ts
 │       ├── tsconfig.json
 │       └── vsc-extension-quickstart.md
 ├── src/
 │   └── q2lsp/
 │       ├── __main__.py
+│       ├── adapters/
 │       ├── cli.py
+│       ├── core/
 │       ├── logging.py
 │       ├── lsp/
-│       └── qiime/
+│       ├── qiime/
+│       └── usecases/
 ├── tests/
 │   ├── __init__.py
+│   ├── adapters/
+│   ├── core/
 │   ├── helpers/
 │   ├── lsp/
 │   ├── qiime/
 │   ├── test_cli.py
 │   ├── test_logging.py
 │   ├── test_release_workflow_consistency.py
-│   └── test_workflow_hardening.py
+│   ├── test_workflow_hardening.py
+│   └── usecases/
 └── pyproject.toml
 ```
 <!-- END GENERATED: PROJECT_STRUCTURE -->
