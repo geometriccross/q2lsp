@@ -85,5 +85,9 @@ class TestCacheTelemetry:
         assert build_calls == 1  # Still only called once
 
         assert caplog.record_tuples == [
-            (LOGGER_NAME, logging.DEBUG, "Hierarchy cache hit - using cached hierarchy"),
+            (
+                LOGGER_NAME,
+                logging.DEBUG,
+                "Hierarchy cache hit - using cached hierarchy",
+            ),
         ]

@@ -186,7 +186,9 @@ class QiimeCatalog:
         return value
 
 
-def make_catalog_provider(get_hierarchy: Callable[[], CommandHierarchy]) -> CatalogProvider:
+def make_catalog_provider(
+    get_hierarchy: Callable[[], CommandHierarchy],
+) -> CatalogProvider:
     catalog: QiimeCatalog | None = None
 
     def provider() -> QiimeCatalog:
@@ -200,7 +202,9 @@ def make_catalog_provider(get_hierarchy: Callable[[], CommandHierarchy]) -> Cata
 
 def _freeze_json(value: JsonValue) -> FrozenJsonValue:
     if isinstance(value, dict):
-        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
+        return MappingProxyType(
+            {key: _freeze_json(item) for key, item in value.items()}
+        )
     if isinstance(value, list):
         return tuple(_freeze_json(item) for item in value)
     return value

@@ -142,7 +142,9 @@ def test_normalizes_catalog_to_core_data() -> None:
     data = to_completion_data(catalog)
 
     assert {item.label for item in data.root_items} == {"info", "feature-table"}
-    command = next(command for command in data.commands if command.name == "feature-table")
+    command = next(
+        command for command in data.commands if command.name == "feature-table"
+    )
     assert command.is_builtin is False
     assert command.actions[0].item.label == "summarize"
     assert command.actions[0].parameters[0].item.label == "--i-table"

@@ -25,14 +25,12 @@ def test_offset_mapper_round_trips_ascii_position() -> None:
 
     position = mapper.offset_to_position(8)
 
-
     assert position == (1, 2)
     assert mapper.position_to_offset(*position) == 8
 
 
 def test_offset_mapper_uses_utf16_lsp_columns() -> None:
     mapper = OffsetMapper("a😀b")
-
 
     assert mapper.offset_to_position(2) == (0, 3)
     assert mapper.position_to_offset(0, 3) == 2

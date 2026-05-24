@@ -243,9 +243,7 @@ class TestGetCompletionContext:
 
     def test_command_after_and_separator(self) -> None:
         """Commands after && should complete from root."""
-        text, offset = extract_cursor_offset(
-            text_with_cursor="true && qiime <CURSOR>"
-        )
+        text, offset = extract_cursor_offset(text_with_cursor="true && qiime <CURSOR>")
         ctx = get_completion_context(text, offset)
         assert ctx.mode == CompletionMode.ROOT
         assert ctx.token_index == 1
@@ -267,9 +265,7 @@ class TestGetCompletionContext:
 
     def test_command_after_newline(self) -> None:
         """Commands after newline should complete from root."""
-        text, offset = extract_cursor_offset(
-            text_with_cursor="echo hi\nqiime <CURSOR>"
-        )
+        text, offset = extract_cursor_offset(text_with_cursor="echo hi\nqiime <CURSOR>")
         ctx = get_completion_context(text, offset)
         assert ctx.mode == CompletionMode.ROOT
         assert ctx.token_index == 1

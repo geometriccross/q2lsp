@@ -14,7 +14,6 @@ def test_qiime_catalog_wraps_hierarchy_immutably() -> None:
 
     hierarchy["other"] = {"builtins": []}
 
-
     assert catalog.root_name == "qiime"
     assert "other" not in catalog.hierarchy
     with pytest.raises(TypeError):
@@ -41,7 +40,9 @@ def test_qiime_catalog_deep_freezes_hierarchy() -> None:
         qiime["plugin"]["actions"] = {}  # type: ignore[index]
 
 
-def test_build_qiime_catalog_uses_owned_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_qiime_catalog_uses_owned_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     hierarchy: CommandHierarchy = {"qiime": {"builtins": []}}
     monkeypatch.setattr(
         "q2lsp.qiime.q2cli_gateway.build_qiime_hierarchy",

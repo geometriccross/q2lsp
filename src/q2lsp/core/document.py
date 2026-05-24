@@ -29,7 +29,11 @@ class OffsetMapper:
         while current_offset < safe_offset:
             char = self.text[current_offset]
             next_offset = current_offset + 1
-            if char == "\r" and next_offset < len(self.text) and self.text[next_offset] == "\n":
+            if (
+                char == "\r"
+                and next_offset < len(self.text)
+                and self.text[next_offset] == "\n"
+            ):
                 if safe_offset <= next_offset:
                     return line, character
                 line += 1
@@ -67,7 +71,11 @@ def _line_bounds(text: str, target_line: int) -> tuple[int, int]:
     current_offset = 0
     while current_offset < len(text):
         char = text[current_offset]
-        if char == "\r" and current_offset + 1 < len(text) and text[current_offset + 1] == "\n":
+        if (
+            char == "\r"
+            and current_offset + 1 < len(text)
+            and text[current_offset + 1] == "\n"
+        ):
             if line == target_line:
                 return line_start, current_offset
             line += 1

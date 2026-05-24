@@ -107,9 +107,7 @@ def _collect_forbidden_imports(
                 for module in _resolve_import_from_modules(file_path, node):
                     if not _is_forbidden_module(module, forbidden_prefixes):
                         continue
-                    violations.append(
-                        f"{relative_path}:{node.lineno} imports {module}"
-                    )
+                    violations.append(f"{relative_path}:{node.lineno} imports {module}")
 
     return violations
 
@@ -253,8 +251,7 @@ def test_q2cli_and_click_imports_stay_in_qiime_gateway_modules() -> None:
     unexpected_violations = [
         violation
         for violation in violations
-        if violation.split(":", maxsplit=1)[0]
-        not in ALLOWED_Q2CLI_CLICK_IMPORT_PATHS
+        if violation.split(":", maxsplit=1)[0] not in ALLOWED_Q2CLI_CLICK_IMPORT_PATHS
     ]
 
     assert unexpected_violations == [], (
@@ -271,8 +268,7 @@ def test_removed_command_hierarchy_module_has_no_internal_callers() -> None:
     unexpected_violations = [
         violation
         for violation in violations
-        if violation.split(":", maxsplit=1)[0]
-        != "src/q2lsp/qiime/command_hierarchy.py"
+        if violation.split(":", maxsplit=1)[0] != "src/q2lsp/qiime/command_hierarchy.py"
     ]
 
     assert unexpected_violations == [], (

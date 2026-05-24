@@ -309,9 +309,7 @@ class TestGetCompletionContext:
         assert ctx.mode == CompletionMode.NONE
 
     def test_mode_root_after_wrapped_qiime(self) -> None:
-        text, offset = extract_cursor_offset(
-            text_with_cursor="run_cmd qiime <CURSOR>"
-        )
+        text, offset = extract_cursor_offset(text_with_cursor="run_cmd qiime <CURSOR>")
         ctx = get_completion_context(text, offset)
         assert ctx.mode == CompletionMode.ROOT
         assert ctx.token_index == 1

@@ -117,9 +117,7 @@ def test_unknown_parameter_action_completion_returns_empty_list() -> None:
 
 
 def test_builtin_command_with_no_actions_returns_help() -> None:
-    data = CompletionData(
-        commands=(CommandCandidate(name="info", is_builtin=True),)
-    )
+    data = CompletionData(commands=(CommandCandidate(name="info", is_builtin=True),))
     query = CompletionQuery(
         mode=CompletionMode.PLUGIN,
         prefix="--",

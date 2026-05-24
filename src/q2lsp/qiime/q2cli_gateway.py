@@ -133,7 +133,9 @@ def _build_builtin_nodes(root: _RootCommand) -> dict[str, JsonObject]:
     return nodes
 
 
-def _build_plugin_nodes(root: _RootCommand, ctx: _click.Context) -> dict[str, JsonObject]:
+def _build_plugin_nodes(
+    root: _RootCommand, ctx: _click.Context
+) -> dict[str, JsonObject]:
     """Build all plugin command nodes."""
     plugin_lookup = cast(Mapping[str, PluginCommandProperties], root._plugin_lookup)
     nodes: dict[str, JsonObject] = {}

@@ -64,8 +64,7 @@ def _to_lsp_items(
 ) -> list[types.CompletionItem]:
     position = types.Position(line=0, character=offset)
     return [
-        to_lsp_completion_item(item, position=position, prefix=prefix)
-        for item in items
+        to_lsp_completion_item(item, position=position, prefix=prefix) for item in items
     ]
 
 

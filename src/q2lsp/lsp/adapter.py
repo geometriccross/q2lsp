@@ -41,7 +41,9 @@ def position_to_offset(document: TextDocument, position: types.Position) -> int:
         0-based offset in the document
     """
     snapshot = _document_snapshot(document)
-    return snapshot.offset_mapper().position_to_offset(position.line, position.character)
+    return snapshot.offset_mapper().position_to_offset(
+        position.line, position.character
+    )
 
 
 def offset_to_position(document: TextDocument, offset: int) -> types.Position:
@@ -61,7 +63,9 @@ def offset_to_position(document: TextDocument, offset: int) -> types.Position:
 
 
 def _document_snapshot(document: TextDocument) -> DocumentSnapshot:
-    return DocumentSnapshot(uri=document.uri, text=document.source, version=document.version)
+    return DocumentSnapshot(
+        uri=document.uri, text=document.source, version=document.version
+    )
 
 
 def completion_kind_to_lsp(kind: CompletionKind | str) -> types.CompletionItemKind:

@@ -125,12 +125,16 @@ def _get_token_text(command_tokens: tuple[str, ...], index: int) -> str:
 
 def _command_detail(command_node: JsonObject, *, is_builtin: bool) -> str:
     if is_builtin:
-        return str(command_node.get("short_help", "")) or str(
-            command_node.get("help", "")
-        ) or "Built-in command"
-    return str(command_node.get("short_description", "")) or str(
-        command_node.get("description", "")
-    ) or "Plugin"
+        return (
+            str(command_node.get("short_help", ""))
+            or str(command_node.get("help", ""))
+            or "Built-in command"
+        )
+    return (
+        str(command_node.get("short_description", ""))
+        or str(command_node.get("description", ""))
+        or "Plugin"
+    )
 
 
 def _to_command_candidate(

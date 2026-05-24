@@ -65,7 +65,9 @@ class TestParseArgs:
             parse_args(["--transport", "invalid"])
         assert exc_info.value.code == 2
 
-    def test_invalid_port_exits_with_useful_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_invalid_port_exits_with_useful_stderr(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """Invalid port value exits with argparse usage error."""
         with pytest.raises(SystemExit) as exc_info:
             parse_args(["--port", "not_a_number"])
@@ -78,7 +80,9 @@ class TestParseArgs:
             parse_args(["--log-level", "INVALID"])
         assert exc_info.value.code == 2
 
-    def test_help_exits_zero_with_key_options(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_help_exits_zero_with_key_options(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """--help exits successfully and documents key options."""
         with pytest.raises(SystemExit) as exc_info:
             parse_args(["--help"])
@@ -123,7 +127,9 @@ class FakeServer:
 
 
 @pytest.fixture
-def fake_server_run(monkeypatch: pytest.MonkeyPatch) -> tuple[FakeServer, list[tuple[str, Path | None]]]:
+def fake_server_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[FakeServer, list[tuple[str, Path | None]]]:
     """Patch server dependencies so run() never starts real transports."""
     import q2lsp.cli as cli
 
@@ -167,19 +173,31 @@ class TestRun:
 
         assert server.calls == [("start_tcp", "0.0.0.0", 9999)]
 
-    def test_keyboard_interrupt_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_keyboard_interrupt_returns_zero(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """KeyboardInterrupt is treated as clean shutdown."""
         import q2lsp.cli as cli
 
-        monkeypatch.setattr(cli, "default_hierarchy_provider", lambda: (_ for _ in ()).throw(KeyboardInterrupt))
+        monkeypatch.setattr(
+            cli,
+            "default_hierarchy_provider",
+            lambda: (_ for _ in ()).throw(KeyboardInterrupt),
+        )
 
         assert run([]) == 0
 
-    def test_generic_exception_returns_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_generic_exception_returns_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Unexpected exceptions return failure."""
         import q2lsp.cli as cli
 
-        monkeypatch.setattr(cli, "default_hierarchy_provider", lambda: (_ for _ in ()).throw(RuntimeError))
+        monkeypatch.setattr(
+            cli,
+            "default_hierarchy_provider",
+            lambda: (_ for _ in ()).throw(RuntimeError),
+        )
 
         assert run([]) == 1
 

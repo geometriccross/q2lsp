@@ -119,9 +119,7 @@ class TestGetHoverHelp:
         assert help_text is not None
         assert "info" in help_text.lower()
 
-    def test_hover_with_line_continuation(
-        self, hover_catalog: QiimeCatalog
-    ) -> None:
+    def test_hover_with_line_continuation(self, hover_catalog: QiimeCatalog) -> None:
         """Hover works correctly with line continuations."""
         text, offset = extract_cursor_offset(
             text_with_cursor="qiime \\\nfe<CURSOR>ature-table summarize"
@@ -170,9 +168,7 @@ class TestGetHoverHelp:
         assert help_text is not None
         assert "Full plugin description" in help_text
 
-    def test_hover_on_parameter_returns_none(
-        self, hover_catalog: QiimeCatalog
-    ) -> None:
+    def test_hover_on_parameter_returns_none(self, hover_catalog: QiimeCatalog) -> None:
         """Hover on parameter token returns None (not implemented)."""
         text, offset = extract_cursor_offset(
             text_with_cursor="qiime feature-table summarize --<CURSOR>help"

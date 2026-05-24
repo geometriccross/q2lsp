@@ -76,7 +76,9 @@ def test_python_release_workflow_has_tag_trigger_and_version_check() -> None:
     # This is a lightweight workflow structure check, not executable shell validation.
     run = str(step.get("run", ""))
     assert "q2lsp-v" in run, f"Project release tag prefix required in {workflow_path}"
-    assert "pyproject.toml" in run, f"Project version source required in {workflow_path}"
+    assert "pyproject.toml" in run, (
+        f"Project version source required in {workflow_path}"
+    )
 
 
 def test_vscode_release_workflow_has_tag_trigger_and_version_check() -> None:
@@ -99,6 +101,10 @@ def test_vscode_release_workflow_has_tag_trigger_and_version_check() -> None:
     )
     # This is a lightweight workflow structure check, not executable shell validation.
     run = str(step.get("run", ""))
-    assert "vscode-q2lsp-v" in run, f"Extension release tag prefix required in {workflow_path}"
-    assert "package.json" in run, f"Extension version source required in {workflow_path}"
+    assert "vscode-q2lsp-v" in run, (
+        f"Extension release tag prefix required in {workflow_path}"
+    )
+    assert "package.json" in run, (
+        f"Extension version source required in {workflow_path}"
+    )
     assert "refs/tags/" in run, f"Tag-only validation guard required in {workflow_path}"

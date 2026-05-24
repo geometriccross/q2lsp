@@ -72,7 +72,9 @@ class TestConfigureLogging:
         logger = logging.getLogger("q2lsp")
         assert logger.level == logging.INFO
 
-    def test_default_stream_writes_to_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_default_stream_writes_to_stderr(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """Default stream handler writes log output to stderr."""
         configure_logging()
         logger = logging.getLogger("q2lsp")
