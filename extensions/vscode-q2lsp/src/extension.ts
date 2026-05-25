@@ -6,12 +6,9 @@ import {
 	VALIDATION_TIMEOUT_MS,
 	buildInterpreterCandidates,
 	buildInterpreterPathNotAbsoluteMessage,
-	buildInterpreterValidationMessage,
 	buildMissingInterpreterMessage,
-	extractPythonExecutablePath,
 	formatOutputSnippet,
 	getUnsupportedPlatformMessage,
-	isPythonExtensionApi,
 	isAbsolutePath,
 	shouldRestartOnConfigChange,
 	type InterpreterCandidate,
@@ -32,6 +29,7 @@ import {
 	toQiimeRunCommandPayload,
 } from './runCommand';
 import { openSetupWizard } from './setupWizard/index';
+import { resolveConfiguredPythonInterpreter, resolveInterpreter } from './interpreter_resolver';
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
@@ -69,7 +67,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('q2lsp.openSetupWizard', async () => {
 			const activeDocument = vscode.window.activeTextEditor?.document;
 			const { interpreterPath: normalizedInterpreter } = resolveQ2lspConfig(activeDocument);
-			const pythonExtensionInterpreter = normalizedInterpreter ? undefined : await resolvePythonExtensionInterpreter();
+			const pythonExtensionInterpreter = normalizedInterpreter
+				? undefined
+				: await resolveConfiguredPythonInterpreter(outputChannel);
 			openSetupWizard({
 				context,
 				outputChannel,
@@ -134,27 +134,11 @@ const stopClient = async (): Promise<void> => {
 const startClient = async (context: vscode.ExtensionContext): Promise<void> => {
 	const activeDocument = vscode.window.activeTextEditor?.document;
 	const { interpreterPath: normalizedInterpreter, serverEnvOverrides } = resolveQ2lspConfig(activeDocument);
-	if (normalizedInterpreter && !isAbsolutePath(normalizedInterpreter)) {
-		const message = buildInterpreterPathNotAbsoluteMessage();
-		outputChannel?.appendLine(message);
-		vscode.window.showErrorMessage(message);
-		return;
-	}
-	const pythonExtensionInterpreter = await resolvePythonExtensionInterpreter();
-	const candidates = buildInterpreterCandidates(
-		normalizedInterpreter,
-		pythonExtensionInterpreter,
-		DEFAULT_PATH_CANDIDATES
-	);
-
-	if (candidates.length === 0) {
-		const message = buildMissingInterpreterMessage();
-		outputChannel?.appendLine(message);
-		vscode.window.showErrorMessage(message);
-		return;
-	}
-
-	const resolvedInterpreter = await resolveValidInterpreter(context, candidates);
+	const resolvedInterpreter = await resolveInterpreter({
+		context,
+		outputChannel,
+		config: { interpreterPath: normalizedInterpreter, serverEnv: serverEnvOverrides },
+	});
 	if (!resolvedInterpreter) {
 		return;
 	}
@@ -170,97 +154,6 @@ const startClient = async (context: vscode.ExtensionContext): Promise<void> => {
 	client = startedClient;
 	context.subscriptions.push(client);
 	outputChannel?.appendLine(`Started q2lsp using ${resolvedInterpreter.path}.`);
-};
-
-const resolveValidInterpreter = async (
-	context: vscode.ExtensionContext,
-	candidates: InterpreterCandidate[]
-): Promise<InterpreterCandidate | undefined> => {
-	let lastFailure: { candidate: InterpreterCandidate; validation: ValidationResult } | undefined;
-	for (const candidate of candidates) {
-		const validation = await validateInterpreter(execFileForValidation, candidate.path, VALIDATION_TIMEOUT_MS);
-		if (validation.ok) {
-			return candidate;
-		}
-		lastFailure = { candidate, validation };
-
-		const message = buildInterpreterValidationMessage(candidate.path, validation.missingModules);
-		outputChannel?.appendLine(message);
-		const detail = validation.stderr ?? validation.errorMessage;
-		if (detail?.trim()) {
-			outputChannel?.appendLine(`Validation detail for ${candidate.path}: ${formatOutputSnippet(detail)}`);
-		}
-		if (candidate.source === 'config') {
-			await showValidationError({
-				context,
-				outputChannel,
-				message,
-				validation,
-				interpreterPath: candidate.path,
-			});
-			return undefined;
-		}
-	}
-
-	if (lastFailure) {
-		const message = buildInterpreterValidationMessage(
-			lastFailure.candidate.path,
-			lastFailure.validation.missingModules
-		);
-		await showValidationError({
-			context,
-			outputChannel,
-			message,
-			validation: lastFailure.validation,
-			interpreterPath: lastFailure.candidate.path,
-		});
-	}
-
-	return undefined;
-};
-
-const resolvePythonExtensionInterpreter = async (): Promise<string | undefined> => {
-	const pythonExtension = vscode.extensions.getExtension('ms-python.python');
-	if (!pythonExtension) {
-		return undefined;
-	}
-
-	try {
-		await pythonExtension.activate();
-	} catch (error) {
-		outputChannel?.appendLine(`Failed to activate Python extension: ${String(error)}`);
-	}
-
-	try {
-		const pythonApi = pythonExtension.exports;
-		if (isPythonExtensionApi(pythonApi)) {
-			const activeEnvironmentPath = pythonApi.environments.getActiveEnvironmentPath();
-			const resolvedEnvironment = await pythonApi.environments.resolveEnvironment(activeEnvironmentPath);
-			const interpreter = extractPythonExecutablePath(resolvedEnvironment, activeEnvironmentPath);
-			if (interpreter) {
-				return interpreter;
-			}
-		}
-	} catch (error) {
-		outputChannel?.appendLine(`Failed to query Python extension environment API: ${String(error)}`);
-	}
-
-	try {
-		const interpreter = await vscode.commands.executeCommand<string>('python.interpreterPath');
-		if (interpreter && interpreter.trim()) {
-			return interpreter.trim();
-		}
-	} catch (error) {
-		outputChannel?.appendLine(`Failed to query legacy Python interpreter path command: ${String(error)}`);
-	}
-
-	const pythonConfig = vscode.workspace.getConfiguration('python');
-	const configured = pythonConfig.get<string>('defaultInterpreterPath');
-	if (configured && configured.trim()) {
-		return configured.trim();
-	}
-
-	return undefined;
 };
 
 const resolveServerCwd = (activeDocument: vscode.TextDocument | undefined): string | undefined => {
@@ -329,7 +222,7 @@ const diagnoseEnvironment = async (context: vscode.ExtensionContext): Promise<vo
 		return;
 	}
 
-	const pythonExtensionInterpreter = await resolvePythonExtensionInterpreter();
+	const pythonExtensionInterpreter = await resolveConfiguredPythonInterpreter(outputChannel);
 	const candidates = buildInterpreterCandidates(
 		normalizedInterpreter,
 		pythonExtensionInterpreter,
