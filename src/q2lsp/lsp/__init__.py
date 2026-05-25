@@ -5,6 +5,8 @@ from q2lsp.lsp.document_commands import (
     AnalyzedDocument,
     analyze_document,
     resolve_completion_context,
+    to_merged_offset,
+    to_original_offset,
 )
 from q2lsp.lsp.types import (
     CompletionContext,
@@ -22,4 +24,6 @@ __all__ = [
     "TokenSpan",
     "analyze_document",
     "resolve_completion_context",
+    "to_merged_offset",
+    "to_original_offset",
 ]

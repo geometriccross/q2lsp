@@ -60,6 +60,14 @@ def complete_parameters(
     return get_core_completions(query, data)
 
 
+def get_completion_context(text: str, offset: int) -> CompletionContext:
+    """Resolve completion context through production document analysis."""
+    from q2lsp.lsp.document_commands import analyze_document, resolve_completion_context
+
+    doc = analyze_document(text)
+    return resolve_completion_context(doc, offset)
+
+
 def ctx_get_used_parameters(ctx: CompletionContext) -> set[str]:
     """Extract used parameter names from a CompletionContext."""
     if ctx.command is None:

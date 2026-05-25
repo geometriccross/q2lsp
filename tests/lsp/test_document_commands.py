@@ -270,19 +270,17 @@ class TestResolveCompletionContext:
         ctx = resolve_completion_context(doc, len(text))
         assert ctx.mode == CompletionMode.PLUGIN
 
-    def test_matches_get_completion_context(self) -> None:
-        """resolve_completion_context should match get_completion_context."""
-        from q2lsp.lsp.completion_context import get_completion_context
-
+    def test_resolves_context_across_continuation_offsets(self) -> None:
+        """Completion context resolution handles original offsets around continuations."""
         text = "qiime \\\ninfo action --help"
-        for offset in range(len(text) + 1):
-            doc = analyze_document(text)
-            ctx_new = resolve_completion_context(doc, offset)
-            ctx_old = get_completion_context(text, offset)
-            assert ctx_new.mode == ctx_old.mode, f"Mode mismatch at offset {offset}"
-            assert ctx_new.prefix == ctx_old.prefix, (
-                f"Prefix mismatch at offset {offset}"
-            )
-            assert ctx_new.token_index == ctx_old.token_index, (
-                f"token_index mismatch at offset {offset}"
-            )
+        doc = analyze_document(text)
+
+        expectations = {
+            0: CompletionMode.NONE,
+            6: CompletionMode.ROOT,
+            8: CompletionMode.ROOT,
+            len(text): CompletionMode.PARAMETER,
+        }
+        for offset, mode in expectations.items():
+            ctx = resolve_completion_context(doc, offset)
+            assert ctx.mode == mode

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from tests.helpers.cursor import extract_cursor_offset
+from tests.helpers.completions import get_completion_context
 
 from q2lsp.lsp.parser import (
     merge_line_continuations,
     tokenize_shell_line,
     find_qiime_commands,
     command_at_position,
-    get_completion_context,
 )
 from q2lsp.lsp.types import CompletionMode
 

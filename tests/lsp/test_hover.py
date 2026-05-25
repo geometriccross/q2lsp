@@ -8,7 +8,7 @@ import pytest
 
 from tests.helpers.cursor import extract_cursor_offset
 
-from q2lsp.lsp.completion_context import get_completion_context
+from tests.helpers.completions import get_completion_context
 from q2lsp.lsp.hover import get_hover_help
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy

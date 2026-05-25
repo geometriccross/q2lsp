@@ -6,7 +6,7 @@ and QIIME command detection for completion context.
 
 from __future__ import annotations
 
-from q2lsp.lsp.types import CompletionContext, ParsedCommand, TokenSpan
+from q2lsp.lsp.types import ParsedCommand, TokenSpan
 
 
 def merge_line_continuations(text: str) -> tuple[str, list[int]]:
@@ -259,17 +259,9 @@ def command_at_position(
     return None
 
 
-def get_completion_context(text: str, offset: int) -> CompletionContext:
-    """Lazily import completion context helper to avoid circular imports."""
-    from q2lsp.lsp.completion_context import get_completion_context as _get_context
-
-    return _get_context(text, offset)
-
-
 __all__ = [
     "merge_line_continuations",
     "tokenize_shell_line",
     "find_qiime_commands",
     "command_at_position",
-    "get_completion_context",  # re-exported from completion_context
 ]

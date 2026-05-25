@@ -2,113 +2,73 @@
 
 from __future__ import annotations
 
+import pytest
+
 from tests.helpers.cursor import extract_cursor_offset
 
-from q2lsp.lsp.completion_context import (
-    _determine_mode,
-    _original_to_merged_offset,
-    get_completion_context,
-)
+from q2lsp.lsp.document_commands import analyze_document, to_merged_offset
 from q2lsp.lsp.types import CompletionMode
+from tests.helpers.completions import get_completion_context
 
 
-class TestDetermineMode:
-    """Test mode determination logic."""
+class TestCompletionModeResolution:
+    """Completion mode is resolved from QIIME command token position."""
 
-    def test_negative_token_index(self) -> None:
-        """token_index < 0 should return NONE."""
-        mode = _determine_mode(-1)
-        assert mode == CompletionMode.NONE
+    @pytest.mark.parametrize(
+        ("text_with_cursor", "mode", "token_index"),
+        [
+            ("echo <CURSOR>hello", CompletionMode.NONE, -1),
+            ("qii<CURSOR>me info", CompletionMode.NONE, 0),
+            ("qiime <CURSOR>", CompletionMode.ROOT, 1),
+            ("qiime inf<CURSOR>", CompletionMode.ROOT, 1),
+            ("qiime info <CURSOR>", CompletionMode.PLUGIN, 2),
+            ("qiime info act<CURSOR>", CompletionMode.PLUGIN, 2),
+            ("qiime info action <CURSOR>", CompletionMode.PARAMETER, 3),
+            ("qiime info action --h<CURSOR>", CompletionMode.PARAMETER, 3),
+        ],
+    )
+    def test_completion_mode_from_document_analysis(
+        self, text_with_cursor: str, mode: CompletionMode, token_index: int
+    ) -> None:
+        text, offset = extract_cursor_offset(text_with_cursor=text_with_cursor)
 
-    def test_negative_token_index_two(self) -> None:
-        """token_index = -5 should return NONE."""
-        mode = _determine_mode(-5)
-        assert mode == CompletionMode.NONE
+        ctx = get_completion_context(text, offset)
 
-    def test_token_index_zero(self) -> None:
-        """token_index == 0 (on 'qiime') should return NONE."""
-        mode = _determine_mode(0)
-        assert mode == CompletionMode.NONE
-
-    def test_token_index_one(self) -> None:
-        """token_index == 1 (plugin position) should return ROOT."""
-        mode = _determine_mode(1)
-        assert mode == CompletionMode.ROOT
-
-    def test_token_index_two(self) -> None:
-        """token_index == 2 (action position) should return PLUGIN."""
-        mode = _determine_mode(2)
-        assert mode == CompletionMode.PLUGIN
-
-    def test_token_index_three(self) -> None:
-        """token_index == 3 (parameter position) should return PARAMETER."""
-        mode = _determine_mode(3)
-        assert mode == CompletionMode.PARAMETER
-
-    def test_token_index_four(self) -> None:
-        """token_index == 4 (parameter position) should return PARAMETER."""
-        mode = _determine_mode(4)
-        assert mode == CompletionMode.PARAMETER
-
-    def test_token_index_large(self) -> None:
-        """token_index >= 3 should return PARAMETER."""
-        mode = _determine_mode(10)
-        assert mode == CompletionMode.PARAMETER
+        assert ctx.mode == mode
+        assert ctx.token_index == token_index
 
 
 class TestOriginalToMergedOffset:
-    """Test offset conversion between original and merged text."""
+    """Test public offset conversion between original and merged text."""
 
     def test_offset_at_beginning(self) -> None:
-        """Offset at position 0 should map to position 0."""
-        offset_map = [0, 1, 2, 3, 4]
-        merged_offset = _original_to_merged_offset(0, offset_map)
-        assert merged_offset == 0
+        doc = analyze_document("qiime info")
+        assert to_merged_offset(doc, 0) == 0
 
     def test_offset_in_middle(self) -> None:
-        """Offset in middle should map correctly."""
-        offset_map = [0, 1, 2, 3, 4, 5, 6]
-        merged_offset = _original_to_merged_offset(3, offset_map)
-        assert merged_offset == 3
+        doc = analyze_document("qiime info")
+        assert to_merged_offset(doc, 3) == 3
 
     def test_offset_at_end(self) -> None:
-        """Offset at end should map to last valid index."""
-        offset_map = [0, 1, 2, 3, 4]
-        merged_offset = _original_to_merged_offset(4, offset_map)
-        assert merged_offset == 4
+        doc = analyze_document("qiime info")
+        assert to_merged_offset(doc, len("qiime info")) == len(doc.merged_text)
 
     def test_offset_beyond_end(self) -> None:
-        """Offset beyond end should return last index - 1."""
-        offset_map = [0, 1, 2, 3, 4, 5]
-        merged_offset = _original_to_merged_offset(100, offset_map)
-        assert merged_offset == 5
+        doc = analyze_document("qiime info")
+        assert to_merged_offset(doc, 100) == len(doc.merged_text)
 
     def test_offset_with_continuation_shift(self) -> None:
-        """Offsets should adjust for line continuation removal."""
-        # Original: "ab\\\ncd" (length 6)
-        # Merged:   "abcd" (length 4)
-        # offset_map: [0, 1, 4, 5, 6] maps merged to original positions
-        offset_map = [0, 1, 4, 5, 6]
-        # Original offset 4 (which is 'c' in merged) -> merged offset 2
-        merged_offset = _original_to_merged_offset(4, offset_map)
-        assert merged_offset == 2
+        doc = analyze_document("ab\\\ncd")
+        assert to_merged_offset(doc, 4) == 2
 
     def test_offset_before_continuation(self) -> None:
-        """Offset before continuation should map 1:1."""
-        offset_map = [0, 1, 4, 5, 6]
-        merged_offset = _original_to_merged_offset(0, offset_map)
-        assert merged_offset == 0
-
-        merged_offset = _original_to_merged_offset(1, offset_map)
-        assert merged_offset == 1
+        doc = analyze_document("ab\\\ncd")
+        assert to_merged_offset(doc, 0) == 0
+        assert to_merged_offset(doc, 1) == 1
 
     def test_offset_in_continuation_gap(self) -> None:
-        """Offset in continuation gap maps to after gap."""
-        offset_map = [0, 1, 4, 5, 6]
-        # Original offset 2 is in the gap (part of '\\\n')
-        # Should map to merged offset 2 (after gap starts)
-        merged_offset = _original_to_merged_offset(2, offset_map)
-        assert merged_offset == 2
+        doc = analyze_document("ab\\\ncd")
+        assert to_merged_offset(doc, 2) == 2
 
 
 class TestGetCompletionContext:

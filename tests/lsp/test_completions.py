@@ -593,7 +593,7 @@ class TestCompletionPipeline:
 
     def test_root_mode_pipeline(self, hierarchy_with_plugins: dict) -> None:
         """Text with cursor -> context -> completions at root mode."""
-        from q2lsp.lsp.completion_context import get_completion_context
+        from tests.helpers.completions import get_completion_context
 
         text, offset = extract_cursor_offset(text_with_cursor="qiime feat<CURSOR>")
         ctx = get_completion_context(text, offset)
@@ -623,7 +623,7 @@ class TestCompletionPipeline:
 
     def test_plugin_mode_pipeline(self, hierarchy_with_plugins: dict) -> None:
         """Text with cursor -> context -> completions at plugin mode."""
-        from q2lsp.lsp.completion_context import get_completion_context
+        from tests.helpers.completions import get_completion_context
 
         text, offset = extract_cursor_offset(
             text_with_cursor="qiime feature-table <CURSOR>"
@@ -637,7 +637,7 @@ class TestCompletionPipeline:
 
     def test_parameter_mode_pipeline(self, hierarchy_with_parameters: dict) -> None:
         """Text with cursor -> context -> completions at parameter mode."""
-        from q2lsp.lsp.completion_context import get_completion_context
+        from tests.helpers.completions import get_completion_context
 
         text, offset = extract_cursor_offset(
             text_with_cursor="qiime feature-table summarize --<CURSOR>"
@@ -693,7 +693,7 @@ class TestCompletionPipeline:
 
     def test_none_mode_pipeline(self, hierarchy_with_plugins: dict) -> None:
         """Text with cursor -> context -> completions at none mode (outside qiime)."""
-        from q2lsp.lsp.completion_context import get_completion_context
+        from tests.helpers.completions import get_completion_context
 
         text, offset = extract_cursor_offset(text_with_cursor="echo hel<CURSOR>lo")
         ctx = get_completion_context(text, offset)

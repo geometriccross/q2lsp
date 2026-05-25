@@ -9,9 +9,14 @@ from __future__ import annotations
 from bisect import bisect_left
 from typing import NamedTuple
 
-from q2lsp.lsp.completion_context import get_context_from_merged
-from q2lsp.lsp.parser import find_qiime_commands, merge_line_continuations
-from q2lsp.lsp.types import CompletionContext, ParsedCommand
+from collections.abc import Sequence
+
+from q2lsp.lsp.parser import (
+    command_at_position,
+    find_qiime_commands,
+    merge_line_continuations,
+)
+from q2lsp.lsp.types import CompletionContext, CompletionMode, ParsedCommand, TokenSpan
 
 
 class AnalyzedDocument(NamedTuple):
@@ -69,5 +74,67 @@ def resolve_completion_context(
     doc: AnalyzedDocument, original_offset: int
 ) -> CompletionContext:
     """Get completion context at an original-source position."""
+    if original_offset < 0:
+        original_offset = 0
     merged_offset = to_merged_offset(doc, original_offset)
-    return get_context_from_merged(doc.merged_text, merged_offset, doc.commands)
+    return _resolve_context_from_merged(doc.merged_text, merged_offset, doc.commands)
+
+
+def _resolve_context_from_merged(
+    merged_text: str,
+    merged_offset: int,
+    commands: Sequence[ParsedCommand],
+) -> CompletionContext:
+    command = command_at_position(list(commands), merged_offset)
+    if command is None and merged_offset == len(merged_text) and merged_offset > 0:
+        command = command_at_position(list(commands), merged_offset - 1)
+
+    if command is None:
+        return CompletionContext(
+            mode=CompletionMode.NONE,
+            command=None,
+            current_token=None,
+            token_index=-1,
+            prefix="",
+        )
+
+    current_token: TokenSpan | None = None
+    token_index = -1
+    prefix = ""
+
+    for i, token in enumerate(command.tokens):
+        if token.start <= merged_offset <= token.end:
+            current_token = token
+            token_index = i
+            prefix = token.text[: merged_offset - token.start]
+            break
+        if token.end < merged_offset:
+            token_index = i + 1
+
+    if current_token is None and token_index >= 0:
+        if merged_offset > 0 and merged_offset <= len(merged_text):
+            if (
+                merged_offset == len(merged_text)
+                or merged_text[merged_offset - 1] in " \t"
+            ):
+                token_index = len(command.tokens)
+
+    return CompletionContext(
+        mode=_completion_mode_for_token(token_index),
+        command=command,
+        current_token=current_token,
+        token_index=token_index,
+        prefix=prefix,
+    )
+
+
+def _completion_mode_for_token(token_index: int) -> CompletionMode:
+    if token_index < 0:
+        return CompletionMode.NONE
+    if token_index == 0:
+        return CompletionMode.NONE
+    if token_index == 1:
+        return CompletionMode.ROOT
+    if token_index == 2:
+        return CompletionMode.PLUGIN
+    return CompletionMode.PARAMETER
