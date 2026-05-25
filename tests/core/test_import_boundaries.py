@@ -1,12 +1,12 @@
 """Architecture boundary tests for q2lsp layered imports.
 
 Rules enforced by these tests:
-- core must not import from lsp, qiime, adapters, or usecases
+- core must not import from lsp, qiime, or adapters
 - core must not import edge dependencies directly
 - q2cli/click imports must stay inside explicit QIIME gateway modules
-- qiime must not import from lsp, adapters, or usecases
-- adapters must not import from lsp or usecases
-- usecases must not import from lsp
+- qiime must not import from lsp or adapters
+- adapters must not import from lsp
+- removed usecases package must stay removed
 """
 
 from __future__ import annotations
@@ -168,7 +168,7 @@ def test_collect_forbidden_imports_resolves_absolute_package_aliases(
     sample_file.write_text(
         "from q2lsp import lsp\n"
         "from q2lsp import qiime as q\n"
-        "from q2lsp import adapters, usecases as u\n",
+        "from q2lsp import adapters\n",
         encoding="utf-8",
     )
 
@@ -178,7 +178,6 @@ def test_collect_forbidden_imports_resolves_absolute_package_aliases(
             "q2lsp.lsp",
             "q2lsp.qiime",
             "q2lsp.adapters",
-            "q2lsp.usecases",
         ),
     )
 
@@ -186,7 +185,6 @@ def test_collect_forbidden_imports_resolves_absolute_package_aliases(
         f"{sample_file.as_posix()}:1 imports q2lsp.lsp",
         f"{sample_file.as_posix()}:2 imports q2lsp.qiime",
         f"{sample_file.as_posix()}:3 imports q2lsp.adapters",
-        f"{sample_file.as_posix()}:3 imports q2lsp.usecases",
     ]
 
 
@@ -214,20 +212,19 @@ def test_collect_forbidden_imports_handles_static_import_forms(
     ]
 
 
-def test_core_must_not_import_lsp_qiime_adapters_or_usecases() -> None:
+def test_core_must_not_import_lsp_qiime_or_adapters() -> None:
     violations = _collect_forbidden_imports(
         layer_dir=SRC_ROOT / "core",
         forbidden_prefixes=(
             "q2lsp.lsp",
             "q2lsp.qiime",
             "q2lsp.adapters",
-            "q2lsp.usecases",
         ),
     )
 
     assert violations == [], (
-        "Architecture violation: core must not depend on lsp, qiime, adapters, or "
-        "usecases.\n" + "\n".join(violations)
+        "Architecture violation: core must not depend on lsp, qiime, or adapters.\n"
+        + "\n".join(violations)
     )
 
 
@@ -283,41 +280,34 @@ def test_removed_command_hierarchy_module_is_not_importable() -> None:
         importlib.import_module("q2lsp.qiime.command_hierarchy")
 
 
-def test_qiime_must_not_import_lsp_adapters_or_usecases() -> None:
+def test_qiime_must_not_import_lsp_or_adapters() -> None:
     violations = _collect_forbidden_imports(
         layer_dir=SRC_ROOT / "qiime",
         forbidden_prefixes=(
             "q2lsp.lsp",
             "q2lsp.adapters",
-            "q2lsp.usecases",
         ),
     )
 
     assert violations == [], (
-        "Architecture violation: qiime must not depend on lsp, adapters, or usecases.\n"
+        "Architecture violation: qiime must not depend on lsp or adapters.\n"
         + "\n".join(violations)
     )
 
 
-def test_adapters_must_not_import_lsp_or_usecases() -> None:
+def test_adapters_must_not_import_lsp() -> None:
     violations = _collect_forbidden_imports(
         layer_dir=SRC_ROOT / "adapters",
-        forbidden_prefixes=("q2lsp.lsp", "q2lsp.usecases"),
-    )
-
-    assert violations == [], (
-        "Architecture violation: adapters must not depend on lsp or usecases.\n"
-        + "\n".join(violations)
-    )
-
-
-def test_usecases_must_not_import_lsp() -> None:
-    violations = _collect_forbidden_imports(
-        layer_dir=SRC_ROOT / "usecases",
         forbidden_prefixes=("q2lsp.lsp",),
     )
 
     assert violations == [], (
-        "Architecture violation: usecases must not depend on lsp.\n"
+        "Architecture violation: adapters must not depend on lsp.\n"
         + "\n".join(violations)
     )
+
+
+def test_removed_usecases_package_is_not_importable() -> None:
+    assert not (SRC_ROOT / "usecases").exists()
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("q2lsp.usecases")

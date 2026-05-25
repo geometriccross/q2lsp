@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from lsprotocol import types
+from pygls.workspace import TextDocument
 
 from tests.helpers.cursor import extract_cursor_offset
 from tests.helpers.completions import (
@@ -14,7 +15,7 @@ from tests.helpers.completions import (
 )
 
 from q2lsp.core.types import CompletionItem
-from q2lsp.lsp.adapter import to_lsp_completion_item
+from q2lsp.lsp.completion_handler import handle_completion
 from q2lsp.lsp.types import (
     CompletionContext,
     CompletionMode,
@@ -23,49 +24,31 @@ from q2lsp.lsp.types import (
 )
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
-from q2lsp.usecases.get_completions_usecase import (
-    CompletionRequest,
-    get_completions as get_usecase_completions,
-)
 
 
-def _get_completions_via_usecase(
-    ctx: CompletionContext, hierarchy: CommandHierarchy
-) -> list[CompletionItem]:
-    """Call the usecase completion path from a CompletionContext."""
-    command_tokens: tuple[str, ...] = ()
-    if ctx.command is not None:
-        command_tokens = tuple(token.text for token in ctx.command.tokens)
-    request = CompletionRequest(
-        mode=str(ctx.mode),
-        prefix=ctx.prefix,
-        command_tokens=command_tokens,
-    )
-    return get_usecase_completions(request, QiimeCatalog.from_hierarchy(hierarchy))
+def _get_completions_via_handler(
+    text: str, offset: int, hierarchy: CommandHierarchy
+) -> types.CompletionList:
+    """Call handle_completion with a real document and catalog."""
+    document = TextDocument(uri="test://doc", source=text, version=0)
+    position = types.Position(line=0, character=offset)
+    catalog = QiimeCatalog.from_hierarchy(hierarchy)
+    return handle_completion(document, position, lambda: catalog)
 
 
-def labels(items: list[CompletionItem]) -> list[str]:
+def labels(items: list[CompletionItem] | list[types.CompletionItem]) -> list[str]:
     """Extract labels from completion items."""
     return [item.label for item in items]
 
 
 def assert_labels(
-    items: list[CompletionItem],
+    items: list[CompletionItem] | list[types.CompletionItem],
     expected_labels: set[str] | list[str],
 ) -> None:
     """Assert that items contain all expected labels (unordered)."""
     expected = set(expected_labels)
     actual = set(labels(items))
     assert actual == expected, f"Expected {expected}, got {actual}"
-
-
-def _to_lsp_items(
-    items: list[CompletionItem], *, offset: int, prefix: str
-) -> list[types.CompletionItem]:
-    position = types.Position(line=0, character=offset)
-    return [
-        to_lsp_completion_item(item, position=position, prefix=prefix) for item in items
-    ]
 
 
 @pytest.fixture
@@ -617,21 +600,17 @@ class TestCompletionPipeline:
         assert ctx.mode == CompletionMode.ROOT
         assert ctx.prefix == "feat"
 
-        items = _get_completions_via_usecase(ctx, hierarchy_with_plugins)
+        items = _get_completions_via_handler(text, offset, hierarchy_with_plugins).items
         assert_labels(items, {"feature-table"})
 
     def test_root_partial_prefix_lsp_item_replaces_prefix(
         self, hierarchy_with_plugins: dict
     ) -> None:
         """Partial plugin completion includes LSP replacement edit and metadata."""
-        from q2lsp.lsp.completion_context import get_completion_context
-
         text, offset = extract_cursor_offset(text_with_cursor="qiime feat<CURSOR>")
-        ctx = get_completion_context(text, offset)
-        items = _get_completions_via_usecase(ctx, hierarchy_with_plugins)
-        lsp_items = _to_lsp_items(items, offset=offset, prefix=ctx.prefix)
+        result = _get_completions_via_handler(text, offset, hierarchy_with_plugins)
 
-        item = next(item for item in lsp_items if item.label == "feature-table")
+        item = next(item for item in result.items if item.label == "feature-table")
         assert item.kind == types.CompletionItemKind.Module
         assert item.detail == "Plugin for working with feature tables"
         assert item.text_edit == types.TextEdit(
@@ -653,7 +632,7 @@ class TestCompletionPipeline:
         assert ctx.mode == CompletionMode.PLUGIN
         assert ctx.prefix == ""
 
-        items = _get_completions_via_usecase(ctx, hierarchy_with_plugins)
+        items = _get_completions_via_handler(text, offset, hierarchy_with_plugins).items
         assert_labels(items, {"summarize", "filter-samples"})
 
     def test_parameter_mode_pipeline(self, hierarchy_with_parameters: dict) -> None:
@@ -667,7 +646,9 @@ class TestCompletionPipeline:
         assert ctx.mode == CompletionMode.PARAMETER
         assert ctx.prefix == "--"
 
-        items = _get_completions_via_usecase(ctx, hierarchy_with_parameters)
+        items = _get_completions_via_handler(
+            text, offset, hierarchy_with_parameters
+        ).items
         item_labels = labels(items)
         assert "--i-table" in item_labels
         assert "--help" in item_labels
@@ -676,16 +657,14 @@ class TestCompletionPipeline:
         self, hierarchy_with_parameters: dict
     ) -> None:
         """Partial parameter completion includes LSP replacement edit and metadata."""
-        from q2lsp.lsp.completion_context import get_completion_context
-
         text, offset = extract_cursor_offset(
             text_with_cursor="qiime feature-table summarize --p-s<CURSOR>"
         )
-        ctx = get_completion_context(text, offset)
-        items = _get_completions_via_usecase(ctx, hierarchy_with_parameters)
-        lsp_items = _to_lsp_items(items, offset=offset, prefix=ctx.prefix)
+        result = _get_completions_via_handler(text, offset, hierarchy_with_parameters)
 
-        item = next(item for item in lsp_items if item.label == "--p-sample-metadata")
+        item = next(
+            item for item in result.items if item.label == "--p-sample-metadata"
+        )
         assert item.kind == types.CompletionItemKind.Field
         assert item.detail == "[Metadata] Sample metadata"
         assert item.text_edit == types.TextEdit(
@@ -700,15 +679,14 @@ class TestCompletionPipeline:
         self, hierarchy_with_parameters: dict
     ) -> None:
         """Parameters after the cursor still count as used in completion filtering."""
-        from q2lsp.lsp.completion_context import get_completion_context
-
         text, offset = extract_cursor_offset(
             text_with_cursor=(
                 "qiime feature-table summarize --<CURSOR> --i-table table.qza"
             )
         )
-        ctx = get_completion_context(text, offset)
-        items = _get_completions_via_usecase(ctx, hierarchy_with_parameters)
+        items = _get_completions_via_handler(
+            text, offset, hierarchy_with_parameters
+        ).items
 
         assert "--i-table" not in labels(items)
         assert "--p-sample-metadata" in labels(items)
@@ -721,68 +699,43 @@ class TestCompletionPipeline:
         ctx = get_completion_context(text, offset)
         assert ctx.mode == CompletionMode.NONE
 
-        items = _get_completions_via_usecase(ctx, hierarchy_with_plugins)
+        items = _get_completions_via_handler(text, offset, hierarchy_with_plugins).items
         assert items == []
 
 
 class TestGetCompletions:
     def test_mode_none_returns_empty(self, full_mock_hierarchy: dict) -> None:
-        ctx = CompletionContext(
-            mode=CompletionMode.NONE,
-            command=None,
-            current_token=None,
-            token_index=-1,
-            prefix="",
-        )
-        items = _get_completions_via_usecase(ctx, full_mock_hierarchy)
-        assert items == []
+        text = "echo hello"
+        offset = 5
+
+        result = _get_completions_via_handler(text, offset, full_mock_hierarchy)
+
+        assert result.items == []
 
     def test_mode_root(self, full_mock_hierarchy: dict) -> None:
-        tokens = [TokenSpan("qiime", 0, 5)]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=6)
-        ctx = CompletionContext(
-            mode=CompletionMode.ROOT,
-            command=cmd,
-            current_token=None,
-            token_index=1,
-            prefix="",
-        )
-        items = _get_completions_via_usecase(ctx, full_mock_hierarchy)
-        assert "info" in labels(items)
-        assert "feature-table" in labels(items)
+        text = "qiime "
+        offset = 6
+
+        result = _get_completions_via_handler(text, offset, full_mock_hierarchy)
+
+        assert "info" in labels(result.items)
+        assert "feature-table" in labels(result.items)
 
     def test_mode_plugin(self, full_mock_hierarchy: dict) -> None:
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("feature-table", 6, 19),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=20)
-        ctx = CompletionContext(
-            mode=CompletionMode.PLUGIN,
-            command=cmd,
-            current_token=None,
-            token_index=2,
-            prefix="",
-        )
-        items = _get_completions_via_usecase(ctx, full_mock_hierarchy)
-        assert "summarize" in labels(items)
+        text = "qiime feature-table "
+        offset = 20
+
+        result = _get_completions_via_handler(text, offset, full_mock_hierarchy)
+
+        assert "summarize" in labels(result.items)
 
     def test_mode_parameter(self, full_mock_hierarchy: dict) -> None:
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("feature-table", 6, 19),
-            TokenSpan("summarize", 20, 29),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=30)
-        ctx = CompletionContext(
-            mode=CompletionMode.PARAMETER,
-            command=cmd,
-            current_token=None,
-            token_index=3,
-            prefix="--",
-        )
-        items = _get_completions_via_usecase(ctx, full_mock_hierarchy)
-        assert "--i-table" in labels(items)
+        text = "qiime feature-table summarize --"
+        offset = 32
+
+        result = _get_completions_via_handler(text, offset, full_mock_hierarchy)
+
+        assert "--i-table" in labels(result.items)
 
     def test_mode_parameter_explicit_required_false_not_marked_required(self) -> None:
         hierarchy = {
@@ -802,22 +755,11 @@ class TestGetCompletions:
                 },
             }
         }
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("tools", 6, 11),
-            TokenSpan("inspect", 12, 19),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=20)
-        ctx = CompletionContext(
-            mode=CompletionMode.PARAMETER,
-            command=cmd,
-            current_token=None,
-            token_index=3,
-            prefix="--",
-        )
+        text = "qiime tools inspect --"
+        offset = 22
 
-        items = _get_completions_via_usecase(ctx, hierarchy)
-        level_item = next(item for item in items if item.label == "--level")
+        result = _get_completions_via_handler(text, offset, hierarchy)
+        level_item = next(item for item in result.items if item.label == "--level")
         assert "(required)" not in level_item.detail
 
     def test_mode_parameter_explicit_required_true_marked_required(self) -> None:
@@ -838,20 +780,9 @@ class TestGetCompletions:
                 },
             }
         }
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("tools", 6, 11),
-            TokenSpan("inspect", 12, 19),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=20)
-        ctx = CompletionContext(
-            mode=CompletionMode.PARAMETER,
-            command=cmd,
-            current_token=None,
-            token_index=3,
-            prefix="--",
-        )
+        text = "qiime tools inspect --"
+        offset = 22
 
-        items = _get_completions_via_usecase(ctx, hierarchy)
-        level_item = next(item for item in items if item.label == "--level")
+        result = _get_completions_via_handler(text, offset, hierarchy)
+        level_item = next(item for item in result.items if item.label == "--level")
         assert "(required)" in level_item.detail
