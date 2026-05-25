@@ -101,8 +101,8 @@ class TestCreateServer:
         completion_options = fm.feature_options[types.TEXT_DOCUMENT_COMPLETION]
         assert completion_options.trigger_characters == [" ", "-"]
 
-    def test_completion_uses_catalog_backed_usecase(self, mocker) -> None:
-        """Completion receives catalog directly from the provider."""
+    def test_completion_delegates_to_completion_handler(self, mocker) -> None:
+        """Completion closure delegates document, position, and catalog provider."""
         hierarchy: CommandHierarchy = {
             "qiime": {
                 "name": "qiime",
@@ -114,24 +114,28 @@ class TestCreateServer:
                 },
             }
         }
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(hierarchy)
-        )
+
+        def get_catalog() -> QiimeCatalog:
+            return QiimeCatalog.from_hierarchy(hierarchy)
+
+        server = server_mod.create_server(get_catalog=get_catalog)
 
         class MockDocument:
             uri = "file:///test.sh"
             source = "qiime "
             version = 1
 
+        document = MockDocument()
         mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = MockDocument()
+        mock_workspace.get_text_document.return_value = document
         server.protocol._workspace = mock_workspace
 
-        mock_get_completions = mocker.patch.object(
+        expected = types.CompletionList(is_incomplete=False, items=[])
+        mock_handle_completion = mocker.patch.object(
             server_mod,
-            "get_completions",
+            "handle_completion",
             autospec=True,
-            return_value=[],
+            return_value=expected,
         )
 
         completion_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_COMPLETION]
@@ -140,19 +144,12 @@ class TestCreateServer:
             position=types.Position(line=0, character=6),
         )
 
-        completion_handler(params)
+        completion = completion_handler(params)
 
-        mock_get_completions.assert_called_once()
-        request = mock_get_completions.call_args.args[0]
-        assert request.mode == "root"
-        assert request.prefix == ""
-        assert request.command_tokens == ("qiime",)
-        catalog = mock_get_completions.call_args.args[1]
-        assert isinstance(catalog, QiimeCatalog)
-        assert [command.name for command in catalog.commands()] == [
-            command.name
-            for command in QiimeCatalog.from_hierarchy(hierarchy).commands()
-        ]
+        assert completion == expected
+        mock_handle_completion.assert_called_once_with(
+            document, params.position, get_catalog
+        )
 
     def test_completion_and_hover_share_cached_catalog(self, mocker) -> None:
         """A cached catalog provider is reused between completion and hover."""
@@ -257,7 +254,9 @@ class TestCreateServer:
     def test_completion_returns_empty_list_on_handler_failure(self, mocker) -> None:
         """Completion handler failures return the default empty list."""
         server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy({"qiime": {"name": "qiime"}})
+            get_catalog=lambda: QiimeCatalog.from_hierarchy(
+                {"qiime": {"name": "qiime"}}
+            )
         )
         mock_workspace = mocker.Mock()
         mock_workspace.get_text_document.side_effect = RuntimeError("boom")

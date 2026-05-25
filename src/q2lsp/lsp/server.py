@@ -18,27 +18,14 @@ from pygls.uris import from_fs_path
 from pygls.workspace import Workspace
 
 from q2lsp.logging import get_logger
-from q2lsp.lsp.adapter import (
-    LSP_POSITION_ENCODING,
-    offset_to_position as _offset_to_position,
-    position_to_offset as _position_to_offset,
-    to_lsp_completion_item as _to_lsp_completion_item,
-)
-from q2lsp.lsp.diagnostics import validate_command_with_catalog
-from q2lsp.lsp.diagnostics.codes import DEFAULT_SEVERITY, DIAGNOSTIC_SEVERITY
+from q2lsp.lsp.adapter import LSP_POSITION_ENCODING
 from q2lsp.lsp.diagnostics.debounce import DebounceManager
-from q2lsp.lsp.document_commands import (
-    analyze_document,
-    resolve_completion_context,
-    to_original_offset,
-)
+from q2lsp.lsp.code_lens_handler import handle_code_lens
+from q2lsp.lsp.completion_handler import handle_completion
+from q2lsp.lsp.diagnostics_handler import compute_diagnostics
 from q2lsp.lsp.error_handling import wrap_async_handler, wrap_handler
-from q2lsp.lsp.hover import get_hover_help
+from q2lsp.lsp.hover_handler import handle_hover
 from q2lsp.qiime.catalog import CatalogProvider
-from q2lsp.usecases.get_completions_usecase import (
-    CompletionRequest,
-    get_completions,
-)
 
 
 class Utf16LanguageServerProtocol(LanguageServerProtocol):
@@ -138,37 +125,10 @@ def create_server(
         logger.debug("Completion request at %s", params.position)
 
         document = server.workspace.get_text_document(params.text_document.uri)
+        result = handle_completion(document, params.position, get_catalog)
 
-        # Calculate document offset from line/character position
-        offset = _position_to_offset(document, params.position)
-
-        # Analyze document and get completion context
-        doc = analyze_document(document.source)
-        ctx = resolve_completion_context(doc, offset)
-        logger.debug("Completion context: mode=%s, prefix=%s", ctx.mode, ctx.prefix)
-
-        # Get completion items
-        command_tokens: tuple[str, ...] = ()
-        if ctx.command is not None:
-            command_tokens = tuple(token.text for token in ctx.command.tokens)
-        request = CompletionRequest(
-            mode=str(ctx.mode),
-            prefix=ctx.prefix,
-            command_tokens=command_tokens,
-        )
-        internal_items = get_completions(request, get_catalog())
-
-        # Convert to LSP CompletionItems
-        lsp_items = [
-            _to_lsp_completion_item(item, position=params.position, prefix=ctx.prefix)
-            for item in internal_items
-        ]
-
-        logger.debug("Returning %d completion items", len(lsp_items))
-        return types.CompletionList(
-            is_incomplete=False,
-            items=lsp_items,
-        )
+        logger.debug("Returning %d completion items", len(result.items))
+        return result
 
     def _empty_code_lens_list() -> list[types.CodeLens]:
         return []
@@ -187,39 +147,10 @@ def create_server(
         logger.debug("CodeLens request for %s", params.text_document.uri)
 
         document = server.workspace.get_text_document(params.text_document.uri)
-        doc = analyze_document(document.source)
+        result = handle_code_lens(document)
 
-        code_lenses: list[types.CodeLens] = []
-        for command in doc.commands:
-            qiime_token = command.tokens[0]
-            original_start = to_original_offset(doc, qiime_token.start)
-            original_end = to_original_offset(doc, qiime_token.end)
-            command_start = to_original_offset(doc, command.start)
-            command_end = to_original_offset(doc, command.end)
-            code_lenses.append(
-                types.CodeLens(
-                    range=types.Range(
-                        start=_offset_to_position(document, original_start),
-                        end=_offset_to_position(document, original_end),
-                    ),
-                    command=types.Command(
-                        title="Run QIIME command",
-                        command="q2lsp.runCommand",
-                        arguments=[
-                            {
-                                "uri": params.text_document.uri,
-                                "commandText": document.source[
-                                    command_start:command_end
-                                ],
-                                "tokens": [token.text for token in command.tokens],
-                            }
-                        ],
-                    ),
-                )
-            )
-
-        logger.debug("Returning %d CodeLens items", len(code_lenses))
-        return code_lenses
+        logger.debug("Returning %d CodeLens items", len(result))
+        return result
 
     def _default_hover() -> types.Hover | None:
         return None
@@ -240,25 +171,7 @@ def create_server(
 
         document = server.workspace.get_text_document(params.text_document.uri)
 
-        # Calculate document offset from line/character position
-        offset = _position_to_offset(document, params.position)
-
-        # Analyze document and get hover help
-        doc = analyze_document(document.source)
-        ctx = resolve_completion_context(doc, offset)
-        catalog = get_catalog() if get_help is None else None
-        help_text = get_hover_help(ctx, get_help=get_help, catalog=catalog)
-
-        if help_text is None:
-            return None
-
-        logger.debug("Hover help: %s", help_text[:100])
-        return types.Hover(
-            contents=types.MarkupContent(
-                kind=types.MarkupKind.Markdown,
-                value=f"```\n{help_text}\n```",
-            ),
-        )
+        return handle_hover(document, params.position, get_catalog, get_help=get_help)
 
     # Diagnostics
     async def publish_document_diagnostics(
@@ -285,35 +198,7 @@ def create_server(
             return
 
         try:
-            # Analyze document
-            doc = analyze_document(document.source)
-
-            catalog = get_catalog()
-
-            # Validate each command
-            lsp_diagnostics: list[types.Diagnostic] = []
-            for cmd in doc.commands:
-                issues = validate_command_with_catalog(cmd, catalog)
-                for issue in issues:
-                    # Map merged offsets back to original offsets
-                    original_start = to_original_offset(doc, issue.start)
-                    original_end = to_original_offset(doc, issue.end)
-
-                    # Convert offsets to LSP position
-                    start_pos = _offset_to_position(document, original_start)
-                    end_pos = _offset_to_position(document, original_end)
-
-                    lsp_diagnostics.append(
-                        types.Diagnostic(
-                            range=types.Range(start=start_pos, end=end_pos),
-                            message=issue.message,
-                            severity=DIAGNOSTIC_SEVERITY.get(
-                                issue.code, DEFAULT_SEVERITY
-                            ),
-                            source="q2lsp",
-                            code=issue.code,
-                        )
-                    )
+            lsp_diagnostics = compute_diagnostics(document, get_catalog)
 
             # Publish diagnostics using pygls standard method
             server.text_document_publish_diagnostics(

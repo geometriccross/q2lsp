@@ -44,9 +44,7 @@ def analyze_command(
         for option in catalog.action_options(command_name, action_name)
         if option.is_bool_flag
     }
-    if _has_help_invocation(
-        option_tokens, option_groups, flag_option_labels
-    ):
+    if _has_help_invocation(option_tokens, option_groups, flag_option_labels):
         return CommandAnalysis(
             command=command,
             issues=issues,

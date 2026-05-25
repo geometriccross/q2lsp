@@ -67,9 +67,7 @@ def _stub_hierarchy_provider() -> CommandHierarchy:
 
 def main() -> None:
     """Start the test LSP server."""
-    server = create_server(
-        get_catalog=make_catalog_provider(_stub_hierarchy_provider)
-    )
+    server = create_server(get_catalog=make_catalog_provider(_stub_hierarchy_provider))
     server.start_io()
 
 

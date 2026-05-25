@@ -444,7 +444,9 @@ class TestValidateCommand:
 class TestValidateOptions:
     """Tests for option validation."""
 
-    def test_unknown_option_on_valid_action_with_empty_signature_emits_diagnostic(self) -> None:
+    def test_unknown_option_on_valid_action_with_empty_signature_emits_diagnostic(
+        self,
+    ) -> None:
         hierarchy = {
             "qiime": {
                 "name": "qiime",
