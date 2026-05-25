@@ -19,6 +19,24 @@ def _document(source: str) -> TextDocument:
     )
 
 
+def _dependency_hierarchy() -> CommandHierarchy:
+    return {
+        "qiime": {
+            "name": "qiime",
+            "demo": {
+                "name": "demo",
+                "step": {
+                    "name": "step",
+                    "signature": [
+                        {"name": "table", "type": "input"},
+                        {"name": "result", "type": "output"},
+                    ],
+                },
+            },
+        }
+    }
+
+
 def test_compute_diagnostics_returns_diagnostic_for_unknown_plugin() -> None:
     """Diagnostics report unknown plugin names from the catalog."""
     hierarchy: CommandHierarchy = {
@@ -66,3 +84,88 @@ def test_compute_diagnostics_returns_empty_list_for_valid_command() -> None:
     )
 
     assert diagnostics == []
+
+
+def test_compute_diagnostics_reports_duplicate_output_paths() -> None:
+    """Duplicate output path diagnostics are published as LSP diagnostics."""
+    source = "\n".join(
+        [
+            "qiime demo step --i-table in-1.qza --o-result dup.qza",
+            "qiime demo step --i-table in-2.qza --o-result dup.qza",
+        ]
+    )
+
+    diagnostics = compute_diagnostics(
+        _document(source),
+        lambda: QiimeCatalog.from_hierarchy(_dependency_hierarchy()),
+    )
+
+    duplicate_diagnostics = [
+        diagnostic
+        for diagnostic in diagnostics
+        if diagnostic.code == "q2lsp-dni/duplicate-output-path"
+    ]
+    assert len(duplicate_diagnostics) == 2
+    assert {diagnostic.message for diagnostic in duplicate_diagnostics} == {
+        "Duplicate output path 'dup.qza' is produced by multiple commands.",
+    }
+    assert {
+        (
+            diagnostic.range.start.line,
+            diagnostic.range.start.character,
+            diagnostic.range.end.line,
+            diagnostic.range.end.character,
+        )
+        for diagnostic in duplicate_diagnostics
+    } == {
+        (0, 46, 0, 53),
+        (1, 46, 1, 53),
+    }
+    assert all(
+        diagnostic.severity == types.DiagnosticSeverity.Error
+        for diagnostic in duplicate_diagnostics
+    )
+
+
+def test_compute_diagnostics_reports_dependency_cycles() -> None:
+    """Dependency cycle diagnostics are published as LSP diagnostics."""
+    first_line = "qiime demo step --i-table b.qza --o-result a.qza"
+    second_line = "qiime demo step --i-table a.qza --o-result b.qza"
+    source = "\n".join([first_line, second_line])
+
+    diagnostics = compute_diagnostics(
+        _document(source),
+        lambda: QiimeCatalog.from_hierarchy(_dependency_hierarchy()),
+    )
+
+    cycle_diagnostics = [
+        diagnostic
+        for diagnostic in diagnostics
+        if diagnostic.code == "q2lsp-dni/dependency-cycle"
+    ]
+    assert len(cycle_diagnostics) == 2
+    assert {diagnostic.message for diagnostic in cycle_diagnostics} == {
+        "Dependency cycle detected for input path 'a.qza'.",
+        "Dependency cycle detected for input path 'b.qza'.",
+    }
+    assert {
+        (
+            diagnostic.range.start.line,
+            diagnostic.range.start.character,
+            diagnostic.range.end.line,
+            diagnostic.range.end.character,
+        )
+        for diagnostic in cycle_diagnostics
+    } == {
+        (0, first_line.index("b.qza"), 0, first_line.index("b.qza") + len("b.qza")),
+        (
+            1,
+            second_line.index("a.qza"),
+            1,
+            second_line.index("a.qza") + len("a.qza"),
+        ),
+    }
+    assert all(
+        diagnostic.severity == types.DiagnosticSeverity.Error
+        for diagnostic in cycle_diagnostics
+    )
