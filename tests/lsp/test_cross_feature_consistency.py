@@ -17,7 +17,7 @@ from q2lsp.lsp.diagnostics.codes import (
     UNKNOWN_OPTION,
     UNKNOWN_SUBCOMMAND,
 )
-from q2lsp.lsp.diagnostics.validator import validate_command_with_catalog
+from q2lsp.lsp.diagnostics.command_analysis import validate_command_with_catalog
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.signature_params import (

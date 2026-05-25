@@ -7,9 +7,12 @@ import pytest
 import q2lsp.lsp.diagnostics.codes as diagnostic_codes
 from q2lsp.lsp.diagnostics import collect_diagnostics
 from q2lsp.lsp.diagnostics.codes import DEPENDENCY_CYCLE
-from q2lsp.lsp.diagnostics.command_level import extract_command_dependencies
+from q2lsp.lsp.diagnostics.command_analysis import (
+    CommandAnalysis,
+    CommandDependencies,
+    extract_command_dependencies,
+)
 from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
-from q2lsp.lsp.diagnostics.models import CommandAnalysis, CommandDependencies
 from q2lsp.lsp.document_commands import (
     AnalyzedDocument,
     analyze_document,

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from q2lsp.lsp.diagnostics import validate_command_with_catalog
+from q2lsp.lsp.diagnostics.command_analysis import validate_command_with_catalog
 from q2lsp.lsp.document_commands import analyze_document
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy

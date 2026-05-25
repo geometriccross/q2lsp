@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from q2lsp.lsp.diagnostics.command_level import analyze_command
+from q2lsp.lsp.diagnostics.command_analysis import analyze_command
 from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
 from q2lsp.lsp.diagnostics.document_level import collect_document_diagnostics
 from q2lsp.lsp.document_commands import AnalyzedDocument

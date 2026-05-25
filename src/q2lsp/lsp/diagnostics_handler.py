@@ -6,7 +6,7 @@ from lsprotocol import types
 from pygls.workspace import TextDocument
 
 from q2lsp.lsp.adapter import offset_to_position
-from q2lsp.lsp.diagnostics import validate_command_with_catalog
+from q2lsp.lsp.diagnostics import analyze_command
 from q2lsp.lsp.diagnostics.codes import DEFAULT_SEVERITY, DIAGNOSTIC_SEVERITY
 from q2lsp.lsp.document_commands import analyze_document, to_original_offset
 from q2lsp.qiime.catalog import CatalogProvider
@@ -22,8 +22,8 @@ def compute_diagnostics(
 
     diagnostics: list[types.Diagnostic] = []
     for cmd in doc.commands:
-        issues = validate_command_with_catalog(cmd, catalog)
-        for issue in issues:
+        analysis = analyze_command(cmd, catalog, doc.merged_text)
+        for issue in analysis.issues:
             original_start = to_original_offset(doc, issue.start)
             original_end = to_original_offset(doc, issue.end)
 

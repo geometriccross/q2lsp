@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from q2lsp.lsp.diagnostics import codes
+from q2lsp.lsp.diagnostics.command_analysis import CommandAnalysis
 from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
-from q2lsp.lsp.diagnostics.models import CommandAnalysis
 
 
 def collect_document_diagnostics(
