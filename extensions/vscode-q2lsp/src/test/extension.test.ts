@@ -1,151 +1,20 @@
 import * as assert from 'assert';
-import {
-	buildInterpreterCandidates,
-	buildInterpreterPathNotAbsoluteMessage,
-	buildInterpreterValidationMessage,
-	buildInterpreterValidationSnippet,
-	extractPythonExecutablePath,
-	formatOutputSnippet,
-	isPythonExtensionApi,
-	parseInterpreterValidationStdout,
-	buildServerCommand,
-	DEFAULT_PATH_CANDIDATES,
-	Q2CLI_MISSING_QIIME_HINT,
-	QIIME2_QUICKSTART_URL,
-	getUnsupportedPlatformMessage,
-	isAbsolutePath,
-	mergeEnv,
-} from '../helpers';
+import type * as vscode from 'vscode';
+import { activate, deactivate } from '../extension';
 
-suite('q2lsp helper tests', () => {
-	test('interpreterPath overrides everything', () => {
-		const candidates = buildInterpreterCandidates('/opt/python', '/opt/python-ext', DEFAULT_PATH_CANDIDATES);
-		assert.deepStrictEqual(candidates, [{ path: '/opt/python', source: 'config' }]);
-	});
+suite('q2lsp extension tests', () => {
+	test('activation stops before registering commands on native Windows', async () => {
+		const originalPlatform = process.platform;
+		Object.defineProperty(process, 'platform', { value: 'win32' });
+		const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
 
-	test('path fallback order prefers python3 then python', () => {
-		const candidates = buildInterpreterCandidates(undefined, undefined, DEFAULT_PATH_CANDIDATES);
-		assert.deepStrictEqual(candidates, [
-			{ path: 'python3', source: 'path' },
-			{ path: 'python', source: 'path' },
-		]);
-	});
+		try {
+			await activate(context);
 
-	test('env merge prefers overrides', () => {
-		const merged = mergeEnv({ FOO: 'base', BAR: 'base' }, { BAR: 'override', BAZ: 'override' });
-		assert.deepStrictEqual(merged, { FOO: 'base', BAR: 'override', BAZ: 'override' });
-	});
-
-	test('formatOutputSnippet returns <empty> for undefined or whitespace', () => {
-		assert.strictEqual(formatOutputSnippet(undefined), '<empty>');
-		assert.strictEqual(formatOutputSnippet('   \n\t  '), '<empty>');
-	});
-
-	test('formatOutputSnippet truncates values longer than 400 chars and appends ellipsis', () => {
-		const longText = 'a'.repeat(401);
-		const formatted = formatOutputSnippet(longText);
-		assert.strictEqual(formatted.length, 403);
-		assert.strictEqual(formatted, `${'a'.repeat(400)}...`);
-	});
-
-	test('formatOutputSnippet returns short non-empty values unchanged', () => {
-		assert.strictEqual(formatOutputSnippet('hello output'), 'hello output');
-	});
-
-	test('windows platform is blocked', () => {
-		assert.ok(getUnsupportedPlatformMessage('win32'));
-		assert.strictEqual(getUnsupportedPlatformMessage('linux'), undefined);
-	});
-
-	test('server command uses q2lsp stdio', () => {
-		assert.deepStrictEqual(buildServerCommand('/opt/python'), {
-			command: '/opt/python',
-			args: ['-m', 'q2lsp', '--transport', 'stdio'],
-		});
-	});
-
-	test('absolute path detection', () => {
-		assert.strictEqual(isAbsolutePath('/usr/bin/python3'), true);
-		assert.strictEqual(isAbsolutePath('python3'), false);
-	});
-
-	test('non-absolute interpreter message is actionable', () => {
-		const message = buildInterpreterPathNotAbsoluteMessage();
-		assert.strictEqual(
-			message,
-			'q2lsp.interpreterPath must be absolute (e.g., /usr/bin/python3).'
-		);
-	});
-
-	test('validation snippet checks for q2lsp and q2cli', () => {
-		const snippet = buildInterpreterValidationSnippet();
-		assert.ok(snippet.includes('q2lsp'));
-		assert.ok(snippet.includes('q2cli'));
-		assert.ok(snippet.includes('executable'));
-		assert.ok(snippet.includes('find_spec'));
-	});
-
-	test('validation message includes missing modules', () => {
-		const message = buildInterpreterValidationMessage('/opt/python', ['q2lsp', 'q2cli']);
-		assert.ok(message.includes('q2lsp'));
-		assert.ok(message.includes('q2cli'));
-		assert.ok(message.includes('Required modules missing'));
-		assert.ok(message.includes('QIIME 2 is not installed in this Python environment'));
-		assert.ok(message.includes(QIIME2_QUICKSTART_URL));
-		assert.ok(!message.includes('README'));
-	});
-
-	test('q2cli hint points to QIIME 2 quickstart', () => {
-		assert.ok(Q2CLI_MISSING_QIIME_HINT.includes(QIIME2_QUICKSTART_URL));
-		assert.ok(!Q2CLI_MISSING_QIIME_HINT.includes('README'));
-	});
-
-	test('validation stdout parse returns missing modules and executable', () => {
-		const parsed = parseInterpreterValidationStdout(
-			'{"missing":["q2lsp"],"executable":"/opt/python","version":"3.11.0"}'
-		);
-		assert.deepStrictEqual(parsed?.missing, ['q2lsp']);
-		assert.strictEqual(parsed?.executable, '/opt/python');
-	});
-
-	test('validation stdout parse fails on unexpected output', () => {
-		assert.strictEqual(parseInterpreterValidationStdout('WARNING: something'), null);
-		assert.strictEqual(parseInterpreterValidationStdout(''), null);
-	});
-
-	test('python extension API guard accepts environment resolver shape', () => {
-		assert.strictEqual(
-			isPythonExtensionApi({
-				environments: {
-					getActiveEnvironmentPath: () => ({ path: '/opt/python' }),
-					resolveEnvironment: async () => ({}),
-				},
-			}),
-			true
-		);
-		assert.strictEqual(isPythonExtensionApi({ environments: {} }), false);
-	});
-
-	test('extractPythonExecutablePath prefers resolved executable uri', () => {
-		const executablePath = extractPythonExecutablePath(
-			{
-				executable: {
-					uri: {
-						fsPath: '/opt/qiime/bin/python',
-					},
-				},
-			},
-			{ path: '/opt/qiime' }
-		);
-
-		assert.strictEqual(executablePath, '/opt/qiime/bin/python');
-	});
-
-	test('extractPythonExecutablePath falls back to active environment path', () => {
-		assert.strictEqual(
-			extractPythonExecutablePath(undefined, { path: ' /opt/qiime/bin/python ' }),
-			'/opt/qiime/bin/python'
-		);
-		assert.strictEqual(extractPythonExecutablePath(undefined, { path: '   ' }), undefined);
+			assert.strictEqual(context.subscriptions.length, 1);
+		} finally {
+			await deactivate();
+			Object.defineProperty(process, 'platform', { value: originalPlatform });
+		}
 	});
 });

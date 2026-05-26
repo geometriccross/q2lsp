@@ -1,9 +1,61 @@
 import { execFile, type ExecFileException, type ExecFileOptionsWithStringEncoding } from 'child_process';
-import {
-	buildInterpreterValidationSnippet,
-	parseInterpreterValidationStdout,
-	type InterpreterValidationDetails,
-} from './helpers';
+export const REQUIRED_PYTHON_MODULES = ['q2lsp', 'q2cli'] as const;
+export const VALIDATION_TIMEOUT_MS = 2000;
+
+export type InterpreterValidationDetails = {
+	missing: string[];
+	executable: string;
+	version: string;
+};
+
+export const buildInterpreterValidationSnippet = (
+	modules: readonly string[] = REQUIRED_PYTHON_MODULES
+): string => {
+	const moduleList = JSON.stringify(modules);
+	return [
+		'import json',
+		'import sys',
+		'import importlib.util',
+		`modules = ${moduleList}`,
+		'missing = []',
+		'for name in modules:',
+		'    if importlib.util.find_spec(name) is None:',
+		'        missing.append(name)',
+		'print(json.dumps({"missing": missing, "executable": sys.executable, "version": sys.version}))',
+	].join('\n');
+};
+
+export const parseInterpreterValidationStdout = (
+	stdout: string | undefined
+): InterpreterValidationDetails | null => {
+	const trimmed = stdout?.trim();
+	if (!trimmed) {
+		return null;
+	}
+
+	try {
+		const parsed = JSON.parse(trimmed) as {
+			missing?: unknown;
+			executable?: unknown;
+			version?: unknown;
+		};
+		if (!Array.isArray(parsed.missing)) {
+			return null;
+		}
+		const executable = typeof parsed.executable === 'string' ? parsed.executable : undefined;
+		const version = typeof parsed.version === 'string' ? parsed.version : undefined;
+		if (!executable || !version) {
+			return null;
+		}
+		return {
+			missing: parsed.missing.filter((entry): entry is string => typeof entry === 'string'),
+			executable,
+			version,
+		};
+	} catch {
+		return null;
+	}
+};
 
 export type ValidationResult = {
 	ok: boolean;

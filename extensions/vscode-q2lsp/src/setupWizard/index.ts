@@ -1,7 +1,7 @@
 import { execFile, type ExecFileOptionsWithStringEncoding } from 'child_process';
 import * as vscode from 'vscode';
 import { selectPythonInterpreter } from '../diagnosis';
-import { VALIDATION_TIMEOUT_MS, buildInterpreterValidationSnippet, parseInterpreterValidationStdout } from '../helpers';
+import { VALIDATION_TIMEOUT_MS, buildInterpreterValidationSnippet, parseInterpreterValidationStdout } from '../interpreter';
 import { execFileForValidation, validateInterpreter } from '../interpreter';
 
 import { buildSetupWizardHtml } from './view';

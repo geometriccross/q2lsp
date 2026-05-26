@@ -103,8 +103,11 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 │       │   ├── config.ts
 │       │   ├── diagnosis.ts
 │       │   ├── extension.ts
-│       │   ├── helpers.ts
 │       │   ├── interpreter.ts
+│       │   ├── interpreter_resolver.ts
+│       │   ├── interpreterMessages.ts
+│       │   ├── interpreterPath.ts
+│       │   ├── interpreterSources.ts
 │       │   ├── runCommand.ts
 │       │   ├── setupWizard/
 │       │   └── test/
@@ -113,6 +116,10 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 │       │       ├── diagnosis.test.ts
 │       │       ├── extension.test.ts
 │       │       ├── interpreter.test.ts
+│       │       ├── interpreter_resolver.test.ts
+│       │       ├── interpreterMessages.test.ts
+│       │       ├── interpreterPath.test.ts
+│       │       ├── interpreterSources.test.ts
 │       │       ├── runCommand.test.ts
 │       │       └── setupWizard.test.ts
 │       ├── tsconfig.json
@@ -125,8 +132,7 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 │       ├── core/
 │       ├── logging.py
 │       ├── lsp/
-│       ├── qiime/
-│       └── usecases/
+│       └── qiime/
 ├── tests/
 │   ├── __init__.py
 │   ├── adapters/
@@ -137,8 +143,7 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 │   ├── test_cli.py
 │   ├── test_logging.py
 │   ├── test_release_workflow_consistency.py
-│   ├── test_workflow_hardening.py
-│   └── usecases/
+│   └── test_workflow_hardening.py
 └── pyproject.toml
 ```
 <!-- END GENERATED: PROJECT_STRUCTURE -->

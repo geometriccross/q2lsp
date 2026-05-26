@@ -3,18 +3,17 @@ import * as vscode from 'vscode';
 import { type LanguageClient } from 'vscode-languageclient/node';
 import {
 	DEFAULT_PATH_CANDIDATES,
-	VALIDATION_TIMEOUT_MS,
 	buildInterpreterCandidates,
+	type InterpreterCandidate,
+} from './interpreterSources';
+import { isAbsolutePath } from './interpreterPath';
+import {
 	buildInterpreterPathNotAbsoluteMessage,
 	buildMissingInterpreterMessage,
 	formatOutputSnippet,
-	getUnsupportedPlatformMessage,
-	isAbsolutePath,
-	shouldRestartOnConfigChange,
-	type InterpreterCandidate,
-} from './helpers';
+} from './interpreterMessages';
 import { resolveQ2lspConfig } from './config';
-import { execFileForValidation, type ValidationResult, validateInterpreter } from './interpreter';
+import { VALIDATION_TIMEOUT_MS, execFileForValidation, type ValidationResult, validateInterpreter } from './interpreter';
 import { startQ2lspClient, stopQ2lspClient } from './client';
 import {
 	manageWorkspaceTrust,
@@ -33,6 +32,18 @@ import { resolveConfiguredPythonInterpreter, resolveInterpreter } from './interp
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
+
+const getUnsupportedPlatformMessage = (platform: NodeJS.Platform): string | undefined => {
+	if (platform !== 'win32') {
+		return undefined;
+	}
+
+	return "q2lsp doesn't run on native Windows. Use WSL or Remote Linux/macOS.";
+};
+
+const shouldRestartOnConfigChange = (affectsConfiguration: (section: string) => boolean): boolean => {
+	return affectsConfiguration('q2lsp.interpreterPath') || affectsConfiguration('q2lsp.serverEnv');
+};
 
 export async function activate(context: vscode.ExtensionContext) {
 	outputChannel = vscode.window.createOutputChannel('q2lsp');

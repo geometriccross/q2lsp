@@ -1,8 +1,35 @@
 import * as assert from 'assert';
 import { type ExecFileException } from 'child_process';
-import { type ExecFileRunner, validateInterpreter } from '../interpreter';
+import {
+	buildInterpreterValidationSnippet,
+	parseInterpreterValidationStdout,
+	type ExecFileRunner,
+	validateInterpreter,
+} from '../interpreter';
 
 suite('q2lsp interpreter tests', () => {
+
+	test('validation snippet checks for q2lsp and q2cli', () => {
+		const snippet = buildInterpreterValidationSnippet();
+		assert.ok(snippet.includes('q2lsp'));
+		assert.ok(snippet.includes('q2cli'));
+		assert.ok(snippet.includes('executable'));
+		assert.ok(snippet.includes('find_spec'));
+	});
+
+	test('validation stdout parse returns missing modules and executable', () => {
+		const parsed = parseInterpreterValidationStdout(
+			'{"missing":["q2lsp"],"executable":"/opt/python","version":"3.11.0"}'
+		);
+		assert.deepStrictEqual(parsed?.missing, ['q2lsp']);
+		assert.strictEqual(parsed?.executable, '/opt/python');
+	});
+
+	test('validation stdout parse fails on unexpected output', () => {
+		assert.strictEqual(parseInterpreterValidationStdout('WARNING: something'), null);
+		assert.strictEqual(parseInterpreterValidationStdout(''), null);
+	});
+
 	test('validateInterpreter succeeds when required modules are available', async () => {
 		let capturedFile = '';
 		let capturedArgs: readonly string[] = [];

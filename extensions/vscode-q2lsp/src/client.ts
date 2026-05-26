@@ -4,7 +4,22 @@ import {
 	type LanguageClientOptions,
 	type ServerOptions,
 } from 'vscode-languageclient/node';
-import { buildServerCommand, mergeEnv } from './helpers';
+
+type ServerCommand = { command: string; args: string[] };
+
+const mergeEnv = (
+	base: NodeJS.ProcessEnv,
+	overrides: Record<string, string> | undefined
+): NodeJS.ProcessEnv => {
+	return { ...base, ...(overrides ?? {}) };
+};
+
+const buildServerCommand = (interpreterPath: string): ServerCommand => {
+	return {
+		command: interpreterPath,
+		args: ['-m', 'q2lsp', '--transport', 'stdio'],
+	};
+};
 
 export interface Q2lspClientLaunchOptions {
 	interpreterPath: string;

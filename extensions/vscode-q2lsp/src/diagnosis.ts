@@ -1,21 +1,15 @@
 import { type ExecFileOptionsWithStringEncoding } from 'child_process';
 import * as vscode from 'vscode';
 import {
-	Q2CLI_MISSING_QIIME_HINT,
 	QIIME2_QUICKSTART_URL,
-	VALIDATION_TIMEOUT_MS,
+	buildDiagnoseInterpreterValidationMessage,
 	formatOutputSnippet,
-	type InterpreterCandidate,
-} from './helpers';
-import { execFileForValidation, type ValidationResult } from './interpreter';
+} from './interpreterMessages';
+import { type InterpreterCandidate } from './interpreterSources';
+import { VALIDATION_TIMEOUT_MS, execFileForValidation, type ValidationResult } from './interpreter';
 
 const buildDiagnoseErrorMessage = (validation: ValidationResult): string => {
-	if (!validation.missingModules?.length) {
-		return "q2lsp couldn't validate this interpreter. See q2lsp log for details.";
-	}
-
-	const q2cliHint = validation.missingModules.includes('q2cli') ? Q2CLI_MISSING_QIIME_HINT : '';
-	return `Required modules missing: ${validation.missingModules.join(', ')}.${q2cliHint}`;
+	return buildDiagnoseInterpreterValidationMessage(validation.missingModules);
 };
 
 export const selectInterpreterCandidate = async (

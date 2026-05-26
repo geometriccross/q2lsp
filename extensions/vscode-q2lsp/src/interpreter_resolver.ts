@@ -1,19 +1,66 @@
 import * as vscode from 'vscode';
 import {
 	DEFAULT_PATH_CANDIDATES,
-	VALIDATION_TIMEOUT_MS,
 	buildInterpreterCandidates,
+	type InterpreterCandidate,
+} from './interpreterSources';
+import { isAbsolutePath } from './interpreterPath';
+import {
 	buildInterpreterPathNotAbsoluteMessage,
 	buildInterpreterValidationMessage,
 	buildMissingInterpreterMessage,
-	extractPythonExecutablePath,
 	formatOutputSnippet,
-	isAbsolutePath,
-	isPythonExtensionApi,
-	type InterpreterCandidate,
-} from './helpers';
+} from './interpreterMessages';
+import { VALIDATION_TIMEOUT_MS } from './interpreter';
 import * as interpreter from './interpreter';
 import { showValidationError } from './diagnosis';
+
+type PythonExtensionApi = {
+	environments: {
+		getActiveEnvironmentPath: () => unknown;
+		resolveEnvironment: (environmentPath: unknown) => Promise<unknown>;
+	};
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+	return typeof value === 'object' && value !== null;
+};
+
+const pathFromUnknown = (value: unknown): string | undefined => {
+	return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+};
+
+const isPythonExtensionApi = (value: unknown): value is PythonExtensionApi => {
+	if (!isRecord(value) || !isRecord(value.environments)) {
+		return false;
+	}
+
+	return (
+		typeof value.environments.getActiveEnvironmentPath === 'function' &&
+		typeof value.environments.resolveEnvironment === 'function'
+	);
+};
+
+const extractPythonExecutablePath = (
+	resolvedEnvironment: unknown,
+	activeEnvironmentPath: unknown
+): string | undefined => {
+	if (isRecord(resolvedEnvironment) && isRecord(resolvedEnvironment.executable)) {
+		const executableUri = resolvedEnvironment.executable.uri;
+		if (isRecord(executableUri)) {
+			const fsPath = pathFromUnknown(executableUri.fsPath);
+			if (fsPath) {
+				return fsPath;
+			}
+		}
+	}
+
+	if (isRecord(activeEnvironmentPath)) {
+		return pathFromUnknown(activeEnvironmentPath.path);
+	}
+
+	return undefined;
+};
 
 export const resolveInterpreter = async (params: {
 	context: vscode.ExtensionContext;
