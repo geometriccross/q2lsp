@@ -15,7 +15,7 @@ from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.catalog_facts import QiimeOptionFact
-from q2lsp.qiime.options import (
+from q2lsp.qiime.option_tokens import (
     OptionGroup,
     group_option_tokens,
     normalize_option_to_param_name,

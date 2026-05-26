@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from q2lsp.core.types import CompletionMode
-from q2lsp.qiime.options import OptionGroup, group_option_tokens
+from q2lsp.qiime.option_tokens import OptionGroup, group_option_tokens
 
 
 class TokenSpan(NamedTuple):

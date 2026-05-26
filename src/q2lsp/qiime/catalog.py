@@ -17,7 +17,7 @@ from q2lsp.qiime.hierarchy_keys import (
     COMMAND_METADATA_KEYS,
     ROOT_METADATA_KEYS,
 )
-from q2lsp.qiime.options import (
+from q2lsp.qiime.signature import (
     format_qiime_option_label,
     param_is_required,
 )

@@ -16,7 +16,7 @@ from q2lsp.core.types import (
 )
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.catalog_facts import QiimeOptionFact
-from q2lsp.qiime.options import (
+from q2lsp.qiime.option_tokens import (
     group_option_tokens,
     OptionGroup,
     normalize_option_to_param_name,

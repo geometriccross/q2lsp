@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import cast
 
-from q2lsp.qiime.options import (
+from q2lsp.qiime.signature import (
     format_qiime_option_label,
     param_is_required,
     qiime_option_prefix,
