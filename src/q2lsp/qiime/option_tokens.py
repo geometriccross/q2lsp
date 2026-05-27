@@ -73,18 +73,6 @@ def group_option_tokens(
     return tuple(grouped)
 
 
-def option_label_matches_prefix(option_name: str, prefix_filter: str) -> bool:
-    if not prefix_filter:
-        return True
-    if option_name.startswith(prefix_filter):
-        return True
-    opt = option_name.lstrip("-")
-    pref = prefix_filter.lstrip("-")
-    if len(opt) >= 2 and opt[0] in {"i", "o", "p", "m"} and opt[1] == "-":
-        opt = opt[2:]
-    return opt.startswith(pref)
-
-
 def normalize_option_to_param_name(token_text: str) -> str | None:
     """Normalize an option token to its canonical signature param name."""
     if not token_text.startswith("--"):

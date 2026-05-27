@@ -20,7 +20,6 @@ from q2lsp.qiime.option_tokens import (
     group_option_tokens,
     OptionGroup,
     normalize_option_to_param_name,
-    option_label_matches_prefix,
 )
 
 
@@ -91,11 +90,6 @@ def get_used_parameters(command_tokens: Any) -> set[str]:
         if param_name:
             used.add(param_name)
     return used
-
-
-def option_matches_prefix(option_name: str, prefix_filter: str) -> bool:
-    """Match completion option names with user prefix text."""
-    return option_label_matches_prefix(option_name, prefix_filter)
 
 
 def _group_command_options(

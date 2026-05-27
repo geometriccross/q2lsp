@@ -9,7 +9,8 @@ from q2lsp.adapters.completion_adapter import (
     to_completion_data,
     to_completion_query,
 )
-from q2lsp.core.types import CompletionKind, CompletionMode
+from q2lsp.core.completion_engine import get_completions as get_core_completions
+from q2lsp.core.types import CompletionKind, CompletionMode, CompletionQuery
 from q2lsp.qiime.catalog import QiimeCatalog
 
 
@@ -197,6 +198,52 @@ def test_normalizes_signature_kinds_and_required_details() -> None:
     assert by_name["sampling_depth"].detail == "[Int] Reads per sample"
     assert by_name["metadata_file"].label == "--m-metadata-file"
     assert by_name["metadata_file"].detail == "(required) [Metadata] Sample metadata"
+
+
+def _parameter_labels_for_prefix(prefix: str) -> set[str]:
+    catalog = QiimeCatalog.from_hierarchy(
+        {
+            "qiime": {
+                "feature-table": {
+                    "summarize": {
+                        "description": "Summarize feature table",
+                        "signature": [
+                            {
+                                "name": "table",
+                                "type": "FeatureTable",
+                                "description": "Input table",
+                                "signature_type": "input",
+                            },
+                            {
+                                "name": "results",
+                                "type": "Visualization",
+                                "description": "Output results",
+                                "signature_type": "output",
+                            },
+                        ],
+                    },
+                },
+            }
+        }
+    )
+    data = to_completion_data(catalog)
+    query = CompletionQuery(
+        mode=CompletionMode.PARAMETER,
+        prefix=prefix,
+        normalized_prefix=prefix.lstrip("-"),
+        plugin_name="feature-table",
+        action_name="summarize",
+    )
+
+    return {item.label for item in get_core_completions(query, data)}
+
+
+def test_parameter_completion_prefix_matching_uses_label_and_match_texts() -> None:
+    assert "--i-table" in _parameter_labels_for_prefix("")
+    assert "--i-table" in _parameter_labels_for_prefix("table")
+    assert "--i-table" in _parameter_labels_for_prefix("ta")
+    assert "--i-table" not in _parameter_labels_for_prefix("results")
+    assert "--i-table" in _parameter_labels_for_prefix("--t")
 
 
 def test_can_import_lsp_package_and_adapter() -> None:
