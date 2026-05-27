@@ -1,4 +1,4 @@
-"""Tests for diagnostics validator module."""
+"""Tests for command analysis module."""
 
 from __future__ import annotations
 
