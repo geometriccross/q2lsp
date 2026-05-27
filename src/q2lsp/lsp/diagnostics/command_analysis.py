@@ -113,7 +113,9 @@ def analyze_command(
         )
 
     invalid_option_spans = {
-        (issue.start, issue.end) for issue in issues if issue.code == codes.UNKNOWN_OPTION
+        (issue.start, issue.end)
+        for issue in issues
+        if issue.code == codes.UNKNOWN_OPTION
     }
     dependencies = _extract_command_dependencies(
         command,

@@ -20,10 +20,6 @@ from q2lsp.lsp.diagnostics.codes import (
 from q2lsp.lsp.diagnostics.command_analysis import validate_command_with_catalog
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
 from q2lsp.qiime.catalog import QiimeCatalog
-from q2lsp.qiime.signature_params import (
-    get_all_option_labels,
-    get_required_option_labels,
-)
 from q2lsp.qiime.types import CommandHierarchy
 
 
@@ -138,7 +134,7 @@ class TestCompletionsDiagnosticsConsistency:
     ) -> None:
         """Completion option labels == diagnostic valid options for same action."""
         root_node = shared_hierarchy["qiime"]
-        action_node = root_node["diversity"]["core-metrics"]
+        catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
 
         completion_items = complete_parameters(
             root_node,
@@ -151,11 +147,12 @@ class TestCompletionsDiagnosticsConsistency:
             item.label for item in completion_items if item.label != "--help"
         }
 
-        diagnostic_labels = set(get_all_option_labels(action_node))
+        diagnostic_labels = {
+            opt.label for opt in catalog.action_options("diversity", "core-metrics")
+        }
 
         assert completion_labels == diagnostic_labels
 
-        catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
         for option_label in completion_labels:
             issue_codes = _issue_codes(
                 ["qiime", "diversity", "core-metrics", option_label, "value"],
@@ -168,7 +165,7 @@ class TestCompletionsDiagnosticsConsistency:
     ) -> None:
         """Required options identified by completions match diagnostics required set."""
         root_node = shared_hierarchy["qiime"]
-        action_node = root_node["diversity"]["core-metrics"]
+        catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
 
         completion_items = complete_parameters(
             root_node,
@@ -181,11 +178,14 @@ class TestCompletionsDiagnosticsConsistency:
             item.label for item in completion_items if "(required)" in item.detail
         }
 
-        required_from_diagnostics = set(get_required_option_labels(action_node))
+        required_from_diagnostics = {
+            opt.label
+            for opt in catalog.action_options("diversity", "core-metrics")
+            if opt.required
+        }
 
         assert required_from_completions == required_from_diagnostics
 
-        catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
         missing_metadata_codes = _issue_codes(
             [
                 "qiime",

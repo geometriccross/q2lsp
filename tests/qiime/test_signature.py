@@ -85,6 +85,7 @@ class TestQiimeOptionPrefix:
         param: JsonObject = {"type": "output", "signature_type": "input"}
         assert qiime_option_prefix(param) == "i"
 
+
 class TestFormatQiimeOptionLabel:
     """Tests for format_qiime_option_label function."""
 
@@ -130,6 +131,7 @@ class TestFormatQiimeOptionLabel:
     def test_single_underscore(self) -> None:
         """Single underscore converted to dash."""
         assert format_qiime_option_label("m", "input") == "--m-input"
+
 
 class TestParamIsRequired:
     """Tests for param_is_required function."""
@@ -188,6 +190,7 @@ class TestParamIsRequired:
         """Any signature_type currently marks a default-less param required."""
         param: JsonObject = {"signature_type": "unknown"}
         assert param_is_required(param)
+
 
 class TestQiimeSignatureKind:
     """Tests for qiime_signature_kind function."""

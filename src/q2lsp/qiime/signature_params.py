@@ -5,41 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import cast
 
-from q2lsp.qiime.signature import (
-    format_qiime_option_label,
-    param_is_required,
-    qiime_option_prefix,
-)
+from q2lsp.qiime.signature import qiime_option_prefix
 from q2lsp.qiime.types import ActionSignatureParameter, JsonObject
-
-
-def get_all_option_labels(action_node: JsonObject) -> list[str]:
-    """
-    Extract valid option labels from action node signature.
-
-    Uses qiime_option_prefix and format_qiime_option_label to format
-    option labels consistently with completions.
-
-    Args:
-        action_node: The action node containing a signature.
-
-    Returns:
-        List of valid option labels (e.g., ['--i-table', '--m-metadata-file']).
-    """
-    return [
-        format_qiime_option_label(prefix, param_name)
-        for param_name, prefix, _param in iter_signature_params(action_node)
-    ]
-
-
-def get_required_option_labels(action_node: JsonObject) -> list[str]:
-    """Extract required option labels from action node signature."""
-    required_options: list[str] = []
-    for param_name, prefix, param in iter_signature_params(action_node):
-        if param_is_required(param):
-            required_options.append(format_qiime_option_label(prefix, param_name))
-
-    return required_options
 
 
 def iter_signature_params(
