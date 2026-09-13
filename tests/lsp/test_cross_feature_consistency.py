@@ -4,11 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.helpers.completions import (
-    complete_parameters,
-    complete_plugin,
-    complete_root,
-)
+from tests.helpers.completions import complete
 
 from q2lsp.core.types import CompletionItem
 from q2lsp.lsp.diagnostics.codes import (
@@ -17,8 +13,8 @@ from q2lsp.lsp.diagnostics.codes import (
     UNKNOWN_OPTION,
     UNKNOWN_SUBCOMMAND,
 )
-from q2lsp.lsp.diagnostics.command_analysis import validate_command_with_catalog
-from q2lsp.lsp.types import ParsedCommand, TokenSpan
+from q2lsp.lsp.diagnostics import collect_diagnostics
+from q2lsp.lsp.document_commands import analyze_document
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
 
@@ -27,24 +23,9 @@ def _labels(items: list[CompletionItem]) -> set[str]:
     return {item.label for item in items}
 
 
-def _build_parsed_command(token_texts: list[str]) -> ParsedCommand:
-    """Build a ParsedCommand with space-delimited token spans."""
-    tokens: list[TokenSpan] = []
-    offset = 0
-
-    for token_text in token_texts:
-        start = offset
-        end = start + len(token_text)
-        tokens.append(TokenSpan(token_text, start, end))
-        offset = end + 1
-
-    end_offset = tokens[-1].end if tokens else 0
-    return ParsedCommand(tokens=tokens, start=0, end=end_offset)
-
-
 def _issue_codes(token_texts: list[str], catalog: QiimeCatalog) -> list[str]:
-    command = _build_parsed_command(token_texts)
-    return [issue.code for issue in validate_command_with_catalog(command, catalog)]
+    document = analyze_document(" ".join(token_texts))
+    return [issue.code for issue in collect_diagnostics(document, catalog)]
 
 
 @pytest.fixture
@@ -133,25 +114,20 @@ class TestCompletionsDiagnosticsConsistency:
         self, shared_hierarchy: CommandHierarchy
     ) -> None:
         """Completion option labels == diagnostic valid options for same action."""
-        root_node = shared_hierarchy["qiime"]
         catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
 
-        completion_items = complete_parameters(
-            root_node,
-            "diversity",
-            "core-metrics",
-            "",
-            set(),
-        )
+        completion_items = complete("qiime diversity core-metrics ", catalog)
         completion_labels = {
             item.label for item in completion_items if item.label != "--help"
         }
 
-        diagnostic_labels = {
-            opt.label for opt in catalog.action_options("diversity", "core-metrics")
+        assert completion_labels == {
+            "--i-table",
+            "--i-phylogeny",
+            "--p-sampling-depth",
+            "--m-metadata",
+            "--p-n-jobs",
         }
-
-        assert completion_labels == diagnostic_labels
 
         for option_label in completion_labels:
             issue_codes = _issue_codes(
@@ -164,27 +140,19 @@ class TestCompletionsDiagnosticsConsistency:
         self, shared_hierarchy: CommandHierarchy
     ) -> None:
         """Required options identified by completions match diagnostics required set."""
-        root_node = shared_hierarchy["qiime"]
         catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
 
-        completion_items = complete_parameters(
-            root_node,
-            "diversity",
-            "core-metrics",
-            "",
-            set(),
-        )
+        completion_items = complete("qiime diversity core-metrics ", catalog)
         required_from_completions = {
             item.label for item in completion_items if "(required)" in item.detail
         }
 
-        required_from_diagnostics = {
-            opt.label
-            for opt in catalog.action_options("diversity", "core-metrics")
-            if opt.required
+        assert required_from_completions == {
+            "--i-table",
+            "--i-phylogeny",
+            "--p-sampling-depth",
+            "--m-metadata",
         }
-
-        assert required_from_completions == required_from_diagnostics
 
         missing_metadata_codes = _issue_codes(
             [
@@ -220,56 +188,33 @@ class TestCompletionsDiagnosticsConsistency:
         assert MISSING_REQUIRED_OPTION in missing_metadata_codes
         assert MISSING_REQUIRED_OPTION not in complete_codes
 
-    def test_plugin_names_match_between_features(
-        self, shared_hierarchy: CommandHierarchy
-    ) -> None:
-        """Plugin/builtin names from completions match diagnostics valid names."""
-        root_node = shared_hierarchy["qiime"]
-        catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
-
-        completion_names = _labels(complete_root(root_node, ""))
-        valid_command_names = {command.name for command in catalog.commands()}
-
-        assert completion_names == valid_command_names
-
     def test_action_names_match_between_features(
         self, shared_hierarchy: CommandHierarchy
     ) -> None:
         """Action names from completions match diagnostics valid actions."""
-        root_node = shared_hierarchy["qiime"]
         catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
 
-        completion_action_names = _labels(complete_plugin(root_node, "diversity", ""))
-        valid_action_names = {action.name for action in catalog.actions("diversity")}
-
-        assert completion_action_names == valid_action_names
+        completion_action_names = _labels(complete("qiime diversity ", catalog))
+        assert completion_action_names == {"core-metrics"}
 
         for action_name in completion_action_names:
-            command = _build_parsed_command(["qiime", "diversity", action_name])
-            issues = validate_command_with_catalog(command, catalog)
-            unknown_action_issues = [
-                issue for issue in issues if issue.code == UNKNOWN_ACTION
-            ]
-            assert unknown_action_issues == []
+            assert UNKNOWN_ACTION not in _issue_codes(
+                ["qiime", "diversity", action_name], catalog
+            )
 
         unknown_action_name = "not-a-real-action"
-        command = _build_parsed_command(["qiime", "diversity", unknown_action_name])
-        issues = validate_command_with_catalog(command, catalog)
-        unknown_action_issues = [
-            issue for issue in issues if issue.code == UNKNOWN_ACTION
-        ]
-
         assert unknown_action_name not in completion_action_names
-        assert len(unknown_action_issues) == 1
+        assert UNKNOWN_ACTION in _issue_codes(
+            ["qiime", "diversity", unknown_action_name], catalog
+        )
 
     def test_builtin_subcommand_names_match_between_features(
         self, shared_hierarchy: CommandHierarchy
     ) -> None:
         """Builtin subcommands from completions are accepted by diagnostics."""
-        root_node = shared_hierarchy["qiime"]
         catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
 
-        completion_subcommands = _labels(complete_plugin(root_node, "tools", ""))
+        completion_subcommands = _labels(complete("qiime tools ", catalog))
         valid_codes = _issue_codes(["qiime", "tools", "import"], catalog)
         unknown_codes = _issue_codes(["qiime", "tools", "not-a-real-tool"], catalog)
 
@@ -281,9 +226,8 @@ class TestCompletionsDiagnosticsConsistency:
         self, shared_hierarchy: CommandHierarchy
     ) -> None:
         """A valid command with all required options has no diagnostics, but completions available."""
-        root_node = shared_hierarchy["qiime"]
         catalog = QiimeCatalog.from_hierarchy(shared_hierarchy)
-        command = _build_parsed_command(
+        source = " ".join(
             [
                 "qiime",
                 "diversity",
@@ -299,16 +243,9 @@ class TestCompletionsDiagnosticsConsistency:
             ]
         )
 
-        issues = validate_command_with_catalog(command, catalog)
-        assert issues == []
+        assert collect_diagnostics(analyze_document(source), catalog) == []
 
-        completion_items = complete_parameters(
-            root_node,
-            "diversity",
-            "core-metrics",
-            "--",
-            {"table", "phylogeny", "sampling_depth", "metadata"},
-        )
+        completion_items = complete(source + " --", catalog)
         remaining_labels = _labels(completion_items)
 
         assert "--p-n-jobs" in remaining_labels

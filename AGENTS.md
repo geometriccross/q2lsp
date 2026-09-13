@@ -129,7 +129,6 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 ├── src/
 │   └── q2lsp/
 │       ├── __main__.py
-│       ├── adapters/
 │       ├── cli.py
 │       ├── core/
 │       ├── logging.py
@@ -137,7 +136,6 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 │       └── qiime/
 ├── tests/
 │   ├── __init__.py
-│   ├── adapters/
 │   ├── core/
 │   ├── helpers/
 │   ├── lsp/

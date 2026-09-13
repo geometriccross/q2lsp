@@ -31,17 +31,6 @@ class CompletionKind(_StrEnum):
     BUILTIN = "builtin"
 
 
-class CompletionQuery(NamedTuple):
-    """Pure input for completion decisions."""
-
-    mode: CompletionMode
-    prefix: str
-    normalized_prefix: str = ""
-    plugin_name: str = ""
-    action_name: str = ""
-    used_parameters: frozenset[str] = frozenset()
-
-
 class CompletionItem(NamedTuple):
     """Pure completion suggestion independent of transport protocol."""
 
@@ -49,33 +38,3 @@ class CompletionItem(NamedTuple):
     detail: str
     kind: CompletionKind
     insert_text: str | None = None
-
-
-class ParameterCandidate(NamedTuple):
-    """Normalized parameter data used by completion filtering."""
-
-    name: str
-    item: CompletionItem
-    match_texts: tuple[str, ...] = ()
-
-
-class ActionCandidate(NamedTuple):
-    """Normalized action data and its available parameters."""
-
-    item: CompletionItem
-    parameters: tuple[ParameterCandidate, ...] = ()
-
-
-class CommandCandidate(NamedTuple):
-    """Normalized plugin/builtin command data for completions."""
-
-    name: str
-    is_builtin: bool
-    actions: tuple[ActionCandidate, ...] = ()
-
-
-class CompletionData(NamedTuple):
-    """Normalized completion dataset consumed by the core engine."""
-
-    root_items: tuple[CompletionItem, ...] = ()
-    commands: tuple[CommandCandidate, ...] = ()

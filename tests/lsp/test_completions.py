@@ -1,4 +1,4 @@
-"""Tests for completion logic."""
+"""Completion behavior through real command contexts and catalog facts."""
 
 from __future__ import annotations
 
@@ -6,783 +6,264 @@ import pytest
 from lsprotocol import types
 from pygls.workspace import TextDocument
 
-from tests.helpers.cursor import extract_cursor_offset
-from tests.helpers.completions import (
-    complete_parameters,
-    complete_plugin,
-    complete_root,
-    ctx_get_used_parameters,
-)
-
-from q2lsp.core.types import CompletionItem
+from q2lsp.core.types import CompletionKind
 from q2lsp.lsp.completion_handler import handle_completion
-from q2lsp.lsp.types import (
-    CompletionContext,
-    CompletionMode,
-    ParsedCommand,
-    TokenSpan,
-)
 from q2lsp.qiime.catalog import QiimeCatalog
-from q2lsp.qiime.types import CommandHierarchy
+from q2lsp.qiime.catalog_facts import QiimeOptionFact
+from tests.helpers.completions import complete
+from tests.helpers.cursor import extract_cursor_offset
 
 
-def _get_completions_via_handler(
-    text: str, offset: int, hierarchy: CommandHierarchy
-) -> types.CompletionList:
-    """Call handle_completion with a real document and catalog."""
-    document = TextDocument(uri="test://doc", source=text, version=0)
-    position = types.Position(line=0, character=offset)
-    catalog = QiimeCatalog.from_hierarchy(hierarchy)
-    return handle_completion(document, position, lambda: catalog)
+@pytest.fixture
+def catalog() -> QiimeCatalog:
+    return QiimeCatalog.from_hierarchy(
+        {
+            "qiime": {
+                "builtins": ["info", "tools"],
+                "info": {"short_help": "Display deployment information"},
+                "tools": {"import": {"description": "Import data", "signature": []}},
+                "feature-table": {
+                    "short_description": "Feature table operations",
+                    "summarize": {
+                        "description": "Summarize a feature table",
+                        "signature": [
+                            {
+                                "name": "table",
+                                "type": "FeatureTable",
+                                "description": "Input table",
+                                "signature_type": "input",
+                            },
+                            {
+                                "name": "output_dir",
+                                "type": "Path",
+                                "description": "Output directory",
+                                "signature_type": "output",
+                                "default": None,
+                            },
+                            {
+                                "name": "sample_metadata",
+                                "type": "Metadata",
+                                "description": "Sample metadata",
+                                "signature_type": "parameter",
+                                "default": None,
+                            },
+                            {
+                                "name": "metadata_file",
+                                "type": "Metadata",
+                                "description": "Metadata file",
+                                "signature_type": "metadata",
+                            },
+                        ],
+                    },
+                    "filter-samples": {"signature": []},
+                },
+                "diversity": {"alpha": {"signature": []}},
+            }
+        }
+    )
 
 
-def labels(items: list[CompletionItem] | list[types.CompletionItem]) -> list[str]:
-    """Extract labels from completion items."""
-    return [item.label for item in items]
-
-
-def assert_labels(
-    items: list[CompletionItem] | list[types.CompletionItem],
-    expected_labels: set[str] | list[str],
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("echo hello", set()),
+        ("qiime ", {"info", "tools", "feature-table", "diversity"}),
+        ("qiime f", {"feature-table"}),
+        ("qiime feature-table ", {"summarize", "filter-samples"}),
+        ("qiime feature-table s", {"summarize"}),
+        ("qiime nonexistent ", set()),
+        ("qiime info ", {"--help"}),
+        ("qiime info --h", {"--help"}),
+        ("qiime tools ", {"import"}),
+        ("qiime tools i", {"import"}),
+        ("qiime tools xyz", set()),
+        ("qiime tools import --", {"--help"}),
+        ("qiime feature-table unknown --", set()),
+        ("qiime diversity alpha --", set()),
+        (
+            "qiime feature-table summarize --",
+            {
+                "--i-table",
+                "--o-output-dir",
+                "--p-sample-metadata",
+                "--m-metadata-file",
+                "--help",
+            },
+        ),
+        ("qiime feature-table summarize --t", {"--i-table"}),
+        ("qiime feature-table summarize ta", {"--i-table"}),
+        ("qiime feature-table summarize table", {"--i-table"}),
+        ("qiime feature-table summarize output", {"--o-output-dir"}),
+        ("qiime feature-table summarize --p-s", {"--p-sample-metadata"}),
+        ("qiime feature-table summarize nonexistent", set()),
+    ],
+)
+def test_completion_candidates(
+    catalog: QiimeCatalog, source: str, expected: set[str]
 ) -> None:
-    """Assert that items contain all expected labels (unordered)."""
-    expected = set(expected_labels)
-    actual = set(labels(items))
-    assert actual == expected, f"Expected {expected}, got {actual}"
-
-
-@pytest.fixture
-def hierarchy_root_builtins() -> dict:
-    """Minimal hierarchy with root builtins for testing."""
-    return {
-        "qiime": {
-            "name": "qiime",
-            "help": "QIIME 2 command-line interface",
-            "short_help": "QIIME 2 CLI",
-            "builtins": ["info", "tools", "dev", "metadata", "types"],
-            "info": {
-                "name": "info",
-                "short_help": "Display information about current deployment",
-                "type": "builtin",
-            },
-            "tools": {
-                "name": "tools",
-                "short_help": "Tools for working with QIIME 2 files",
-                "type": "builtin",
-                "import": {
-                    "id": "import",
-                    "name": "import",
-                    "description": "Import data into a new QIIME 2 Artifact",
-                    "signature": [],
-                },
-                "export": {
-                    "id": "export",
-                    "name": "export",
-                    "description": "Export data from a QIIME 2 Artifact or Visualization",
-                    "signature": [],
-                },
-                "peek": {
-                    "id": "peek",
-                    "name": "peek",
-                    "description": "Take a peek at a QIIME 2 Artifact or Visualization",
-                    "signature": [],
-                },
-                "citations": {
-                    "id": "citations",
-                    "name": "citations",
-                    "description": "Print citations for a QIIME 2 result",
-                    "signature": [],
-                },
-                "validate": {
-                    "id": "validate",
-                    "name": "validate",
-                    "description": "Validate data in a QIIME 2 Artifact",
-                    "signature": [],
-                },
-            },
-            "metadata": {
-                "name": "metadata",
-                "short_help": "Plugin for working with Metadata",
-                "type": "builtin",
-                "distance-matrix": {
-                    "id": "distance-matrix",
-                    "name": "distance-matrix",
-                    "description": "Create a distance matrix from a numeric Metadata column",
-                    "signature": [],
-                },
-                "merge": {
-                    "id": "merge",
-                    "name": "merge",
-                    "description": "Merge metadata",
-                    "signature": [],
-                },
-                "shuffle-groups": {
-                    "id": "shuffle-groups",
-                    "name": "shuffle-groups",
-                    "description": "Shuffle values in a categorical sample metadata column",
-                    "signature": [],
-                },
-                "tabulate": {
-                    "id": "tabulate",
-                    "name": "tabulate",
-                    "description": "Interactively explore Metadata in an HTML table",
-                    "signature": [],
-                },
-            },
-            "dev": {
-                "name": "dev",
-                "short_help": "Utilities for developers and advanced users",
-                "type": "builtin",
-                "refresh-cache": {
-                    "id": "refresh-cache",
-                    "name": "refresh-cache",
-                    "description": "Refresh CLI cache",
-                    "signature": [],
-                },
-                "reset-theme": {
-                    "id": "reset-theme",
-                    "name": "reset-theme",
-                    "description": "Reset command line theme to default",
-                    "signature": [],
-                },
-            },
-            "types": {
-                "name": "types",
-                "short_help": "Plugin defining types for microbiome analysis",
-                "type": "builtin",
-                "collate-contigs": {
-                    "id": "collate-contigs",
-                    "name": "collate-contigs",
-                    "description": "Collate contigs",
-                    "signature": [],
-                },
-                "partition-samples-single": {
-                    "id": "partition-samples-single",
-                    "name": "partition-samples-single",
-                    "description": "Split demultiplexed sequence data into partitions",
-                    "signature": [],
-                },
-            },
-        }
-    }
-
-
-@pytest.fixture
-def hierarchy_with_plugins() -> dict:
-    """Hierarchy with plugins for testing plugin completion."""
-    return {
-        "qiime": {
-            "name": "qiime",
-            "help": "QIIME 2 command-line interface",
-            "short_help": "QIIME 2 CLI",
-            "builtins": ["info"],
-            "info": {
-                "name": "info",
-                "short_help": "Display information about current deployment",
-                "type": "builtin",
-            },
-            "feature-table": {
-                "id": "feature-table",
-                "name": "feature-table",
-                "short_description": "Plugin for working with feature tables",
-                "description": "Full description of feature-table plugin",
-                "summarize": {
-                    "id": "summarize",
-                    "name": "summarize",
-                    "description": "Summarize a feature table",
-                    "signature": [
-                        {
-                            "name": "table",
-                            "type": "FeatureTable",
-                            "description": "The feature table to summarize",
-                            "signature_type": "input",
-                        },
-                        {
-                            "name": "output_dir",
-                            "type": "Path",
-                            "description": "Output directory",
-                            "default": None,
-                            "signature_type": "output",
-                        },
-                        {
-                            "name": "sample_metadata",
-                            "type": "Metadata",
-                            "description": "Sample metadata",
-                            "default": None,
-                            "signature_type": "parameter",
-                        },
-                    ],
-                },
-                "filter-samples": {
-                    "id": "filter-samples",
-                    "name": "filter-samples",
-                    "description": "Filter samples from a feature table",
-                    "signature": [
-                        {
-                            "name": "table",
-                            "type": "FeatureTable",
-                            "description": "Input table",
-                            "signature_type": "input",
-                        },
-                    ],
-                },
-            },
-            "diversity": {
-                "id": "diversity",
-                "name": "diversity",
-                "short_description": "Diversity analyses",
-                "alpha": {
-                    "id": "alpha",
-                    "name": "alpha",
-                    "description": "Compute alpha diversity",
-                    "signature": [],
-                },
-            },
-        }
-    }
-
-
-@pytest.fixture
-def hierarchy_with_parameters() -> dict:
-    """Hierarchy with action parameters for testing parameter completion."""
-    return {
-        "qiime": {
-            "name": "qiime",
-            "help": "QIIME 2 command-line interface",
-            "short_help": "QIIME 2 CLI",
-            "builtins": ["info"],
-            "info": {
-                "name": "info",
-                "short_help": "Display information about current deployment",
-                "type": "builtin",
-            },
-            "feature-table": {
-                "id": "feature-table",
-                "name": "feature-table",
-                "short_description": "Plugin for working with feature tables",
-                "description": "Full description of feature-table plugin",
-                "summarize": {
-                    "id": "summarize",
-                    "name": "summarize",
-                    "description": "Summarize a feature table",
-                    "signature": [
-                        {
-                            "name": "table",
-                            "type": "FeatureTable",
-                            "description": "The feature table to summarize",
-                            "signature_type": "input",
-                        },
-                        {
-                            "name": "output_dir",
-                            "type": "Path",
-                            "description": "Output directory",
-                            "default": None,
-                            "signature_type": "output",
-                        },
-                        {
-                            "name": "sample_metadata",
-                            "type": "Metadata",
-                            "description": "Sample metadata",
-                            "default": None,
-                            "signature_type": "parameter",
-                        },
-                    ],
-                },
-            },
-        }
-    }
-
-
-@pytest.fixture
-def full_mock_hierarchy() -> dict:
-    """Complete mock hierarchy for comprehensive tests."""
-    return {
-        "qiime": {
-            "name": "qiime",
-            "help": "QIIME 2 command-line interface",
-            "short_help": "QIIME 2 CLI",
-            "builtins": ["info", "tools", "dev", "metadata", "types"],
-            "info": {
-                "name": "info",
-                "short_help": "Display information about current deployment",
-                "type": "builtin",
-            },
-            "tools": {
-                "name": "tools",
-                "short_help": "Tools for working with QIIME 2 files",
-                "type": "builtin",
-                "import": {
-                    "id": "import",
-                    "name": "import",
-                    "description": "Import data into a new QIIME 2 Artifact",
-                    "signature": [],
-                },
-                "export": {
-                    "id": "export",
-                    "name": "export",
-                    "description": "Export data from a QIIME 2 Artifact or Visualization",
-                    "signature": [],
-                },
-            },
-            "metadata": {
-                "name": "metadata",
-                "short_help": "Plugin for working with Metadata",
-                "type": "builtin",
-                "tabulate": {
-                    "id": "tabulate",
-                    "name": "tabulate",
-                    "description": "Interactively explore Metadata in an HTML table",
-                    "signature": [],
-                },
-            },
-            "feature-table": {
-                "id": "feature-table",
-                "name": "feature-table",
-                "short_description": "Plugin for working with feature tables",
-                "summarize": {
-                    "id": "summarize",
-                    "name": "summarize",
-                    "description": "Summarize a feature table",
-                    "signature": [
-                        {
-                            "name": "table",
-                            "type": "FeatureTable",
-                            "description": "The feature table to summarize",
-                            "signature_type": "input",
-                        },
-                        {
-                            "name": "output_dir",
-                            "type": "Path",
-                            "description": "Output directory",
-                            "default": None,
-                            "signature_type": "output",
-                        },
-                        {
-                            "name": "sample_metadata",
-                            "type": "Metadata",
-                            "description": "Sample metadata",
-                            "default": None,
-                            "signature_type": "parameter",
-                        },
-                    ],
-                },
-            },
-            "diversity": {
-                "id": "diversity",
-                "name": "diversity",
-                "short_description": "Diversity analyses",
-                "alpha": {
-                    "id": "alpha",
-                    "name": "alpha",
-                    "description": "Compute alpha diversity",
-                    "signature": [],
-                },
-            },
-        }
-    }
-
-
-class TestCompleteRoot:
-    def test_returns_builtins(self, hierarchy_root_builtins: dict) -> None:
-        items = complete_root(hierarchy_root_builtins["qiime"], "")
-        assert_labels(items, {"info", "tools", "dev", "metadata", "types"})
-
-    def test_returns_plugins(self, hierarchy_with_plugins: dict) -> None:
-        items = complete_root(hierarchy_with_plugins["qiime"], "")
-        assert_labels(items, {"info", "feature-table", "diversity"})
-
-    def test_filters_by_prefix(self, hierarchy_with_plugins: dict) -> None:
-        items = complete_root(hierarchy_with_plugins["qiime"], "f")
-        assert_labels(items, {"feature-table"})
-
-    def test_builtin_kind(self, hierarchy_root_builtins: dict) -> None:
-        items = complete_root(hierarchy_root_builtins["qiime"], "info")
-        assert len(items) == 1
-        assert items[0].kind == "builtin"
-
-    def test_plugin_kind(self, hierarchy_with_plugins: dict) -> None:
-        items = complete_root(hierarchy_with_plugins["qiime"], "feature")
-        assert len(items) == 1
-        assert items[0].kind == "plugin"
-
-    def test_includes_detail(self, hierarchy_root_builtins: dict) -> None:
-        items = complete_root(hierarchy_root_builtins["qiime"], "info")
-        assert items[0].detail != ""
-
-
-class TestCompletePlugin:
-    def test_returns_actions(self, hierarchy_with_plugins: dict) -> None:
-        items = complete_plugin(hierarchy_with_plugins["qiime"], "feature-table", "")
-        assert_labels(items, {"summarize", "filter-samples"})
-
-    def test_filters_by_prefix(self, hierarchy_with_plugins: dict) -> None:
-        items = complete_plugin(hierarchy_with_plugins["qiime"], "feature-table", "s")
-        assert_labels(items, {"summarize"})
-
-    def test_action_kind(self, hierarchy_with_plugins: dict) -> None:
-        items = complete_plugin(
-            hierarchy_with_plugins["qiime"], "feature-table", "summarize"
-        )
-        assert len(items) == 1
-        assert items[0].kind == "action"
-
-    def test_unknown_plugin_returns_empty(self, hierarchy_with_plugins: dict) -> None:
-        items = complete_plugin(hierarchy_with_plugins["qiime"], "nonexistent", "")
-        assert items == []
-
-    def test_builtin_returns_help_option(self, hierarchy_with_plugins: dict) -> None:
-        items = complete_plugin(hierarchy_with_plugins["qiime"], "info", "")
-        assert_labels(items, {"--help"})
-
-    def test_builtin_with_actions_returns_actions(
-        self, hierarchy_root_builtins: dict
-    ) -> None:
-        """Test that builtins with actions return their subcommands, not just --help."""
-        items = complete_plugin(hierarchy_root_builtins["qiime"], "tools", "")
-        assert_labels(items, {"import", "export", "peek", "citations", "validate"})
-
-    def test_builtin_with_actions_filters_by_prefix(
-        self, hierarchy_root_builtins: dict
-    ) -> None:
-        """Test that prefix filtering works for builtin actions."""
-        items = complete_plugin(hierarchy_root_builtins["qiime"], "tools", "i")
-        assert_labels(items, {"import"})
-
-    def test_builtin_types_returns_actions(self, hierarchy_root_builtins: dict) -> None:
-        """Test that 'types' builtin returns its subcommands."""
-        items = complete_plugin(hierarchy_root_builtins["qiime"], "types", "")
-        assert_labels(items, {"collate-contigs", "partition-samples-single"})
-
-    def test_builtin_metadata_returns_actions(
-        self, hierarchy_root_builtins: dict
-    ) -> None:
-        """Test that 'metadata' builtin returns its subcommands."""
-        items = complete_plugin(hierarchy_root_builtins["qiime"], "metadata", "")
-        assert_labels(items, {"distance-matrix", "merge", "shuffle-groups", "tabulate"})
-
-    def test_builtin_dev_returns_actions(self, hierarchy_root_builtins: dict) -> None:
-        """Test that 'dev' builtin returns its subcommands."""
-        items = complete_plugin(hierarchy_root_builtins["qiime"], "dev", "")
-        assert_labels(items, {"refresh-cache", "reset-theme"})
-
-    def test_builtin_action_kind(self, hierarchy_root_builtins: dict) -> None:
-        """Test that builtin actions have the 'action' kind."""
-        items = complete_plugin(hierarchy_root_builtins["qiime"], "tools", "import")
-        assert len(items) == 1
-        assert items[0].kind == "action"
-
-    def test_builtin_with_actions_no_matching_prefix_returns_empty(
-        self, hierarchy_root_builtins: dict
-    ) -> None:
-        """Test that builtin with actions returns empty list when no actions match prefix."""
-        items = complete_plugin(hierarchy_root_builtins["qiime"], "tools", "xyz")
-        # Should return empty list, not --help, because tools has actions
-        assert items == []
-
-
-class TestCompleteParameters:
-    def test_returns_parameters(self, hierarchy_with_parameters: dict) -> None:
-        items = complete_parameters(
-            hierarchy_with_parameters["qiime"],
-            "feature-table",
-            "summarize",
-            "--",
-            set(),
-        )
-        assert_labels(
-            items, {"--i-table", "--o-output-dir", "--p-sample-metadata", "--help"}
-        )
-
-    def test_filters_by_prefix(self, hierarchy_with_parameters: dict) -> None:
-        items = complete_parameters(
-            hierarchy_with_parameters["qiime"],
-            "feature-table",
-            "summarize",
-            "--t",
-            set(),
-        )
-        assert_labels(items, {"--i-table"})
-
-    def test_excludes_used_parameters(self, hierarchy_with_parameters: dict) -> None:
-        items = complete_parameters(
-            hierarchy_with_parameters["qiime"],
-            "feature-table",
-            "summarize",
-            "--",
-            {"table"},
-        )
-        assert "--i-table" not in labels(items)
-        assert "--o-output-dir" in labels(items)
-
-    def test_includes_help(self, hierarchy_with_parameters: dict) -> None:
-        items = complete_parameters(
-            hierarchy_with_parameters["qiime"],
-            "feature-table",
-            "summarize",
-            "--",
-            set(),
-        )
-        assert "--help" in labels(items)
-
-    def test_parameter_kind(self, hierarchy_with_parameters: dict) -> None:
-        items = complete_parameters(
-            hierarchy_with_parameters["qiime"],
-            "feature-table",
-            "summarize",
-            "--i-table",
-            set(),
-        )
-        assert len(items) == 1
-        assert items[0].kind == "parameter"
-
-    def test_required_indicator(self, hierarchy_with_parameters: dict) -> None:
-        items = complete_parameters(
-            hierarchy_with_parameters["qiime"],
-            "feature-table",
-            "summarize",
-            "--i-table",
-            set(),
-        )
-        # table has no default, so it's required
-        assert "(required)" in items[0].detail
-
-
-class TestGetUsedParameters:
-    def test_extracts_used_params(self) -> None:
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("feature-table", 6, 19),
-            TokenSpan("summarize", 20, 29),
-            TokenSpan("--i-table", 30, 39),
-            TokenSpan("table.qza", 40, 49),
-            TokenSpan("--o-output-dir", 50, 64),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=64)
-        ctx = CompletionContext(
-            mode=CompletionMode.PARAMETER,
-            command=cmd,
-            current_token=None,
-            token_index=6,
-            prefix="",
-        )
-        used = ctx_get_used_parameters(ctx)
-        assert "table" in used
-        assert "output_dir" in used  # normalized to underscore
-
-    def test_handles_equals_syntax(self) -> None:
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("feature-table", 6, 19),
-            TokenSpan("summarize", 20, 29),
-            TokenSpan("--i-table=table.qza", 30, 49),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
-        ctx = CompletionContext(
-            mode=CompletionMode.PARAMETER,
-            command=cmd,
-            current_token=None,
-            token_index=4,
-            prefix="",
-        )
-        used = ctx_get_used_parameters(ctx)
-        assert "table" in used
-
-
-class TestCompletionPipeline:
-    """Integration-style tests for the full completion pipeline."""
-
-    def test_root_mode_pipeline(self, hierarchy_with_plugins: dict) -> None:
-        """Text with cursor -> context -> completions at root mode."""
-        from tests.helpers.completions import get_completion_context
-
-        text, offset = extract_cursor_offset(text_with_cursor="qiime feat<CURSOR>")
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.ROOT
-        assert ctx.prefix == "feat"
-
-        items = _get_completions_via_handler(text, offset, hierarchy_with_plugins).items
-        assert_labels(items, {"feature-table"})
-
-    def test_root_partial_prefix_lsp_item_replaces_prefix(
-        self, hierarchy_with_plugins: dict
-    ) -> None:
-        """Partial plugin completion includes LSP replacement edit and metadata."""
-        text, offset = extract_cursor_offset(text_with_cursor="qiime feat<CURSOR>")
-        result = _get_completions_via_handler(text, offset, hierarchy_with_plugins)
-
-        item = next(item for item in result.items if item.label == "feature-table")
-        assert item.kind == types.CompletionItemKind.Module
-        assert item.detail == "Plugin for working with feature tables"
-        assert item.text_edit == types.TextEdit(
-            range=types.Range(
-                start=types.Position(line=0, character=6),
-                end=types.Position(line=0, character=10),
-            ),
-            new_text="feature-table",
-        )
-
-    def test_plugin_mode_pipeline(self, hierarchy_with_plugins: dict) -> None:
-        """Text with cursor -> context -> completions at plugin mode."""
-        from tests.helpers.completions import get_completion_context
-
-        text, offset = extract_cursor_offset(
-            text_with_cursor="qiime feature-table <CURSOR>"
-        )
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.PLUGIN
-        assert ctx.prefix == ""
-
-        items = _get_completions_via_handler(text, offset, hierarchy_with_plugins).items
-        assert_labels(items, {"summarize", "filter-samples"})
-
-    def test_parameter_mode_pipeline(self, hierarchy_with_parameters: dict) -> None:
-        """Text with cursor -> context -> completions at parameter mode."""
-        from tests.helpers.completions import get_completion_context
-
-        text, offset = extract_cursor_offset(
-            text_with_cursor="qiime feature-table summarize --<CURSOR>"
-        )
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.PARAMETER
-        assert ctx.prefix == "--"
-
-        items = _get_completions_via_handler(
-            text, offset, hierarchy_with_parameters
-        ).items
-        item_labels = labels(items)
-        assert "--i-table" in item_labels
-        assert "--help" in item_labels
-
-    def test_parameter_partial_prefix_lsp_item_replaces_prefix(
-        self, hierarchy_with_parameters: dict
-    ) -> None:
-        """Partial parameter completion includes LSP replacement edit and metadata."""
-        text, offset = extract_cursor_offset(
-            text_with_cursor="qiime feature-table summarize --p-s<CURSOR>"
-        )
-        result = _get_completions_via_handler(text, offset, hierarchy_with_parameters)
-
-        item = next(
-            item for item in result.items if item.label == "--p-sample-metadata"
-        )
-        assert item.kind == types.CompletionItemKind.Field
-        assert item.detail == "[Metadata] Sample metadata"
-        assert item.text_edit == types.TextEdit(
-            range=types.Range(
-                start=types.Position(line=0, character=30),
-                end=types.Position(line=0, character=35),
-            ),
-            new_text="--p-sample-metadata",
-        )
-
-    def test_parameter_completion_counts_later_tokens_as_used(
-        self, hierarchy_with_parameters: dict
-    ) -> None:
-        """Parameters after the cursor still count as used in completion filtering."""
-        text, offset = extract_cursor_offset(
-            text_with_cursor=(
-                "qiime feature-table summarize --<CURSOR> --i-table table.qza"
-            )
-        )
-        items = _get_completions_via_handler(
-            text, offset, hierarchy_with_parameters
-        ).items
-
-        assert "--i-table" not in labels(items)
-        assert "--p-sample-metadata" in labels(items)
-
-    def test_none_mode_pipeline(self, hierarchy_with_plugins: dict) -> None:
-        """Text with cursor -> context -> completions at none mode (outside qiime)."""
-        from tests.helpers.completions import get_completion_context
-
-        text, offset = extract_cursor_offset(text_with_cursor="echo hel<CURSOR>lo")
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.NONE
-
-        items = _get_completions_via_handler(text, offset, hierarchy_with_plugins).items
-        assert items == []
-
-
-class TestGetCompletions:
-    def test_mode_none_returns_empty(self, full_mock_hierarchy: dict) -> None:
-        text = "echo hello"
-        offset = 5
-
-        result = _get_completions_via_handler(text, offset, full_mock_hierarchy)
-
-        assert result.items == []
-
-    def test_mode_root(self, full_mock_hierarchy: dict) -> None:
-        text = "qiime "
-        offset = 6
-
-        result = _get_completions_via_handler(text, offset, full_mock_hierarchy)
-
-        assert "info" in labels(result.items)
-        assert "feature-table" in labels(result.items)
-
-    def test_mode_plugin(self, full_mock_hierarchy: dict) -> None:
-        text = "qiime feature-table "
-        offset = 20
-
-        result = _get_completions_via_handler(text, offset, full_mock_hierarchy)
-
-        assert "summarize" in labels(result.items)
-
-    def test_mode_parameter(self, full_mock_hierarchy: dict) -> None:
-        text = "qiime feature-table summarize --"
-        offset = 32
-
-        result = _get_completions_via_handler(text, offset, full_mock_hierarchy)
-
-        assert "--i-table" in labels(result.items)
-
-    def test_mode_parameter_explicit_required_false_not_marked_required(self) -> None:
-        hierarchy = {
+    assert {item.label for item in complete(source, catalog)} == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "kind", "detail"),
+    [
+        ("qiime info", CompletionKind.BUILTIN, "Display deployment information"),
+        ("qiime feat", CompletionKind.PLUGIN, "Feature table operations"),
+        ("qiime feature-table sum", CompletionKind.ACTION, "Summarize a feature table"),
+        ("qiime tools imp", CompletionKind.ACTION, "Import data"),
+        (
+            "qiime feature-table summarize --i-t",
+            CompletionKind.PARAMETER,
+            "(required) [FeatureTable] Input table",
+        ),
+        (
+            "qiime feature-table summarize --o-out",
+            CompletionKind.PARAMETER,
+            "[Path] Output directory",
+        ),
+        (
+            "qiime feature-table summarize --p-s",
+            CompletionKind.PARAMETER,
+            "[Metadata] Sample metadata",
+        ),
+        (
+            "qiime feature-table summarize --m-m",
+            CompletionKind.PARAMETER,
+            "(required) [Metadata] Metadata file",
+        ),
+    ],
+)
+def test_completion_metadata(
+    catalog: QiimeCatalog, source: str, kind: CompletionKind, detail: str
+) -> None:
+    items = complete(source, catalog)
+    assert len(items) == 1
+    assert items[0].kind == kind
+    assert items[0].detail == detail
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_explicit_requiredness_overrides_defaults(required: bool) -> None:
+    catalog = QiimeCatalog.from_hierarchy(
+        {
             "qiime": {
-                "builtins": [],
                 "tools": {
                     "inspect": {
                         "signature": [
-                            {
-                                "name": "level",
-                                "type": "String",
-                                "description": "Inspection level",
-                                "required": False,
-                            }
+                            {"name": "level", "type": "String", "required": required}
                         ]
                     }
-                },
+                }
             }
         }
-        text = "qiime tools inspect --"
-        offset = 22
+    )
+    item = next(
+        item
+        for item in complete("qiime tools inspect --", catalog)
+        if item.label == "--level"
+    )
+    assert ("(required)" in item.detail) is required
 
-        result = _get_completions_via_handler(text, offset, hierarchy)
-        level_item = next(item for item in result.items if item.label == "--level")
-        assert "(required)" not in level_item.detail
 
-    def test_mode_parameter_explicit_required_true_marked_required(self) -> None:
-        hierarchy = {
-            "qiime": {
-                "builtins": [],
-                "tools": {
-                    "inspect": {
-                        "signature": [
-                            {
-                                "name": "level",
-                                "type": "String",
-                                "description": "Inspection level",
-                                "required": True,
-                            }
-                        ]
-                    }
-                },
-            }
-        }
-        text = "qiime tools inspect --"
-        offset = 22
+@pytest.mark.parametrize("table_option", ["--i-table table.qza", "--i-table=table.qza"])
+def test_used_options_are_excluded(catalog: QiimeCatalog, table_option: str) -> None:
+    items = complete(
+        f"qiime feature-table summarize {table_option} --o-output-dir out --help --",
+        catalog,
+    )
+    assert {item.label for item in items} == {
+        "--p-sample-metadata",
+        "--m-metadata-file",
+    }
 
-        result = _get_completions_via_handler(text, offset, hierarchy)
-        level_item = next(item for item in result.items if item.label == "--level")
-        assert "(required)" in level_item.detail
+
+@pytest.mark.parametrize(
+    ("source", "label", "kind", "start", "end"),
+    [
+        ("qiime feat<CURSOR>", "feature-table", types.CompletionItemKind.Module, 6, 10),
+        (
+            "qiime feature-table summarize --p-s<CURSOR>",
+            "--p-sample-metadata",
+            types.CompletionItemKind.Field,
+            30,
+            35,
+        ),
+    ],
+)
+def test_lsp_completion_replaces_only_prefix(
+    catalog: QiimeCatalog,
+    source: str,
+    label: str,
+    kind: types.CompletionItemKind,
+    start: int,
+    end: int,
+) -> None:
+    text, offset = extract_cursor_offset(text_with_cursor=source)
+    result = handle_completion(
+        TextDocument(uri="file:///test.sh", source=text),
+        types.Position(0, offset),
+        lambda: catalog,
+    )
+    item = next(item for item in result.items if item.label == label)
+    assert item.kind == kind
+    assert item.text_edit == types.TextEdit(
+        range=types.Range(start=types.Position(0, start), end=types.Position(0, end)),
+        new_text=label,
+    )
+
+
+def test_later_options_also_count_as_used(catalog: QiimeCatalog) -> None:
+    text, offset = extract_cursor_offset(
+        text_with_cursor="qiime feature-table summarize --<CURSOR> --i-table table.qza"
+    )
+    result = handle_completion(
+        TextDocument(uri="file:///test.sh", source=text),
+        types.Position(0, offset),
+        lambda: catalog,
+    )
+    labels = {item.label for item in result.items}
+    assert "--i-table" not in labels
+    assert "--p-sample-metadata" in labels
+
+
+@pytest.mark.parametrize("source", ["", "echo hello", "qiime"])
+def test_non_completion_context_does_not_load_catalog(source: str) -> None:
+    def fail_catalog() -> QiimeCatalog:
+        raise AssertionError("No catalog is needed outside a completion context")
+
+    result = handle_completion(
+        TextDocument(uri="file:///test.sh", source=source),
+        types.Position(0, len(source)),
+        fail_catalog,
+    )
+    assert result == types.CompletionList(is_incomplete=False, items=[])
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_reads"),
+    [
+        ("qiime ", []),
+        ("qiime feature-table ", []),
+        ("qiime feature-table summarize --", [("feature-table", "summarize")]),
+    ],
+)
+def test_only_requested_action_options_are_read(
+    catalog: QiimeCatalog,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    expected_reads: list[tuple[str, str]],
+) -> None:
+    reads: list[tuple[str, str]] = []
+    action_options = QiimeCatalog.action_options
+
+    def track(
+        self: QiimeCatalog, command: str, action: str
+    ) -> tuple[QiimeOptionFact, ...]:
+        reads.append((command, action))
+        return action_options(self, command, action)
+
+    monkeypatch.setattr(QiimeCatalog, "action_options", track)
+    for _ in range(2):
+        reads.clear()
+        assert complete(source, catalog)
+        assert reads == expected_reads
