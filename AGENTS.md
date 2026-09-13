@@ -1,14 +1,12 @@
 # AGENTS.md
 ## Overview
 This file is the onboarding index and working agreement for this repo. Keep it concise and aligned with current behavior.
-Use beads to track and manage issue/tasks
 
 ## Canonical Sources
 - `src/q2lsp/` core implementation.
 - `tests/` pytest suite.
 - `pyproject.toml` tool and environment configuration (ruff, pyright, pytest, pixi).
 - `extensions/vscode-q2lsp/README.md` VS Code extension docs; the extension lives in `extensions/vscode-q2lsp/`.
-- `.beads/README.md` beads workflow reference.
 
 ## Architecture Boundaries
 - `src/q2lsp/lsp/` handles LSP server protocol, request routing, and editor-facing behavior.
@@ -85,7 +83,6 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 <!-- BEGIN GENERATED: PROJECT_STRUCTURE -->
 ```
 <Project Root>
-├── .beads/
 ├── extensions/
 │   └── vscode-q2lsp/
 │       ├── .gitignore

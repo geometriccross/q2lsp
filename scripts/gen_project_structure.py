@@ -32,7 +32,6 @@ EXCLUDED_PATHS = {"src/q2lsp.egg-info"}
 EXTRA_DEPTH_PATHS = {"extensions/vscode-q2lsp/src/test"}
 
 ALLOWLIST = [
-    (".beads", 1),
     ("extensions", 4),
     ("src", 3),
     ("tests", 2),
