@@ -60,14 +60,12 @@ def _stub_hierarchy() -> CommandHierarchy:
     }
 
 
-def _stub_hierarchy_provider() -> CommandHierarchy:
-    """Stub hierarchy provider function."""
-    return _stub_hierarchy()
-
-
 def main() -> None:
     """Start the test LSP server."""
-    server = create_server(get_catalog=make_catalog_provider(_stub_hierarchy_provider))
+    server = create_server(
+        get_catalog=make_catalog_provider(_stub_hierarchy),
+        get_help=lambda path: "Usage: qiime " + " ".join(path),
+    )
     server.start_io()
 
 

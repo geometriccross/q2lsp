@@ -10,21 +10,18 @@ from pygls.workspace import TextDocument
 from q2lsp.lsp.adapter import position_to_offset
 from q2lsp.lsp.document_commands import analyze_document, resolve_completion_context
 from q2lsp.lsp.hover import get_hover_help
-from q2lsp.qiime.catalog import CatalogProvider
 
 
 def handle_hover(
     document: TextDocument,
     position: types.Position,
-    get_catalog: CatalogProvider,
-    get_help: Callable[[list[str]], str | None] | None = None,
+    get_help: Callable[[list[str]], str | None],
 ) -> types.Hover | None:
     """Return hover help for a document position."""
     offset = position_to_offset(document, position)
     doc = analyze_document(document.source)
     ctx = resolve_completion_context(doc, offset)
-    catalog = get_catalog() if get_help is None else None
-    help_text = get_hover_help(ctx, get_help=get_help, catalog=catalog)
+    help_text = get_hover_help(ctx, get_help=get_help)
 
     if help_text is None:
         return None

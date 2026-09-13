@@ -1,458 +1,243 @@
-"""Tests for diagnostics feature in LSP server.
-
-Covers debounce manager behavior and diagnostic severity mapping.
-"""
+"""Diagnostic publishing and document lifecycle with real workspace documents."""
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
+
 import pytest
 from lsprotocol import types
+from pygls.lsp.server import LanguageServer
+from pygls.workspace import Workspace
 
 import q2lsp.lsp.server as server_mod
-from q2lsp.qiime.catalog import QiimeCatalog, make_catalog_provider
+from q2lsp.lsp.diagnostics.codes import MISSING_REQUIRED_OPTION, UNKNOWN_OPTION
+from q2lsp.qiime.catalog import make_catalog_provider
 from q2lsp.qiime.types import CommandHierarchy
-from q2lsp.lsp.diagnostics.debounce import DebounceManager
+
+DEBOUNCE_MS = 10
+URI = "file:///test.sh"
 
 
-async def wait_until(assertion, timeout: float = 1.0) -> None:
-    """Wait until an assertion passes, then surface the last failure on timeout."""
-    deadline = asyncio.get_running_loop().time() + timeout
-    last_error: AssertionError | None = None
-    while asyncio.get_running_loop().time() < deadline:
-        try:
-            assertion()
-            return
-        except AssertionError as error:
-            last_error = error
-            await asyncio.sleep(0.01)
-
-    if last_error is not None:
-        raise last_error
-
-
-class TestDebounceManager:
-    """Tests for debounce manager."""
-
-    @pytest.mark.asyncio
-    async def test_schedule_and_cancel(self) -> None:
-        """Test that scheduling cancels previous task."""
-        manager = DebounceManager()
-        call_count = 0
-
-        async def func() -> None:
-            nonlocal call_count
-            call_count += 1
-
-        # Schedule first task
-        await manager.schedule("uri1", func, delay_ms=10)
-
-        # Schedule second task immediately (should cancel first)
-        await manager.schedule("uri1", func, delay_ms=10)
-
-        # Only the second task should execute
-        await wait_until(lambda: assert_equal(call_count, 1))
-
-    @pytest.mark.asyncio
-    async def test_different_uris_independent(self) -> None:
-        """Test that different URIs have independent tasks."""
-        manager = DebounceManager()
-        calls = []
-
-        async def func1() -> None:
-            calls.append("func1")
-
-        async def func2() -> None:
-            calls.append("func2")
-
-        # Schedule tasks for different URIs
-        await manager.schedule("uri1", func1, delay_ms=10)
-        await manager.schedule("uri2", func2, delay_ms=10)
-
-        # Both tasks should execute
-        await wait_until(lambda: assert_in("func1", calls))
-        await wait_until(lambda: assert_in("func2", calls))
-
-    @pytest.mark.asyncio
-    async def test_cancel_pending_task(self) -> None:
-        """Test that cancel stops a pending task."""
-        manager = DebounceManager()
-        call_count = 0
-
-        async def func() -> None:
-            nonlocal call_count
-            call_count += 1
-
-        # Schedule task
-        await manager.schedule("uri1", func, delay_ms=100)
-
-        # Cancel before debounce completes
-        await manager.cancel("uri1")
-
-        # Wait longer than debounce
-        await asyncio.sleep(0.2)
-
-        # Task should not execute
-        assert call_count == 0
-
-    @pytest.mark.asyncio
-    async def test_exception_handling(self) -> None:
-        """Test that exceptions don't crash the manager."""
-        manager = DebounceManager()
-
-        async def raising_func() -> None:
-            raise RuntimeError("Test error")
-
-        ran_successfully = asyncio.Event()
-
-        async def successful_func() -> None:
-            ran_successfully.set()
-
-        # Schedule a task that raises
-        await manager.schedule("uri1", raising_func, delay_ms=10)
-
-        # Wait for debounce - should not raise
-        await asyncio.sleep(0.05)
-
-        # The manager should remain usable after swallowing the exception.
-        await manager.schedule("uri1", successful_func, delay_ms=10)
-        await asyncio.wait_for(ran_successfully.wait(), timeout=1)
-
-
-def assert_equal(actual, expected) -> None:
-    assert actual == expected
-
-
-def assert_in(item, container) -> None:
-    assert item in container
-
-
-class TestDiagnosticSeverity:
-    """Tests for diagnostic severity mapping behavior."""
-
-    @pytest.fixture
-    def mock_hierarchy(self) -> CommandHierarchy:
-        """Create a hierarchy with required options and one action."""
-        return {
-            "qiime": {
-                "name": "qiime",
-                "dummy-plugin": {
-                    "type": "plugin",
-                    "dummy-action": {
-                        "signature": [
-                            {
-                                "name": "table",
-                                "signature_type": "artifact",
-                            },
-                            {
-                                "name": "metadata",
-                                "signature_type": "metadata",
-                            },
-                        ],
-                    },
-                },
+@pytest.fixture
+def hierarchy() -> CommandHierarchy:
+    return {
+        "qiime": {
+            "demo": {
+                "step": {
+                    "signature": [
+                        {"name": "table", "type": "input"},
+                        {"name": "metadata", "type": "metadata"},
+                    ]
+                }
             }
         }
+    }
 
-    @pytest.mark.asyncio
-    async def test_did_open_publishes_expected_severity_by_diagnostic_code(
-        self, mock_hierarchy: CommandHierarchy, mocker
-    ) -> None:
-        """did_open publishes Error for missing required and Warning for unknown option."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy),
-            debounce_ms=0,
+
+@pytest.fixture
+def server_and_published(
+    hierarchy: CommandHierarchy,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[tuple[LanguageServer, asyncio.Queue[types.PublishDiagnosticsParams]]]:
+    server = server_mod.create_server(
+        get_catalog=make_catalog_provider(lambda: hierarchy),
+        get_help=lambda _path: None,
+        debounce_ms=DEBOUNCE_MS,
+    )
+    server.protocol._workspace = Workspace(None)
+    published: asyncio.Queue[types.PublishDiagnosticsParams] = asyncio.Queue()
+    monkeypatch.setattr(
+        server, "text_document_publish_diagnostics", published.put_nowait
+    )
+    yield server, published
+    server.protocol.fm.features[types.SHUTDOWN](None)
+
+
+def open_document(server: LanguageServer, source: str, uri: str = URI) -> None:
+    document = types.TextDocumentItem(
+        uri=uri, language_id="shellscript", version=1, text=source
+    )
+    server.workspace.put_text_document(document)
+    server.protocol.fm.features[types.TEXT_DOCUMENT_DID_OPEN](
+        types.DidOpenTextDocumentParams(document)
+    )
+
+
+def change_document(server: LanguageServer, source: str, version: int) -> None:
+    identifier = types.VersionedTextDocumentIdentifier(uri=URI, version=version)
+    change = types.TextDocumentContentChangeWholeDocument(text=source)
+    server.workspace.update_text_document(identifier, change)
+    server.protocol.fm.features[types.TEXT_DOCUMENT_DID_CHANGE](
+        types.DidChangeTextDocumentParams(
+            text_document=identifier, content_changes=[change]
         )
+    )
 
-        source = "qiime dummy-plugin dummy-action --unknown-opt value"
 
-        class MockDocument:
-            def __init__(self) -> None:
-                self.uri = "file:///test.sh"
-                self.source = source
-                self.version = 1
-                self.lines = [source]
+def close_document(server: LanguageServer, uri: str = URI) -> None:
+    server.workspace.remove_text_document(uri)
+    server.protocol.fm.features[types.TEXT_DOCUMENT_DID_CLOSE](
+        types.DidCloseTextDocumentParams(types.TextDocumentIdentifier(uri))
+    )
 
-        document = MockDocument()
 
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = document
-        server.protocol._workspace = mock_workspace
+async def wait_past_debounce() -> None:
+    await asyncio.sleep(DEBOUNCE_MS / 1000 * 3)
 
-        diagnostics_published = asyncio.Event()
-        mock_publish = mocker.patch.object(
-            server,
-            "text_document_publish_diagnostics",
-            autospec=True,
-            side_effect=lambda _params: diagnostics_published.set(),
-        )
 
-        fm = server.protocol.fm
-        did_open_handler = fm.features[types.TEXT_DOCUMENT_DID_OPEN]
-        params = types.DidOpenTextDocumentParams(
-            text_document=types.TextDocumentItem(
-                uri=document.uri,
-                language_id="shellscript",
-                version=document.version,
-                text=document.source,
-            )
-        )
+async def test_open_publishes_diagnostic_ranges_and_severity(
+    server_and_published: tuple[
+        LanguageServer, asyncio.Queue[types.PublishDiagnosticsParams]
+    ],
+) -> None:
+    server, published = server_and_published
+    source = "qiime demo step --unknown-opt value"
+    open_document(server, source)
+    result = await asyncio.wait_for(published.get(), timeout=1)
 
-        await did_open_handler(params)
-        await asyncio.wait_for(diagnostics_published.wait(), timeout=1)
+    assert result.uri == URI
+    assert result.version == 1
+    assert [issue.code for issue in result.diagnostics] == [
+        UNKNOWN_OPTION,
+        MISSING_REQUIRED_OPTION,
+        MISSING_REQUIRED_OPTION,
+    ]
+    unknown, *missing = result.diagnostics
+    start = source.index("--unknown-opt")
+    assert unknown.range == types.Range(
+        start=types.Position(0, start), end=types.Position(0, start + 13)
+    )
+    assert unknown.severity == types.DiagnosticSeverity.Warning
+    assert all(issue.severity == types.DiagnosticSeverity.Error for issue in missing)
 
-        mock_publish.assert_called_once()
-        publish_params = mock_publish.call_args[0][0]
-        assert isinstance(publish_params, types.PublishDiagnosticsParams)
 
-        diagnostics = publish_params.diagnostics
-        assert publish_params.uri == document.uri
-        assert publish_params.version == document.version
-        missing_required_diagnostics = [
-            diagnostic
-            for diagnostic in diagnostics
-            if diagnostic.code == "q2lsp-dni/missing-required-option"
-        ]
-        unknown_option_diagnostics = [
-            diagnostic
-            for diagnostic in diagnostics
-            if diagnostic.code == "q2lsp-dni/unknown-option"
-        ]
+async def test_rapid_changes_publish_only_the_latest_version(
+    server_and_published: tuple[
+        LanguageServer, asyncio.Queue[types.PublishDiagnosticsParams]
+    ],
+) -> None:
+    server, published = server_and_published
+    open_document(server, "qiime unknown")
+    change_document(server, "qiime demo step --bad", 2)
+    change_document(
+        server, "qiime demo step --i-table table.qza --m-metadata metadata.tsv", 3
+    )
+    result = await asyncio.wait_for(published.get(), timeout=1)
 
-        assert len(missing_required_diagnostics) == 2
-        assert len(unknown_option_diagnostics) == 1
-        unknown_option = unknown_option_diagnostics[0]
-        assert unknown_option.range == types.Range(
-            start=types.Position(line=0, character=32),
-            end=types.Position(line=0, character=45),
-        )
-        assert all(
-            diagnostic.severity == types.DiagnosticSeverity.Error
-            for diagnostic in missing_required_diagnostics
-        )
-        assert all(
-            diagnostic.severity == types.DiagnosticSeverity.Warning
-            for diagnostic in unknown_option_diagnostics
-        )
+    assert result.version == 3
+    assert result.diagnostics == []
+    await wait_past_debounce()
+    assert published.empty()
 
-    @pytest.mark.asyncio
-    async def test_did_change_publishes_diagnostics(
-        self, mock_hierarchy: CommandHierarchy, mocker
-    ) -> None:
-        """did_change publishes diagnostics for the changed document version."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy),
-            debounce_ms=0,
-        )
 
-        source = "qiime dummy-plugin dummy-action --unknown-opt value"
+async def test_document_timers_are_independent(
+    server_and_published: tuple[
+        LanguageServer, asyncio.Queue[types.PublishDiagnosticsParams]
+    ],
+) -> None:
+    server, published = server_and_published
+    open_document(server, "qiime unknown")
+    open_document(server, "qiime other", "file:///other.sh")
+    results = [await asyncio.wait_for(published.get(), timeout=1) for _ in range(2)]
+    assert {result.uri for result in results} == {URI, "file:///other.sh"}
+    assert all(result.diagnostics for result in results)
 
-        class MockDocument:
-            def __init__(self) -> None:
-                self.uri = "file:///test.sh"
-                self.source = source
-                self.version = 2
-                self.lines = [source]
 
-        document = MockDocument()
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = document
-        server.protocol._workspace = mock_workspace
+async def test_close_clears_diagnostics_and_cancels_pending_work(
+    server_and_published: tuple[
+        LanguageServer, asyncio.Queue[types.PublishDiagnosticsParams]
+    ],
+) -> None:
+    server, published = server_and_published
+    open_document(server, "qiime unknown")
+    close_document(server)
+    assert published.get_nowait() == types.PublishDiagnosticsParams(
+        uri=URI, diagnostics=[], version=None
+    )
+    await wait_past_debounce()
+    assert published.empty()
 
-        diagnostics_published = asyncio.Event()
-        mock_publish = mocker.patch.object(
-            server,
-            "text_document_publish_diagnostics",
-            autospec=True,
-            side_effect=lambda _params: diagnostics_published.set(),
-        )
 
-        did_change_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_DID_CHANGE]
-        params = types.DidChangeTextDocumentParams(
-            text_document=types.VersionedTextDocumentIdentifier(
-                uri=document.uri,
-                version=document.version,
-            ),
-            content_changes=[],
-        )
+async def test_reopening_same_uri_does_not_publish_the_old_document(
+    server_and_published: tuple[
+        LanguageServer, asyncio.Queue[types.PublishDiagnosticsParams]
+    ],
+) -> None:
+    server, published = server_and_published
+    open_document(server, "qiime unknown")
+    close_document(server)
+    published.get_nowait()
+    open_document(server, "echo hello")
+    result = await asyncio.wait_for(published.get(), timeout=1)
+    assert result.version == 1
+    assert result.diagnostics == []
+    await wait_past_debounce()
+    assert published.empty()
 
-        await did_change_handler(params)
-        await asyncio.wait_for(diagnostics_published.wait(), timeout=1)
 
-        publish_params = mock_publish.call_args[0][0]
-        assert publish_params.uri == document.uri
-        assert publish_params.version == document.version
-        assert publish_params.diagnostics
+@pytest.mark.parametrize("remove_document", [False, True])
+async def test_outdated_or_missing_document_is_not_published(
+    server_and_published: tuple[
+        LanguageServer, asyncio.Queue[types.PublishDiagnosticsParams]
+    ],
+    remove_document: bool,
+) -> None:
+    server, published = server_and_published
+    open_document(server, "qiime unknown")
+    if remove_document:
+        server.workspace.remove_text_document(URI)
+    else:
+        server.workspace.get_text_document(URI).version = 2
+    await wait_past_debounce()
+    assert published.empty()
 
-    @pytest.mark.asyncio
-    async def test_valid_command_publishes_empty_diagnostics(
-        self, mock_hierarchy: CommandHierarchy, mocker
-    ) -> None:
-        """A valid command publishes an empty diagnostics list."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy),
-            debounce_ms=0,
-        )
 
-        source = (
-            "qiime dummy-plugin dummy-action "
-            "--table table.qza --m-metadata metadata.tsv"
-        )
+async def test_shutdown_cancels_pending_diagnostics(
+    server_and_published: tuple[
+        LanguageServer, asyncio.Queue[types.PublishDiagnosticsParams]
+    ],
+) -> None:
+    server, published = server_and_published
+    open_document(server, "qiime unknown")
+    server.protocol.fm.features[types.SHUTDOWN](None)
+    await wait_past_debounce()
+    assert published.empty()
 
-        class MockDocument:
-            def __init__(self) -> None:
-                self.uri = "file:///valid.sh"
-                self.source = source
-                self.version = 1
-                self.lines = [source]
 
-        document = MockDocument()
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = document
-        server.protocol._workspace = mock_workspace
+async def test_failed_diagnostics_do_not_prevent_later_updates(
+    server_and_published: tuple[
+        LanguageServer, asyncio.Queue[types.PublishDiagnosticsParams]
+    ],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, published = server_and_published
+    with monkeypatch.context() as patch:
 
-        diagnostics_published = asyncio.Event()
-        mock_publish = mocker.patch.object(
-            server,
-            "text_document_publish_diagnostics",
-            autospec=True,
-            side_effect=lambda _params: diagnostics_published.set(),
-        )
+        def fail(*_args: object) -> list[types.Diagnostic]:
+            raise RuntimeError("temporary discovery failure")
 
-        did_open_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_DID_OPEN]
-        params = types.DidOpenTextDocumentParams(
-            text_document=types.TextDocumentItem(
-                uri=document.uri,
-                language_id="shellscript",
-                version=document.version,
-                text=document.source,
-            )
-        )
+        patch.setattr(server_mod, "compute_diagnostics", fail)
+        open_document(server, "qiime unknown")
+        await wait_past_debounce()
+        assert published.empty()
 
-        await did_open_handler(params)
-        await asyncio.wait_for(diagnostics_published.wait(), timeout=1)
+    change_document(server, "qiime unknown", 2)
+    result = await asyncio.wait_for(published.get(), timeout=1)
+    assert result.version == 2
+    assert result.diagnostics
 
-        publish_params = mock_publish.call_args[0][0]
-        assert publish_params.uri == document.uri
-        assert publish_params.version == document.version
-        assert publish_params.diagnostics == []
 
-    @pytest.mark.asyncio
-    async def test_diagnostics_reuse_cached_catalog(
-        self, mock_hierarchy: CommandHierarchy, mocker
-    ) -> None:
-        """Repeated diagnostics use the server's cached catalog provider."""
-        hierarchy_call_count = 0
-
-        def get_hierarchy() -> CommandHierarchy:
-            nonlocal hierarchy_call_count
-            hierarchy_call_count += 1
-            return mock_hierarchy
-
-        get_catalog = make_catalog_provider(get_hierarchy)
-        server = server_mod.create_server(
-            get_catalog=get_catalog,
-            debounce_ms=0,
-        )
-
-        source = "qiime dummy-plugin dummy-action --unknown-opt value"
-
-        class MockDocument:
-            def __init__(self) -> None:
-                self.uri = "file:///test.sh"
-                self.source = source
-                self.version = 1
-                self.lines = [source]
-
-        document = MockDocument()
-
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = document
-        server.protocol._workspace = mock_workspace
-
-        diagnostics_published_count = 0
-
-        def record_publish(_params) -> None:
-            nonlocal diagnostics_published_count
-            diagnostics_published_count += 1
-
-        mocker.patch.object(
-            server,
-            "text_document_publish_diagnostics",
-            autospec=True,
-            side_effect=record_publish,
-        )
-
-        fm = server.protocol.fm
-        did_open_handler = fm.features[types.TEXT_DOCUMENT_DID_OPEN]
-        params = types.DidOpenTextDocumentParams(
-            text_document=types.TextDocumentItem(
-                uri=document.uri,
-                language_id="shellscript",
-                version=document.version,
-                text=document.source,
-            )
-        )
-
-        await did_open_handler(params)
-        await wait_until(lambda: assert_equal(diagnostics_published_count, 1))
-        await did_open_handler(params)
-        await wait_until(lambda: assert_equal(diagnostics_published_count, 2))
-
-        assert hierarchy_call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_line_continuation_diagnostic_range_maps_to_original_line(
-        self, mocker
-    ) -> None:
-        """Diagnostics from merged commands publish ranges in original source."""
-        hierarchy: CommandHierarchy = {
-            "qiime": {
-                "name": "qiime",
-                "feature-table": {
-                    "name": "feature-table",
-                    "summarize": {"name": "summarize", "signature": []},
-                },
-            }
-        }
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(hierarchy),
-            debounce_ms=0,
-        )
-        source = "qiime \\\nfeature-tabel summarize"
-
-        class MockDocument:
-            def __init__(self) -> None:
-                self.uri = "file:///test.sh"
-                self.source = source
-                self.version = 1
-
-        document = MockDocument()
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = document
-        server.protocol._workspace = mock_workspace
-        mock_publish = mocker.patch.object(
-            server,
-            "text_document_publish_diagnostics",
-            autospec=True,
-        )
-
-        did_open_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_DID_OPEN]
-        params = types.DidOpenTextDocumentParams(
-            text_document=types.TextDocumentItem(
-                uri=document.uri,
-                language_id="shellscript",
-                version=document.version,
-                text=document.source,
-            )
-        )
-
-        await did_open_handler(params)
-        await asyncio.sleep(0.05)
-
-        publish_params = mock_publish.call_args[0][0]
-        assert isinstance(publish_params, types.PublishDiagnosticsParams)
-        assert len(publish_params.diagnostics) == 1
-        diagnostic_range = publish_params.diagnostics[0].range
-        assert diagnostic_range.start == types.Position(line=1, character=0)
-        assert diagnostic_range.end == types.Position(line=1, character=13)
+async def test_continuation_diagnostic_uses_original_line(
+    server_and_published: tuple[
+        LanguageServer, asyncio.Queue[types.PublishDiagnosticsParams]
+    ],
+) -> None:
+    server, published = server_and_published
+    open_document(server, "qiime \\\nunknown")
+    result = await asyncio.wait_for(published.get(), timeout=1)
+    assert len(result.diagnostics) == 1
+    assert result.diagnostics[0].range == types.Range(
+        start=types.Position(1, 0),
+        end=types.Position(1, 7),
+    )

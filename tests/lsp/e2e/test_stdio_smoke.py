@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from tests.lsp.e2e.lsp_client import LspTestClient
+from tests.lsp.e2e.lsp_client import LspTestClient, read_lsp_message
 
 
 @pytest.mark.e2e
@@ -24,7 +24,9 @@ class TestStdioE2E:
         response = await lsp_client.initialize()
 
         assert "result" in response
-        assert "capabilities" in response["result"]
+        assert response["result"]["capabilities"]["completionProvider"][
+            "triggerCharacters"
+        ] == [" ", "-"]
 
         # Shutdown
         shutdown_response = await lsp_client.shutdown_exit()
@@ -112,6 +114,65 @@ class TestStdioE2E:
         assert "error" not in response
         assert response["result"]["items"] == []
 
+        await lsp_client.shutdown_exit()
+
+    @pytest.mark.asyncio
+    async def test_diagnostics_lifecycle_and_provider_hover(
+        self,
+        lsp_client: LspTestClient,
+        lsp_server_process: asyncio.subprocess.Process,
+    ) -> None:
+        await lsp_client.initialize()
+        reader = lsp_server_process.stdout
+        assert reader is not None
+        uri = "file:///diagnostics.sh"
+        await lsp_client.did_open(
+            uri=uri, language_id="shellscript", version=1, text="qiime unknown"
+        )
+        opened = await read_lsp_message(reader)
+        assert opened["method"] == "textDocument/publishDiagnostics"
+        assert opened["params"]["version"] == 1
+        assert opened["params"]["diagnostics"][0]["code"] == "q2lsp-dni/unknown-root"
+
+        await lsp_client.send_notification(
+            method="textDocument/didChange",
+            params={
+                "textDocument": {"uri": uri, "version": 2},
+                "contentChanges": [
+                    {
+                        "text": (
+                            "qiime feature-table summarize --i-table in.qza "
+                            "--o-visualization out.qzv --p-sample-metadata metadata.tsv"
+                        )
+                    }
+                ],
+            },
+        )
+        changed = await read_lsp_message(reader)
+        assert changed["method"] == "textDocument/publishDiagnostics"
+        assert changed["params"]["version"] == 2
+        assert changed["params"]["diagnostics"] == []
+
+        hover = await lsp_client.send_request(
+            method="textDocument/hover",
+            params={
+                "textDocument": {"uri": uri},
+                "position": {"line": 0, "character": 8},
+            },
+        )
+        assert hover["result"]["contents"] == {
+            "kind": "markdown",
+            "value": "```\nUsage: qiime feature-table\n```",
+        }
+
+        await lsp_client.send_notification(
+            method="textDocument/didClose",
+            params={"textDocument": {"uri": uri}},
+        )
+        closed = await read_lsp_message(reader)
+        assert closed["method"] == "textDocument/publishDiagnostics"
+        assert closed["params"]["uri"] == uri
+        assert closed["params"]["diagnostics"] == []
         await lsp_client.shutdown_exit()
 
     @pytest.mark.asyncio

@@ -1,62 +1,73 @@
-"""Behavior tests for standalone hover handler."""
+"""Hover routing and rendering through the same help-provider path as production."""
 
 from __future__ import annotations
 
+import pytest
 from lsprotocol import types
 from pygls.workspace import TextDocument
 
+from q2lsp.lsp.adapter import offset_to_position
 from q2lsp.lsp.hover_handler import handle_hover
-from q2lsp.qiime.catalog import QiimeCatalog
-from q2lsp.qiime.types import CommandHierarchy
+from tests.helpers.cursor import extract_cursor_offset
 
 
-def _document(source: str) -> TextDocument:
-    return TextDocument(
-        uri="file:///test.sh",
-        source=source,
-        language_id="shellscript",
-        version=1,
+@pytest.mark.parametrize(
+    ("source", "expected_path"),
+    [
+        ("qii<CURSOR>me info", []),
+        ("qiime fe<CURSOR>ature-table summarize", ["feature-table"]),
+        ("qiime feature-table sum<CURSOR>marize", ["feature-table", "summarize"]),
+        ("qiime in<CURSOR>fo", ["info"]),
+        ("qiime \\\nfe<CURSOR>ature-table summarize", ["feature-table"]),
+    ],
+)
+def test_hover_requests_cli_help_and_returns_fenced_markdown(
+    source: str,
+    expected_path: list[str],
+) -> None:
+    text, offset = extract_cursor_offset(text_with_cursor=source)
+    document = TextDocument(uri="file:///test.sh", source=text)
+    calls: list[list[str]] = []
+    help_text = (
+        "Usage: qiime [OPTIONS] COMMAND [ARGS]...\n\nOptions:\n  --help  Show help."
     )
 
+    def get_help(path: list[str]) -> str:
+        calls.append(path)
+        return help_text
 
-def test_handle_hover_returns_help_for_root_token() -> None:
-    """Hover returns fenced markdown help for the qiime root token."""
-    hierarchy: CommandHierarchy = {
-        "qiime": {
-            "name": "qiime",
-            "help": "QIIME root help",
-            "builtins": [],
-        }
-    }
-
-    hover = handle_hover(
-        _document("qiime info"),
-        types.Position(line=0, character=2),
-        lambda: QiimeCatalog.from_hierarchy(hierarchy),
-    )
-
+    hover = handle_hover(document, offset_to_position(document, offset), get_help)
+    assert calls == [expected_path]
     assert hover == types.Hover(
         contents=types.MarkupContent(
             kind=types.MarkupKind.Markdown,
-            value="```\nQIIME root help\n```",
+            value=f"```\n{help_text}\n```",
         )
     )
 
 
-def test_handle_hover_returns_none_when_cursor_is_not_on_qiime_token() -> None:
-    """Hover returns None outside qiime commands."""
-    hierarchy: CommandHierarchy = {
-        "qiime": {
-            "name": "qiime",
-            "help": "QIIME root help",
-            "builtins": [],
-        }
-    }
+@pytest.mark.parametrize(
+    "source",
+    [
+        "qiime  <CURSOR> info",
+        "echo <CURSOR>hello",
+        "qiime feature-table summarize --<CURSOR>help",
+        "qiime feature-table summarize --i-table ta<CURSOR>ble.qza",
+        "qiime feature-table summarize --help <CURSOR>",
+    ],
+)
+def test_hover_outside_command_path_does_not_request_help(source: str) -> None:
+    text, offset = extract_cursor_offset(text_with_cursor=source)
+    document = TextDocument(uri="file:///test.sh", source=text)
 
-    hover = handle_hover(
-        _document("echo hello"),
-        types.Position(line=0, character=2),
-        lambda: QiimeCatalog.from_hierarchy(hierarchy),
+    def fail_help(path: list[str]) -> str | None:
+        raise AssertionError(f"Unexpected help request: {path}")
+
+    assert (
+        handle_hover(document, offset_to_position(document, offset), fail_help) is None
     )
 
-    assert hover is None
+
+def test_hover_returns_none_when_help_is_unavailable() -> None:
+    document = TextDocument(uri="file:///test.sh", source="qiime unknown")
+    assert handle_hover(document, types.Position(0, 8), lambda _path: None) is None

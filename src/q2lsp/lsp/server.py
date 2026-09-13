@@ -5,6 +5,7 @@ Provides completion support for QIIME2 CLI commands in shell scripts.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable, Generator
 from typing import Any
@@ -19,11 +20,10 @@ from pygls.workspace import Workspace
 
 from q2lsp.logging import get_logger
 from q2lsp.lsp.adapter import LSP_POSITION_ENCODING
-from q2lsp.lsp.diagnostics.debounce import DebounceManager
 from q2lsp.lsp.code_lens_handler import handle_code_lens
 from q2lsp.lsp.completion_handler import handle_completion
 from q2lsp.lsp.diagnostics_handler import compute_diagnostics
-from q2lsp.lsp.error_handling import wrap_async_handler, wrap_handler
+from q2lsp.lsp.error_handling import wrap_handler
 from q2lsp.lsp.hover_handler import handle_hover
 from q2lsp.qiime.catalog import CatalogProvider
 
@@ -79,7 +79,7 @@ class Utf16LanguageServerProtocol(LanguageServerProtocol):
 def create_server(
     *,
     get_catalog: CatalogProvider,
-    get_help: Callable[[list[str]], str | None] | None = None,
+    get_help: Callable[[list[str]], str | None],
     logger: logging.Logger | None = None,
     debounce_ms: int = 400,
 ) -> LanguageServer:
@@ -99,7 +99,7 @@ def create_server(
         logger = get_logger("lsp")
 
     server = LanguageServer("q2lsp", "v0.1.0", protocol_cls=Utf16LanguageServerProtocol)
-    debounce_manager = DebounceManager()
+    pending_diagnostics: dict[str, asyncio.TimerHandle] = {}
 
     def _empty_completion_list() -> types.CompletionList:
         return types.CompletionList(is_incomplete=False, items=[])
@@ -171,36 +171,16 @@ def create_server(
 
         document = server.workspace.get_text_document(params.text_document.uri)
 
-        return handle_hover(document, params.position, get_catalog, get_help=get_help)
+        return handle_hover(document, params.position, get_help)
 
-    # Diagnostics
-    async def publish_document_diagnostics(
-        uri: str, document_version: int | None
-    ) -> None:
-        """
-        Publish diagnostics for a document.
-
-        This function is called after debounce.
-        """
-        # Check if document still exists
-        document = server.workspace.get_text_document(uri)
-        if document is None:
-            return
-
-        # Check version to avoid publishing stale results
-        if document_version is not None and document.version != document_version:
-            logger.debug(
-                "Skipping diagnostics for %s: version mismatch (expected %s, got %s)",
-                uri,
-                document_version,
-                document.version,
-            )
-            return
-
+    def publish_document_diagnostics(uri: str, document_version: int) -> None:
+        pending_diagnostics.pop(uri, None)
         try:
-            lsp_diagnostics = compute_diagnostics(document, get_catalog)
+            document = server.workspace.text_documents.get(uri)
+            if document is None or document.version != document_version:
+                return
 
-            # Publish diagnostics using pygls standard method
+            lsp_diagnostics = compute_diagnostics(document, get_catalog)
             server.text_document_publish_diagnostics(
                 types.PublishDiagnosticsParams(
                     uri=uri,
@@ -208,7 +188,6 @@ def create_server(
                     version=document_version,
                 )
             )
-
             logger.debug(
                 "Published %d diagnostics for %s (version %s)",
                 len(lsp_diagnostics),
@@ -218,72 +197,46 @@ def create_server(
         except Exception:
             logger.exception("Error publishing diagnostics for %s", uri)
 
+    def cancel_diagnostics(uri: str) -> None:
+        if timer := pending_diagnostics.pop(uri, None):
+            timer.cancel()
+
     @server.feature(types.TEXT_DOCUMENT_DID_OPEN)
-    @wrap_async_handler(
-        logger=logger,
-        feature_name="textDocument/didOpen",
-        default_factory=lambda: None,
-    )
-    async def did_open(params: types.DidOpenTextDocumentParams) -> None:
-        """Handle textDocument/didOpen by scheduling diagnostics."""
-        uri = params.text_document.uri
-        document = server.workspace.get_text_document(uri)
-        if document is None:
-            return
-
-        logger.debug("Document opened: %s (version %s)", uri, document.version)
-
-        # Schedule diagnostics with debounce
-        await debounce_manager.schedule(
-            uri,
-            lambda: publish_document_diagnostics(uri, document.version),
-            delay_ms=debounce_ms,
-        )
-
     @server.feature(types.TEXT_DOCUMENT_DID_CHANGE)
-    @wrap_async_handler(
+    @wrap_handler(
         logger=logger,
-        feature_name="textDocument/didChange",
+        feature_name="diagnostics scheduling",
         default_factory=lambda: None,
     )
-    async def did_change(params: types.DidChangeTextDocumentParams) -> None:
-        """Handle textDocument/didChange by debouncing diagnostics."""
+    def schedule_diagnostics(
+        params: types.DidOpenTextDocumentParams | types.DidChangeTextDocumentParams,
+    ) -> None:
         uri = params.text_document.uri
-        document = server.workspace.get_text_document(uri)
-        if document is None:
-            return
-
-        logger.debug("Document changed: %s (version %s)", uri, document.version)
-
-        # Schedule diagnostics with debounce
-        await debounce_manager.schedule(
+        cancel_diagnostics(uri)
+        pending_diagnostics[uri] = asyncio.get_running_loop().call_later(
+            debounce_ms / 1000,
+            publish_document_diagnostics,
             uri,
-            lambda: publish_document_diagnostics(uri, document.version),
-            delay_ms=debounce_ms,
+            params.text_document.version,
         )
 
     @server.feature(types.TEXT_DOCUMENT_DID_CLOSE)
-    @wrap_async_handler(
+    @wrap_handler(
         logger=logger,
         feature_name="textDocument/didClose",
         default_factory=lambda: None,
     )
-    async def did_close(params: types.DidCloseTextDocumentParams) -> None:
-        """Handle textDocument/didClose by clearing diagnostics."""
+    def did_close(params: types.DidCloseTextDocumentParams) -> None:
         uri = params.text_document.uri
-
-        logger.debug("Document closed: %s", uri)
-
-        # Clear diagnostics
+        cancel_diagnostics(uri)
         server.text_document_publish_diagnostics(
-            types.PublishDiagnosticsParams(
-                uri=uri,
-                diagnostics=[],
-                version=None,
-            )
+            types.PublishDiagnosticsParams(uri=uri, diagnostics=[], version=None)
         )
 
-        # Cancel any pending validation task
-        await debounce_manager.cancel(uri)
+    @server.feature(types.SHUTDOWN)
+    def shutdown(params: None = None) -> None:
+        for timer in pending_diagnostics.values():
+            timer.cancel()
+        pending_diagnostics.clear()
 
     return server

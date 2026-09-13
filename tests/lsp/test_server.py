@@ -1,551 +1,114 @@
-"""Tests for LSP server module."""
+"""Server request routing and failure responses."""
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 from lsprotocol import types
+from pygls.lsp.server import LanguageServer
+from pygls.workspace import Workspace
 
-import q2lsp.lsp.server as server_mod
-from q2lsp.qiime.catalog import QiimeCatalog, make_catalog_provider
-from q2lsp.qiime.types import CommandHierarchy
+from q2lsp.lsp.server import create_server
+from q2lsp.qiime.catalog import QiimeCatalog
 
 
-class TestCreateServer:
-    """Tests for create_server function."""
-
-    @pytest.fixture
-    def mock_hierarchy(self) -> CommandHierarchy:
-        """Create a mock hierarchy for testing."""
-        return {"qiime": {"name": "qiime"}}
-
-    def test_returns_language_server(self, mock_hierarchy: CommandHierarchy) -> None:
-        """Returns LanguageServer instance."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-        assert isinstance(server, server_mod.LanguageServer)
-
-    def test_registers_completion_feature(
-        self, mock_hierarchy: CommandHierarchy
-    ) -> None:
-        """TEXT_DOCUMENT_COMPLETION is registered."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-        fm = server.protocol.fm
-        assert types.TEXT_DOCUMENT_COMPLETION in fm.features
-
-    def test_registers_code_lens_feature(
-        self, mock_hierarchy: CommandHierarchy
-    ) -> None:
-        """TEXT_DOCUMENT_CODE_LENS is registered."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-        fm = server.protocol.fm
-        assert types.TEXT_DOCUMENT_CODE_LENS in fm.features
-
-    def test_code_lens_returns_run_command_with_tokens_and_shell_text(
-        self, mock_hierarchy: CommandHierarchy, mocker
-    ) -> None:
-        """CodeLens carries tokens plus raw shell text for runtime expansion."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-
-        class MockDocument:
-            uri = "file:///test.sh"
-            source = 'qiime feature-table summarize --i-table "$TABLE"'
-            version = 1
-
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = MockDocument()
-        server.protocol._workspace = mock_workspace
-
-        code_lens_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_CODE_LENS]
-        code_lenses = code_lens_handler(
-            types.CodeLensParams(
-                text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
-            )
-        )
-
-        assert len(code_lenses) == 1
-        code_lens = code_lenses[0]
-        assert code_lens.command is not None
-        assert code_lens.command.title == "Run QIIME command"
-        assert code_lens.command.command == "q2lsp.runCommand"
-        assert code_lens.command.arguments == [
-            {
-                "uri": "file:///test.sh",
-                "commandText": 'qiime feature-table summarize --i-table "$TABLE"',
-                "tokens": [
-                    "qiime",
-                    "feature-table",
-                    "summarize",
-                    "--i-table",
-                    "$TABLE",
-                ],
-            }
-        ]
-
-    def test_completion_trigger_characters(
-        self, mock_hierarchy: CommandHierarchy
-    ) -> None:
-        """Trigger chars are [" ", "-"]."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-        fm = server.protocol.fm
-        completion_options = fm.feature_options[types.TEXT_DOCUMENT_COMPLETION]
-        assert completion_options.trigger_characters == [" ", "-"]
-
-    def test_completion_delegates_to_completion_handler(self, mocker) -> None:
-        """Completion closure delegates document, position, and catalog provider."""
-        hierarchy: CommandHierarchy = {
-            "qiime": {
-                "name": "qiime",
-                "help": "QIIME root help",
-                "builtins": [],
-                "feature-table": {
-                    "name": "feature-table",
-                    "short_description": "Feature table plugin",
-                },
-            }
-        }
-
-        def get_catalog() -> QiimeCatalog:
-            return QiimeCatalog.from_hierarchy(hierarchy)
-
-        server = server_mod.create_server(get_catalog=get_catalog)
-
-        class MockDocument:
-            uri = "file:///test.sh"
-            source = "qiime "
-            version = 1
-
-        document = MockDocument()
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = document
-        server.protocol._workspace = mock_workspace
-
-        expected = types.CompletionList(is_incomplete=False, items=[])
-        mock_handle_completion = mocker.patch.object(
-            server_mod,
-            "handle_completion",
-            autospec=True,
-            return_value=expected,
-        )
-
-        completion_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_COMPLETION]
-        params = types.CompletionParams(
-            text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
-            position=types.Position(line=0, character=6),
-        )
-
-        completion = completion_handler(params)
-
-        assert completion == expected
-        mock_handle_completion.assert_called_once_with(
-            document, params.position, get_catalog
-        )
-
-    def test_completion_and_hover_share_cached_catalog(self, mocker) -> None:
-        """A cached catalog provider is reused between completion and hover."""
-        hierarchy: CommandHierarchy = {
-            "qiime": {
-                "name": "qiime",
-                "help": "QIIME root help",
-                "builtins": [],
-                "feature-table": {
-                    "name": "feature-table",
-                    "short_description": "Feature table plugin",
-                },
-            }
-        }
-        calls = 0
-
-        def get_hierarchy() -> CommandHierarchy:
-            nonlocal calls
-            calls += 1
-            return hierarchy
-
-        get_catalog = make_catalog_provider(get_hierarchy)
-        server = server_mod.create_server(get_catalog=get_catalog)
-
-        class MockDocument:
-            uri = "file:///test.sh"
-            source = "qiime "
-            version = 1
-
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = MockDocument()
-        server.protocol._workspace = mock_workspace
-
-        completion_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_COMPLETION]
-        completion = completion_handler(
-            types.CompletionParams(
-                text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
-                position=types.Position(line=0, character=6),
-            )
-        )
-
-        assert [item.label for item in completion.items] == ["feature-table"]
-
-        hover_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_HOVER]
-        hover = hover_handler(
-            types.HoverParams(
-                text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
-                position=types.Position(line=0, character=2),
-            )
-        )
-
-        assert hover is not None
-        assert isinstance(hover.contents, types.MarkupContent)
-        assert "QIIME root help" in hover.contents.value
-        assert calls == 1
-
-    def test_completion_text_edit_replaces_partial_prefix_only(self, mocker) -> None:
-        """Completing "qiime fea" replaces only "fea" with the candidate."""
-        hierarchy: CommandHierarchy = {
-            "qiime": {
-                "name": "qiime",
-                "help": "QIIME root help",
-                "builtins": [],
-                "feature-table": {
-                    "name": "feature-table",
-                    "short_description": "Feature table plugin",
-                },
-            }
-        }
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(hierarchy)
-        )
-
-        class MockDocument:
-            uri = "file:///test.sh"
-            source = "qiime fea"
-            version = 1
-
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = MockDocument()
-        server.protocol._workspace = mock_workspace
-
-        completion_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_COMPLETION]
-        completion = completion_handler(
-            types.CompletionParams(
-                text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
-                position=types.Position(line=0, character=9),
-            )
-        )
-
-        assert len(completion.items) == 1
-        item = completion.items[0]
-        assert item.label == "feature-table"
-        assert item.text_edit is not None
-        assert isinstance(item.text_edit, types.TextEdit)
-        assert item.text_edit.new_text == "feature-table"
-        assert item.text_edit.range == types.Range(
-            start=types.Position(line=0, character=6),
-            end=types.Position(line=0, character=9),
-        )
-
-    def test_completion_returns_empty_list_on_handler_failure(self, mocker) -> None:
-        """Completion handler failures return the default empty list."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(
-                {"qiime": {"name": "qiime"}}
-            )
-        )
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.side_effect = RuntimeError("boom")
-        server.protocol._workspace = mock_workspace
-
-        completion_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_COMPLETION]
-        completion = completion_handler(
-            types.CompletionParams(
-                text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
-                position=types.Position(line=0, character=0),
-            )
-        )
-
-        assert completion == types.CompletionList(is_incomplete=False, items=[])
-
-    def test_registers_hover_feature(self, mock_hierarchy: CommandHierarchy) -> None:
-        """TEXT_DOCUMENT_HOVER is registered."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-        fm = server.protocol.fm
-        assert types.TEXT_DOCUMENT_HOVER in fm.features
-
-    @pytest.mark.parametrize(
-        ("source", "hover_token", "expected"),
-        [
-            (
-                "qiime feature-table summarize",
-                "feature-table",
-                "Feature table plugin help",
-            ),
-            (
-                "qiime feature-table summarize",
-                "summarize",
-                "Summarize action help",
-            ),
-            ("qiime info", "info", "Builtin info help"),
-        ],
+@pytest.fixture
+def server() -> LanguageServer:
+    catalog = QiimeCatalog.from_hierarchy({"qiime": {"feature-table": {}}})
+    server = create_server(
+        get_catalog=lambda: catalog, get_help=lambda _path: "Root help"
     )
-    def test_hover_handler_returns_catalog_help_for_command_tokens(
-        self,
-        mocker,
-        source: str,
-        hover_token: str,
-        expected: str,
-    ) -> None:
-        """Hover handler returns plugin, action, and builtin catalog help."""
-        hierarchy: CommandHierarchy = {
-            "qiime": {
-                "name": "qiime",
-                "help": "QIIME root help",
-                "builtins": ["info"],
-                "info": {
-                    "name": "info",
-                    "help": "Builtin info help",
-                    "type": "builtin",
-                },
-                "feature-table": {
-                    "name": "feature-table",
-                    "short_description": "Feature table plugin help",
-                    "summarize": {
-                        "name": "summarize",
-                        "description": "Summarize action help",
-                    },
-                },
-            }
-        }
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(hierarchy)
+    server.protocol._workspace = Workspace(None)
+    server.workspace.put_text_document(
+        types.TextDocumentItem(
+            uri="file:///test.sh",
+            language_id="shellscript",
+            version=1,
+            text="qiime feat",
         )
+    )
+    return server
 
-        class MockDocument:
-            uri = "file:///test.sh"
-            version = 1
 
-            def __init__(self, document_source: str) -> None:
-                self.source = document_source
-
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = MockDocument(source)
-        server.protocol._workspace = mock_workspace
-
-        hover_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_HOVER]
-        hover = hover_handler(
-            types.HoverParams(
-                text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
-                position=types.Position(
-                    line=0,
-                    character=source.index(hover_token) + 2,
-                ),
-            )
+def test_completion_routes_document_and_cursor(server: LanguageServer) -> None:
+    result = server.protocol.fm.features[types.TEXT_DOCUMENT_COMPLETION](
+        types.CompletionParams(
+            text_document=types.TextDocumentIdentifier("file:///test.sh"),
+            position=types.Position(0, 10),
         )
+    )
+    assert [item.label for item in result.items] == ["feature-table"]
+    assert result.items[0].text_edit == types.TextEdit(
+        range=types.Range(start=types.Position(0, 6), end=types.Position(0, 10)),
+        new_text="feature-table",
+    )
 
-        assert hover is not None
-        assert isinstance(hover.contents, types.MarkupContent)
-        assert expected in hover.contents.value
 
-    def test_hover_with_help_provider_does_not_build_catalog(self, mocker) -> None:
-        """Hover uses get_help without calling the catalog provider."""
-
-        def get_catalog() -> QiimeCatalog:
-            raise AssertionError("catalog should not be requested")
-
-        server = server_mod.create_server(
-            get_catalog=get_catalog,
-            get_help=lambda command_path: "Root help" if not command_path else None,
-        )
-
-        class MockDocument:
-            uri = "file:///test.sh"
-            source = "qiime"
-            version = 1
-
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = MockDocument()
-        server.protocol._workspace = mock_workspace
-
-        hover_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_HOVER]
-        params = types.HoverParams(
-            text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
-            position=types.Position(line=0, character=2),
-        )
-
-        hover = hover_handler(params)
-
-        assert hover is not None
-        assert isinstance(hover.contents, types.MarkupContent)
-        assert "Root help" in hover.contents.value
-
-    def test_create_server_accepts_catalog_provider_without_hierarchy(
-        self, mocker
-    ) -> None:
-        """create_server accepts a catalog provider and does not call hierarchy."""
-        catalog = QiimeCatalog.from_hierarchy(
-            {
-                "qiime": {
-                    "name": "qiime",
-                    "help": "QIIME root help",
-                    "builtins": [],
-                }
-            }
-        )
-        server = server_mod.create_server(get_catalog=lambda: catalog)
-
-        class MockDocument:
-            uri = "file:///test.sh"
-            source = "qiime "
-            version = 1
-
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = MockDocument()
-        server.protocol._workspace = mock_workspace
-
-        completion_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_COMPLETION]
-        completion = completion_handler(
+@pytest.mark.parametrize(
+    ("feature", "params", "expected"),
+    [
+        (
+            types.TEXT_DOCUMENT_COMPLETION,
             types.CompletionParams(
-                text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
-                position=types.Position(line=0, character=6),
-            )
-        )
-
-        assert completion is not None
-        assert completion.items == []
-
-        hover_handler = server.protocol.fm.features[types.TEXT_DOCUMENT_HOVER]
-        hover = hover_handler(
+                text_document=types.TextDocumentIdentifier("file:///test.sh"),
+                position=types.Position(0, 0),
+            ),
+            types.CompletionList(is_incomplete=False, items=[]),
+        ),
+        (
+            types.TEXT_DOCUMENT_HOVER,
             types.HoverParams(
-                text_document=types.TextDocumentIdentifier(uri="file:///test.sh"),
-                position=types.Position(line=0, character=2),
-            )
+                text_document=types.TextDocumentIdentifier("file:///test.sh"),
+                position=types.Position(0, 0),
+            ),
+            None,
+        ),
+        (
+            types.TEXT_DOCUMENT_CODE_LENS,
+            types.CodeLensParams(
+                text_document=types.TextDocumentIdentifier("file:///test.sh")
+            ),
+            [],
+        ),
+    ],
+)
+def test_request_failures_return_feature_defaults(
+    server: LanguageServer,
+    monkeypatch: pytest.MonkeyPatch,
+    feature: str,
+    params: types.CompletionParams | types.HoverParams | types.CodeLensParams,
+    expected: types.CompletionList | list[types.CodeLens] | None,
+) -> None:
+    def fail_document(_uri: str) -> None:
+        raise RuntimeError("workspace unavailable")
+
+    monkeypatch.setattr(server.workspace, "get_text_document", fail_document)
+    assert server.protocol.fm.features[feature](params) == expected
+
+
+def test_hover_uses_help_without_loading_catalog() -> None:
+    def fail_catalog() -> QiimeCatalog:
+        raise AssertionError("Hover must not load the completion catalog")
+
+    server = create_server(
+        get_catalog=fail_catalog, get_help=lambda path: f"Help for {path}"
+    )
+    server.protocol._workspace = Workspace(None)
+    server.workspace.put_text_document(
+        types.TextDocumentItem(
+            uri="file:///test.sh",
+            language_id="shellscript",
+            version=1,
+            text="qiime info",
         )
-
-        assert hover is not None
-        assert isinstance(hover.contents, types.MarkupContent)
-        assert "QIIME root help" in hover.contents.value
-
-    def test_registers_did_open(self, mock_hierarchy: CommandHierarchy) -> None:
-        """TEXT_DOCUMENT_DID_OPEN is registered."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
+    )
+    result = server.protocol.fm.features[types.TEXT_DOCUMENT_HOVER](
+        types.HoverParams(
+            text_document=types.TextDocumentIdentifier("file:///test.sh"),
+            position=types.Position(0, 8),
         )
-        fm = server.protocol.fm
-        assert types.TEXT_DOCUMENT_DID_OPEN in fm.features
-
-    def test_registers_did_change(self, mock_hierarchy: CommandHierarchy) -> None:
-        """TEXT_DOCUMENT_DID_CHANGE is registered."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-        fm = server.protocol.fm
-        assert types.TEXT_DOCUMENT_DID_CHANGE in fm.features
-
-    def test_registers_did_close(self, mock_hierarchy: CommandHierarchy) -> None:
-        """TEXT_DOCUMENT_DID_CLOSE is registered."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-        fm = server.protocol.fm
-        assert types.TEXT_DOCUMENT_DID_CLOSE in fm.features
-
-    @pytest.mark.asyncio
-    async def test_did_close_calls_text_document_publish_diagnostics(
-        self, mock_hierarchy: CommandHierarchy, mocker
-    ) -> None:
-        """did_close publishes empty diagnostics via text_document_publish_diagnostics."""
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-
-        # Mock the text_document_publish_diagnostics method
-        mock_publish = mocker.patch.object(
-            server,
-            "text_document_publish_diagnostics",
-            autospec=True,
-        )
-
-        # Get the did_close handler from the feature manager
-        fm = server.protocol.fm
-        did_close_handler = fm.features[types.TEXT_DOCUMENT_DID_CLOSE]
-
-        # Trigger didClose
-        uri = "file:///test.sh"
-        params = types.DidCloseTextDocumentParams(
-            text_document=types.TextDocumentIdentifier(uri=uri)
-        )
-
-        # Call the handler
-        await did_close_handler(params)
-
-        # Assert text_document_publish_diagnostics was called with empty list
-        mock_publish.assert_called_once()
-        call_args = mock_publish.call_args
-        assert isinstance(call_args[0][0], types.PublishDiagnosticsParams)
-        assert call_args[0][0].uri == uri
-        assert call_args[0][0].diagnostics == []
-
-    @pytest.mark.asyncio
-    async def test_did_close_cancels_pending_diagnostics(
-        self, mock_hierarchy: CommandHierarchy, mocker
-    ) -> None:
-        """did_close prevents debounced did_open/did_change diagnostics from publishing."""
-        debounce_ms = 20
-        server = server_mod.create_server(
-            get_catalog=lambda: QiimeCatalog.from_hierarchy(mock_hierarchy),
-            debounce_ms=debounce_ms,
-        )
-
-        class MockDocument:
-            uri = "file:///test.sh"
-            source = "qiime not-a-plugin"
-            version = 2
-
-        mock_workspace = mocker.Mock()
-        mock_workspace.get_text_document.return_value = MockDocument()
-        server.protocol._workspace = mock_workspace
-        mock_publish = mocker.patch.object(
-            server,
-            "text_document_publish_diagnostics",
-            autospec=True,
-        )
-
-        fm = server.protocol.fm
-        uri = "file:///test.sh"
-        await fm.features[types.TEXT_DOCUMENT_DID_OPEN](
-            types.DidOpenTextDocumentParams(
-                text_document=types.TextDocumentItem(
-                    uri=uri,
-                    language_id="shellscript",
-                    version=1,
-                    text="qiime not-a-plugin",
-                )
-            )
-        )
-        await fm.features[types.TEXT_DOCUMENT_DID_CHANGE](
-            types.DidChangeTextDocumentParams(
-                text_document=types.VersionedTextDocumentIdentifier(uri=uri, version=2),
-                content_changes=[],
-            )
-        )
-        await fm.features[types.TEXT_DOCUMENT_DID_CLOSE](
-            types.DidCloseTextDocumentParams(
-                text_document=types.TextDocumentIdentifier(uri=uri)
-            )
-        )
-
-        assert mock_publish.call_count == 1
-        clearing_publish = mock_publish.call_args.args[0]
-        assert clearing_publish.diagnostics == []
-
-        await asyncio.sleep((debounce_ms / 1000) * 2)
-
-        assert mock_publish.call_count == 1
+    )
+    assert result == types.Hover(
+        contents=types.MarkupContent(
+            kind=types.MarkupKind.Markdown, value="```\nHelp for ['info']\n```"
+        ),
+    )
