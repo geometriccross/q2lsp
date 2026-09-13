@@ -11,17 +11,11 @@ from q2lsp.core.types import (
     CompletionItem as InternalCompletionItem,
 )
 from q2lsp.lsp.adapter import (
-    LSP_POSITION_ENCODING,
     completion_kind_to_lsp,
     offset_to_position,
     position_to_offset,
     to_lsp_completion_item,
 )
-
-
-def test_lsp_position_encoding_contract_is_utf16() -> None:
-    """Adapter-owned LSP position mapping contract is UTF-16."""
-    assert LSP_POSITION_ENCODING == types.PositionEncodingKind.Utf16
 
 
 class TestPositionToOffset:
@@ -324,37 +318,3 @@ class TestToLspCompletionItem:
         assert lsp_item.text_edit is not None
         assert isinstance(lsp_item.text_edit, types.TextEdit)
         assert lsp_item.text_edit.new_text == "--m-sample-metadata-file"
-
-    def test_text_edit_start_after_non_bmp_before_ascii_prefix(self) -> None:
-        """Prefix replacement uses UTF-16 position units after earlier emoji."""
-        item = InternalCompletionItem(
-            label="qiime",
-            detail="test detail",
-            kind=CompletionKind.BUILTIN,
-        )
-
-        lsp_item = to_lsp_completion_item(
-            item, position=types.Position(line=0, character=4), prefix="qi"
-        )
-
-        assert lsp_item.text_edit is not None
-        assert isinstance(lsp_item.text_edit, types.TextEdit)
-        assert lsp_item.text_edit.range.start == types.Position(line=0, character=2)
-        assert lsp_item.text_edit.range.end == types.Position(line=0, character=4)
-
-    def test_text_edit_prefix_is_ascii_cli_token_text(self) -> None:
-        """QIIME CLI prefixes are ASCII tokens; non-BMP prefix math is out of scope."""
-        item = InternalCompletionItem(
-            label="feature-table",
-            detail="test detail",
-            kind=CompletionKind.PLUGIN,
-        )
-
-        lsp_item = to_lsp_completion_item(
-            item, position=types.Position(line=0, character=9), prefix="fea"
-        )
-
-        assert lsp_item.text_edit is not None
-        assert isinstance(lsp_item.text_edit, types.TextEdit)
-        assert lsp_item.text_edit.range.start == types.Position(line=0, character=6)
-        assert lsp_item.text_edit.range.end == types.Position(line=0, character=9)

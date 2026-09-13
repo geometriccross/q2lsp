@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import dataclasses
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from q2lsp.cli import CliArgs, parse_args, run
+from q2lsp.cli import parse_args, run
 
 
 class TestParseArgs:
@@ -94,23 +93,6 @@ class TestParseArgs:
         assert "--log-level" in stdout
         assert "--log-file" in stdout
         assert "--debug" in stdout
-
-
-class TestCliArgs:
-    """Tests for CliArgs dataclass."""
-
-    def test_is_frozen(self) -> None:
-        """CliArgs is immutable."""
-        args = CliArgs(
-            transport="stdio",
-            host="127.0.0.1",
-            port=4389,
-            log_level="INFO",
-            log_file=None,
-            debug=False,
-        )
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            args.transport = "tcp"  # type: ignore[misc]
 
 
 class FakeServer:

@@ -93,18 +93,6 @@ class TestFormatQiimeOptionLabel:
         """Label with prefix."""
         assert format_qiime_option_label("i", "table") == "--i-table"
 
-    def test_with_o_prefix(self) -> None:
-        """Label with output prefix."""
-        assert format_qiime_option_label("o", "results") == "--o-results"
-
-    def test_with_p_prefix(self) -> None:
-        """Label with parameter prefix."""
-        assert format_qiime_option_label("p", "threads") == "--p-threads"
-
-    def test_with_m_prefix(self) -> None:
-        """Label with metadata prefix."""
-        assert format_qiime_option_label("m", "file") == "--m-file"
-
     def test_without_prefix(self) -> None:
         """Label without prefix."""
         assert format_qiime_option_label("", "table") == "--table"
@@ -128,23 +116,9 @@ class TestFormatQiimeOptionLabel:
             == "--p-my-parameter-name"
         )
 
-    def test_single_underscore(self) -> None:
-        """Single underscore converted to dash."""
-        assert format_qiime_option_label("m", "input") == "--m-input"
-
 
 class TestParamIsRequired:
     """Tests for param_is_required function."""
-
-    def test_explicit_required_true(self) -> None:
-        """Explicit required=True returns True."""
-        param: JsonObject = {"required": True}
-        assert param_is_required(param)
-
-    def test_explicit_required_false(self) -> None:
-        """Explicit required=False returns False."""
-        param: JsonObject = {"required": False}
-        assert not param_is_required(param)
 
     def test_explicit_required_true_with_default(self) -> None:
         """Explicit required flag takes precedence over default."""

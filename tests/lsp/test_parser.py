@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from tests.helpers.cursor import extract_cursor_offset
-from tests.helpers.completions import get_completion_context
-
 from q2lsp.lsp.parser import (
     merge_line_continuations,
     tokenize_shell_line,
     find_qiime_commands,
     command_at_position,
 )
-from q2lsp.lsp.types import CompletionMode
 
 
 class TestMergeLineContinuations:
@@ -264,72 +260,3 @@ class TestCommandAtPosition:
     def test_cursor_just_after_command_before_separator_is_inside_command(self) -> None:
         cmds = find_qiime_commands("qiime info ; echo hi")
         assert command_at_position(cmds, len("qiime info")) is not None
-
-
-class TestGetCompletionContext:
-    def test_mode_root_after_qiime(self) -> None:
-        text, offset = extract_cursor_offset(text_with_cursor="qiime <CURSOR>")
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.ROOT
-        assert ctx.token_index == 1
-
-    def test_mode_root_partial_plugin(self) -> None:
-        text, offset = extract_cursor_offset(text_with_cursor="qiime inf<CURSOR>")
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.ROOT
-        assert ctx.prefix == "inf"
-
-    def test_mode_plugin_after_plugin(self) -> None:
-        text, offset = extract_cursor_offset(text_with_cursor="qiime info <CURSOR>")
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.PLUGIN
-        assert ctx.token_index == 2
-
-    def test_mode_plugin_at_token2(self) -> None:
-        # Token 2 (action position) should be "plugin" mode
-        text, offset = extract_cursor_offset(
-            text_with_cursor="qiime info --hel<CURSOR>p"
-        )
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.PLUGIN
-        assert ctx.token_index == 2
-
-    def test_mode_parameter(self) -> None:
-        # "qiime info action --help" has 4 tokens
-        # token 3 (--help) should be parameter mode
-        text, offset = extract_cursor_offset(
-            text_with_cursor="qiime info action --help<CURSOR>"
-        )
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.PARAMETER
-
-    def test_mode_none_outside_qiime(self) -> None:
-        text, offset = extract_cursor_offset(text_with_cursor="echo hel<CURSOR>lo")
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.NONE
-
-    def test_mode_root_after_wrapped_qiime(self) -> None:
-        text, offset = extract_cursor_offset(text_with_cursor="run_cmd qiime <CURSOR>")
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.ROOT
-        assert ctx.token_index == 1
-        assert ctx.command is not None
-        assert [token.text for token in ctx.command.tokens] == ["qiime"]
-
-    def test_mode_none_on_qiime_token(self) -> None:
-        text, offset = extract_cursor_offset(text_with_cursor="qii<CURSOR>me info")
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.NONE  # Cursor on "qiime" itself
-
-    def test_with_line_continuation(self) -> None:
-        text, offset = extract_cursor_offset(text_with_cursor="qiime \\\ninfo <CURSOR>")
-        # After merging: "qiime info " - cursor at position after "info"
-        ctx = get_completion_context(text, offset)
-        assert ctx.mode == CompletionMode.PLUGIN
-
-    def test_prefix_extraction(self) -> None:
-        text, offset = extract_cursor_offset(text_with_cursor="qiime inf<CURSOR>")
-        ctx = get_completion_context(text, offset)
-        assert ctx.prefix == "inf"
-        assert ctx.current_token is not None
-        assert ctx.current_token.text == "inf"

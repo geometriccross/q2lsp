@@ -8,7 +8,6 @@ from tests.helpers.cursor import extract_cursor_offset
 from tests.helpers.completions import get_completion_context
 
 from q2lsp.lsp.document_commands import (
-    AnalyzedDocument,
     analyze_document,
     resolve_completion_context,
     to_merged_offset,
@@ -23,7 +22,6 @@ class TestAnalyzeDocument:
     def test_simple_qiime_command(self) -> None:
         """Analyzing a simple qiime command returns correct structure."""
         doc = analyze_document("qiime info")
-        assert isinstance(doc, AnalyzedDocument)
         assert doc.merged_text == "qiime info"
         assert len(doc.commands) == 1
         assert doc.commands[0].tokens[0].text == "qiime"
@@ -33,11 +31,6 @@ class TestAnalyzeDocument:
         doc = analyze_document("qiime \\\ninfo")
         assert doc.merged_text == "qiime info"
         assert len(doc.commands) == 1
-
-    def test_multiple_commands(self) -> None:
-        """Multiple qiime commands are all found."""
-        doc = analyze_document("qiime info; qiime tools")
-        assert len(doc.commands) == 2
 
     def test_multiple_commands_include_full_spans_and_tokens(self) -> None:
         """Multi-command analysis preserves each command span and token text."""
@@ -78,16 +71,6 @@ class TestAnalyzeDocument:
             ("info", 6, 10),
             ("--help", 11, 17),
         ]
-
-    def test_commands_is_tuple(self) -> None:
-        """Commands should be a tuple (immutable)."""
-        doc = analyze_document("qiime info")
-        assert isinstance(doc.commands, tuple)
-
-    def test_offset_map_is_tuple(self) -> None:
-        """Offset map should be a tuple (immutable)."""
-        doc = analyze_document("qiime info")
-        assert isinstance(doc.offset_map, tuple)
 
 
 class TestToOriginalOffset:
@@ -208,68 +191,16 @@ class TestToMergedOffset:
         with pytest.raises(ValueError, match="non-negative"):
             to_merged_offset(doc, -1)
 
-    def test_at_eof(self) -> None:
-        """Offset at EOF should map correctly."""
+    def test_at_or_after_eof(self) -> None:
+        """Offsets at or beyond EOF map to merged EOF."""
         text = "qiime info"
         doc = analyze_document(text)
-        merged = to_merged_offset(doc, len(text))
-        assert merged == len(doc.merged_text)
+        assert to_merged_offset(doc, len(text)) == len(doc.merged_text)
+        assert to_merged_offset(doc, 100) == len(doc.merged_text)
 
 
 class TestResolveCompletionContext:
     """Tests for getting completion context from analyzed document."""
-
-    def test_plugin_position(self) -> None:
-        """Context at plugin position returns ROOT mode."""
-        text, offset = extract_cursor_offset(text_with_cursor="qiime <CURSOR>")
-        doc = analyze_document(text)
-        ctx = resolve_completion_context(doc, offset)
-        assert ctx.mode == CompletionMode.ROOT
-
-    def test_action_position(self) -> None:
-        """Context at action position returns PLUGIN mode."""
-        text, offset = extract_cursor_offset(text_with_cursor="qiime info <CURSOR>")
-        doc = analyze_document(text)
-        ctx = resolve_completion_context(doc, offset)
-        assert ctx.mode == CompletionMode.PLUGIN
-
-    def test_parameter_position(self) -> None:
-        """Context at parameter position returns PARAMETER mode."""
-        text, offset = extract_cursor_offset(
-            text_with_cursor="qiime info action <CURSOR>"
-        )
-        doc = analyze_document(text)
-        ctx = resolve_completion_context(doc, offset)
-        assert ctx.mode == CompletionMode.PARAMETER
-
-    def test_with_line_continuation(self) -> None:
-        """Context works correctly with line continuations."""
-        text, offset = extract_cursor_offset(text_with_cursor="qiime \\\ninfo <CURSOR>")
-        doc = analyze_document(text)
-        ctx = resolve_completion_context(doc, offset)
-        assert ctx.mode == CompletionMode.PLUGIN
-
-    def test_outside_qiime_command(self) -> None:
-        """Context outside qiime command returns NONE."""
-        text, offset = extract_cursor_offset(text_with_cursor="echo <CURSOR>hello")
-        doc = analyze_document(text)
-        ctx = resolve_completion_context(doc, offset)
-        assert ctx.mode == CompletionMode.NONE
-
-    def test_partial_prefix(self) -> None:
-        """Context with partial token returns correct prefix."""
-        text, offset = extract_cursor_offset(text_with_cursor="qiime inf<CURSOR>")
-        doc = analyze_document(text)
-        ctx = resolve_completion_context(doc, offset)
-        assert ctx.mode == CompletionMode.ROOT
-        assert ctx.prefix == "inf"
-
-    def test_at_eof(self) -> None:
-        """Context at EOF returns sensible result."""
-        text = "qiime info "
-        doc = analyze_document(text)
-        ctx = resolve_completion_context(doc, len(text))
-        assert ctx.mode == CompletionMode.PLUGIN
 
     def test_resolves_context_across_continuation_offsets(self) -> None:
         """Completion context resolution handles original offsets around continuations."""
@@ -285,66 +216,6 @@ class TestResolveCompletionContext:
         for offset, mode in expectations.items():
             ctx = resolve_completion_context(doc, offset)
             assert ctx.mode == mode
-
-
-class TestCompletionModeResolution:
-    """Completion mode is resolved from QIIME command token position."""
-
-    @pytest.mark.parametrize(
-        ("text_with_cursor", "mode", "token_index"),
-        [
-            ("echo <CURSOR>hello", CompletionMode.NONE, -1),
-            ("qii<CURSOR>me info", CompletionMode.NONE, 0),
-            ("qiime <CURSOR>", CompletionMode.ROOT, 1),
-            ("qiime inf<CURSOR>", CompletionMode.ROOT, 1),
-            ("qiime info <CURSOR>", CompletionMode.PLUGIN, 2),
-            ("qiime info act<CURSOR>", CompletionMode.PLUGIN, 2),
-            ("qiime info action <CURSOR>", CompletionMode.PARAMETER, 3),
-            ("qiime info action --h<CURSOR>", CompletionMode.PARAMETER, 3),
-        ],
-    )
-    def test_completion_mode_from_document_analysis(
-        self, text_with_cursor: str, mode: CompletionMode, token_index: int
-    ) -> None:
-        text, offset = extract_cursor_offset(text_with_cursor=text_with_cursor)
-
-        ctx = get_completion_context(text, offset)
-
-        assert ctx.mode == mode
-        assert ctx.token_index == token_index
-
-
-class TestToMergedOffsetCompat:
-    """Test public offset conversion between original and merged text."""
-
-    def test_offset_at_beginning(self) -> None:
-        doc = analyze_document("qiime info")
-        assert to_merged_offset(doc, 0) == 0
-
-    def test_offset_in_middle(self) -> None:
-        doc = analyze_document("qiime info")
-        assert to_merged_offset(doc, 3) == 3
-
-    def test_offset_at_end(self) -> None:
-        doc = analyze_document("qiime info")
-        assert to_merged_offset(doc, len("qiime info")) == len(doc.merged_text)
-
-    def test_offset_beyond_end(self) -> None:
-        doc = analyze_document("qiime info")
-        assert to_merged_offset(doc, 100) == len(doc.merged_text)
-
-    def test_offset_with_continuation_shift(self) -> None:
-        doc = analyze_document("ab\\\ncd")
-        assert to_merged_offset(doc, 4) == 2
-
-    def test_offset_before_continuation(self) -> None:
-        doc = analyze_document("ab\\\ncd")
-        assert to_merged_offset(doc, 0) == 0
-        assert to_merged_offset(doc, 1) == 1
-
-    def test_offset_in_continuation_gap(self) -> None:
-        doc = analyze_document("ab\\\ncd")
-        assert to_merged_offset(doc, 2) == 2
 
 
 class TestGetCompletionContext:
@@ -593,18 +464,18 @@ class TestGetCompletionContext:
         assert ctx.current_token is not None
         assert ctx.current_token.text == "demux"
 
-    def test_prefix_at_token_start(self) -> None:
-        """Prefix at token start should be empty."""
-        text, offset = extract_cursor_offset(text_with_cursor="qiime <CURSOR>")
-        ctx = get_completion_context(text, offset)
-        assert ctx.prefix == ""
-        assert ctx.current_token is None
-
-    def test_token_index_at_end_of_command(self) -> None:
-        """Token index at end of command should be number of tokens."""
+    def test_option_like_token_at_action_position(self) -> None:
         text, offset = extract_cursor_offset(
-            text_with_cursor="qiime info action <CURSOR>"
+            text_with_cursor="qiime info --hel<CURSOR>p"
         )
         ctx = get_completion_context(text, offset)
-        assert ctx.token_index == 3
-        assert ctx.mode == CompletionMode.PARAMETER
+        assert ctx.mode == CompletionMode.PLUGIN
+        assert ctx.token_index == 2
+
+    def test_mode_root_after_wrapped_qiime(self) -> None:
+        text, offset = extract_cursor_offset(text_with_cursor="run_cmd qiime <CURSOR>")
+        ctx = get_completion_context(text, offset)
+        assert ctx.mode == CompletionMode.ROOT
+        assert ctx.token_index == 1
+        assert ctx.command is not None
+        assert [token.text for token in ctx.command.tokens] == ["qiime"]

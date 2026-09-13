@@ -42,20 +42,6 @@ async def lsp_client(
     assert lsp_server_process.stdin is not None
     assert lsp_server_process.stdout is not None
 
-    # Create stream reader/writer from process pipes
-    reader = lsp_server_process.stdout
-    writer = lsp_server_process.stdin
-
-    # Wrap stdin in a StreamWriter-like interface
-    class StdinWriter:
-        def __init__(self, stdin: asyncio.StreamWriter) -> None:
-            self._stdin = stdin
-
-        def write(self, data: bytes) -> None:
-            self._stdin.write(data)
-
-        async def drain(self) -> None:
-            await self._stdin.drain()
-
-    client = LspTestClient(reader=reader, writer=StdinWriter(writer))  # type: ignore[arg-type]
-    yield client
+    yield LspTestClient(
+        reader=lsp_server_process.stdout, writer=lsp_server_process.stdin
+    )

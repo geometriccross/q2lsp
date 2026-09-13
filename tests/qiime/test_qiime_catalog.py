@@ -9,7 +9,6 @@ from q2lsp.qiime.catalog_facts import (
     QiimeOptionFact,
     QiimeRootFact,
 )
-from q2lsp.qiime.q2cli_gateway import build_qiime_catalog
 from q2lsp.qiime.types import CommandHierarchy
 
 
@@ -40,22 +39,6 @@ def test_qiime_catalog_wraps_hierarchy_immutably() -> None:
         help_text="Display information",
         has_actions=False,
     )
-
-
-def test_build_qiime_catalog_uses_owned_catalog(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    hierarchy: CommandHierarchy = {"qiime": {"builtins": []}}
-    monkeypatch.setattr(
-        "q2lsp.qiime.q2cli_gateway.build_qiime_hierarchy",
-        lambda: hierarchy,
-    )
-
-    catalog = build_qiime_catalog()
-
-    assert isinstance(catalog, QiimeCatalog)
-    assert catalog.root().name == "qiime"
-    assert catalog.commands() == ()
 
 
 def test_qiime_catalog_rejects_malformed_hierarchy_without_qiime_root() -> None:

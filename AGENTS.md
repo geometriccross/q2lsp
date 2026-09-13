@@ -12,7 +12,7 @@ This file is the onboarding index and working agreement for this repo. Keep it c
 - `src/q2lsp/lsp/` handles LSP server protocol, request routing, and editor-facing behavior.
 - `src/q2lsp/qiime/` handles QIIME 2 command discovery, execution helpers, and domain-specific data.
 - LSP layer MAY depend on qiime helpers; qiime helpers MUST NOT depend on LSP.
-- How to verify: `pixi run -e dev pyright`.
+- How to verify: review import direction during code review. Pyright checks types, not architectural boundaries.
 
 ## Local Dev (Pixi)
 Pixi is the supported local environment manager. Use the dev environment for all checks.

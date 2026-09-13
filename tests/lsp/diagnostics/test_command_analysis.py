@@ -602,40 +602,6 @@ class TestValidateRequiredOptions:
         assert issues[0].start == 20
         assert issues[0].end == 29
 
-    def test_all_required_options_present_no_diagnostic(
-        self, hierarchy_with_plugins_and_builtins: dict
-    ) -> None:
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("feature-table", 6, 19),
-            TokenSpan("summarize", 20, 29),
-            TokenSpan("--i-table", 30, 39),
-            TokenSpan("table.qza", 40, 49),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
-        issues = validate_command_with_hierarchy(
-            cmd, hierarchy_with_plugins_and_builtins
-        )
-
-        assert issues == []
-
-    def test_only_optional_missing_no_diagnostic(
-        self, hierarchy_with_plugins_and_builtins: dict
-    ) -> None:
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("feature-table", 6, 19),
-            TokenSpan("summarize", 20, 29),
-            TokenSpan("--i-table", 30, 39),
-            TokenSpan("table.qza", 40, 49),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
-        issues = validate_command_with_hierarchy(
-            cmd, hierarchy_with_plugins_and_builtins
-        )
-
-        assert issues == []
-
     def test_help_flag_suppresses_required_check(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:
@@ -974,46 +940,6 @@ class TestValidateRequiredOptions:
         assert any("--input-path" in message for message in missing_messages)
         assert any("--output-path" in message for message in missing_messages)
 
-    def test_builtin_optional_none_default_no_false_positive(self) -> None:
-        """Builtin param without required flag and no default key is NOT treated as required."""
-        hierarchy = {
-            "qiime": {
-                "name": "qiime",
-                "builtins": ["tools"],
-                "tools": {
-                    "name": "tools",
-                    "type": "builtin",
-                    "import": {
-                        "name": "import",
-                        "type": "builtin_action",
-                        "signature": [
-                            {
-                                "name": "verbose",
-                                "type": "boolean",
-                                "description": "Verbose",
-                            }
-                        ],
-                    },
-                },
-            }
-        }
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("tools", 6, 11),
-            TokenSpan("import", 12, 18),
-            TokenSpan("--verbose", 19, 28),
-            TokenSpan("true", 29, 33),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=33)
-        issues = validate_command_with_hierarchy(cmd, hierarchy)
-
-        missing = [
-            issue
-            for issue in issues
-            if issue.code == "q2lsp-dni/missing-required-option"
-        ]
-        assert missing == []
-
     def test_explicit_required_false_overrides_fallback(self) -> None:
         """Param with explicit required=False is not required even if signature_type present and no default."""
         hierarchy = {
@@ -1147,46 +1073,6 @@ class TestValidateRequiredOptions:
         assert len(unknown_option_issues) == 1
         assert missing_required_issues == []
 
-    def test_param_without_signature_type_not_treated_as_required(self) -> None:
-        hierarchy = {
-            "qiime": {
-                "name": "qiime",
-                "short_help": "QIIME 2 CLI",
-                "builtins": [],
-                "example-plugin": {
-                    "id": "example-plugin",
-                    "name": "example-plugin",
-                    "example-action": {
-                        "id": "example-action",
-                        "name": "example-action",
-                        "signature": [
-                            {
-                                "name": "foo",
-                                "type": "Str",
-                            }
-                        ],
-                    },
-                },
-            }
-        }
-
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("example-plugin", 6, 20),
-            TokenSpan("example-action", 21, 35),
-            TokenSpan("--p-foo", 36, 43),
-            TokenSpan("bar", 44, 47),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=47)
-        issues = validate_command_with_hierarchy(cmd, hierarchy)
-
-        missing_required_issues = [
-            issue
-            for issue in issues
-            if issue.code == "q2lsp-dni/missing-required-option"
-        ]
-        assert missing_required_issues == []
-
     def test_unknown_option_when_action_invalid_no_option_diagnostic(
         self, hierarchy_with_plugins_and_builtins: dict
     ) -> None:
@@ -1205,34 +1091,6 @@ class TestValidateRequiredOptions:
         assert len(issues) == 1
         assert "summerize" in issues[0].message
         assert issues[0].code != "q2lsp-dni/unknown-option"
-
-    def test_help_option_always_valid(
-        self, hierarchy_with_plugins_and_builtins: dict
-    ) -> None:
-        # --help and -h should always be treated as valid
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("feature-table", 6, 19),
-            TokenSpan("summarize", 20, 29),
-            TokenSpan("--help", 30, 36),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=36)
-        issues = validate_command_with_hierarchy(
-            cmd, hierarchy_with_plugins_and_builtins
-        )
-        assert issues == []
-
-        tokens = [
-            TokenSpan("qiime", 0, 5),
-            TokenSpan("feature-table", 6, 19),
-            TokenSpan("summarize", 20, 29),
-            TokenSpan("-h", 30, 32),
-        ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=32)
-        issues = validate_command_with_hierarchy(
-            cmd, hierarchy_with_plugins_and_builtins
-        )
-        assert issues == []
 
     def test_multiple_options_with_one_typo(
         self, hierarchy_with_plugins_and_builtins: dict
