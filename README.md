@@ -25,7 +25,8 @@ pip install q2lsp
 
 ## Development
 
-This repository uses Pixi for local development.
+This repository uses Pixi for local development. See [LSP architecture](docs/architecture.md)
+for module responsibilities, data flow, and how to add features.
 
 ```bash
 pixi run -e dev pytest

@@ -9,10 +9,11 @@ This file is the onboarding index and working agreement for this repo. Keep it c
 - `extensions/vscode-q2lsp/README.md` VS Code extension docs; the extension lives in `extensions/vscode-q2lsp/`.
 
 ## Architecture Boundaries
-- `src/q2lsp/lsp/` handles LSP server protocol, request routing, and editor-facing behavior.
-- `src/q2lsp/qiime/` handles QIIME 2 command discovery, execution helpers, and domain-specific data.
-- LSP layer MAY depend on qiime helpers; qiime helpers MUST NOT depend on LSP.
-- How to verify: review import direction during code review. Pyright checks types, not architectural boundaries.
+- `src/q2lsp/core/` owns immutable document analysis, completion rules, and diagnostics. It MAY use catalog facts/pure qiime helpers, but MUST NOT import LSP libraries or q2cli/click.
+- `src/q2lsp/lsp/` owns protocol registration, response conversion, and per-server document/diagnostic lifecycle.
+- `src/q2lsp/qiime/` owns QIIME 2 discovery, help, catalog facts, and option conventions; it MUST NOT depend on core or LSP.
+- See `docs/architecture.md` for data flow, coordinate contracts, and feature extension points.
+- How to verify: `tests/core/test_import_boundaries.py` and import-direction review. Pyright checks types, not architectural boundaries.
 
 ## Local Dev (Pixi)
 Pixi is the supported local environment manager. Use the dev environment for all checks.
