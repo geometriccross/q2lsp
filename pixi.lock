@@ -6532,7 +6532,7 @@ packages:
 - pypi: ./
   name: q2lsp
   version: 4.0.0
-  sha256: c4874b883c06428cf88ab6dd6dd8d6eab4a0d75328701552d14db839c98437a8
+  sha256: a21264758e6d2ff2a700c638df54d86300025e1beb1365adce511b301c2eadcd
   requires_dist:
   - returns>=0.26.0,<0.27
   - pygls>=2.0.0,<3

@@ -24,7 +24,6 @@ pixi run -e dev pytest
 pixi run -e dev ruff check .
 pixi run -e dev ruff format .
 pixi run -e dev pyright
-pixi run -e dev git-hooks-install
 ```
 
 ## Working Agreements
@@ -78,73 +77,3 @@ qiime2 ref: https://amplicon-docs.qiime2.org/en/stable/
 
 ### click
 click ref: https://click.palletsprojects.com/en/stable/
-
-## Project Structure (generated)
-Snapshot for navigation only; do not edit between the markers. Regenerate using `pixi run -e dev agents-structure` (or `pixi run -e dev agents-structure-check`). Fallback: `python scripts/gen_project_structure.py` (or `python scripts/gen_project_structure.py --check`).
-<!-- BEGIN GENERATED: PROJECT_STRUCTURE -->
-```
-<Project Root>
-├── extensions/
-│   └── vscode-q2lsp/
-│       ├── .gitignore
-│       ├── .npmrc
-│       ├── .vscode-test.mjs
-│       ├── .vscodeignore
-│       ├── CHANGELOG.md
-│       ├── eslint.config.mjs
-│       ├── LICENSE
-│       ├── media/
-│       │   ├── setup-environment.md
-│       │   ├── setup-finish.md
-│       │   └── setup-server.md
-│       ├── package.json
-│       ├── pnpm-lock.yaml
-│       ├── README.md
-│       ├── src/
-│       │   ├── client.ts
-│       │   ├── config.ts
-│       │   ├── diagnosis.ts
-│       │   ├── extension.ts
-│       │   ├── interpreter.ts
-│       │   ├── interpreter_resolver.ts
-│       │   ├── interpreterMessages.ts
-│       │   ├── interpreterPath.ts
-│       │   ├── interpreterSources.ts
-│       │   ├── runCommand.ts
-│       │   ├── setupWizard/
-│       │   └── test/
-│       │       ├── client.test.ts
-│       │       ├── config.test.ts
-│       │       ├── diagnosis.test.ts
-│       │       ├── extension.test.ts
-│       │       ├── interpreter.test.ts
-│       │       ├── interpreter_resolver.test.ts
-│       │       ├── interpreterMessages.test.ts
-│       │       ├── interpreterPath.test.ts
-│       │       ├── interpreterSources.test.ts
-│       │       ├── runCommand.test.ts
-│       │       ├── setupEnvironment.test.ts
-│       │       └── setupWizard.test.ts
-│       ├── tsconfig.json
-│       └── vsc-extension-quickstart.md
-├── src/
-│   └── q2lsp/
-│       ├── __main__.py
-│       ├── cli.py
-│       ├── core/
-│       ├── logging.py
-│       ├── lsp/
-│       └── qiime/
-├── tests/
-│   ├── __init__.py
-│   ├── core/
-│   ├── helpers/
-│   ├── lsp/
-│   ├── qiime/
-│   ├── test_cli.py
-│   ├── test_logging.py
-│   ├── test_release_workflow_consistency.py
-│   └── test_workflow_hardening.py
-└── pyproject.toml
-```
-<!-- END GENERATED: PROJECT_STRUCTURE -->

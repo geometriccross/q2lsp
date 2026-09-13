@@ -23,6 +23,8 @@ jobs:
   build-package:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      prerelease: ${{ steps.release-meta.outputs.prerelease }}
     defaults:
       run:
         working-directory: extensions/vscode-q2lsp
@@ -47,12 +49,14 @@ jobs:
           cache-dependency-path: extensions/vscode-q2lsp/pnpm-lock.yaml
 
       - name: Verify release tag matches extension version
+        id: release-meta
         shell: bash
         run: |
           set -euo pipefail
 
           if [[ "${GITHUB_REF}" != refs/tags/* ]]; then
             echo "Non-tag run detected; skipping strict tag/version check."
+            echo "prerelease=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
@@ -70,6 +74,12 @@ jobs:
             exit 1
           fi
 
+          prerelease="false"
+          if [[ "${tag_version}" == *-* ]] || [[ "${tag_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)[0-9]+$ ]]; then
+            prerelease="true"
+          fi
+          echo "prerelease=${prerelease}" >> "${GITHUB_OUTPUT}"
+
       - name: Dry-run note
         shell: bash
         run: |
@@ -83,32 +93,18 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
-      - name: Compile
-        run: pnpm run compile
-
-      - name: Test
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v xvfb-run >/dev/null 2>&1; then
-            xvfb-run -a pnpm run test
-          else
-            pnpm run test
-          fi
-
       - name: Package extension (.vsix)
         id: package
         shell: bash
+        env:
+          PRERELEASE: ${{ steps.release-meta.outputs.prerelease }}
         run: |
           set -euo pipefail
           rm -f ./*.vsix
 
           package_prerelease_flag=()
-          if [[ "${GITHUB_REF}" == refs/tags/vscode-q2lsp-v* ]]; then
-            tag_version="${GITHUB_REF_NAME#vscode-q2lsp-v}"
-            if [[ "${tag_version}" == *-* ]] || [[ "${tag_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)[0-9]+$ ]]; then
-              package_prerelease_flag=(--pre-release)
-            fi
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            package_prerelease_flag=(--pre-release)
           fi
 
           pnpm dlx @vscode/vsce@3.7.1 package "${package_prerelease_flag[@]}"
@@ -121,6 +117,17 @@ jobs:
           fi
 
           echo "vsix_path=${vsix_files[0]#./}" >> "${GITHUB_OUTPUT}"
+
+      # Packaging runs vscode:prepublish; test that output without rerunning pretest.
+      - name: Test
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v xvfb-run >/dev/null 2>&1; then
+            xvfb-run -a pnpm exec vscode-test
+          else
+            pnpm exec vscode-test
+          fi
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
@@ -167,6 +174,7 @@ jobs:
         shell: bash
         env:
           VSCE_PAT: ${{ secrets.AZURE_ACCESS_TOKEN }}
+          PRERELEASE: ${{ needs.build-package.outputs.prerelease }}
         run: |
           set -euo pipefail
 
@@ -177,9 +185,8 @@ jobs:
             exit 1
           fi
 
-          tag_version="${GITHUB_REF_NAME#vscode-q2lsp-v}"
           prerelease_flag=()
-          if [[ "${tag_version}" == *-* ]] || [[ "${tag_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)[0-9]+$ ]]; then
+          if [[ "${PRERELEASE}" == "true" ]]; then
             prerelease_flag=(--pre-release)
           fi
 

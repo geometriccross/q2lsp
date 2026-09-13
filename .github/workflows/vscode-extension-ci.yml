@@ -6,12 +6,18 @@ on:
       - "extensions/vscode-q2lsp/**"
       - ".github/workflows/vscode-extension-ci.yml"
   push:
+    branches:
+      - main
     paths:
       - "extensions/vscode-q2lsp/**"
       - ".github/workflows/vscode-extension-ci.yml"
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   extension-checks:
