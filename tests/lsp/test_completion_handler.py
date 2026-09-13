@@ -3,20 +3,14 @@
 from __future__ import annotations
 
 from lsprotocol import types
-from pygls.workspace import TextDocument
-
-from q2lsp.lsp.completion_handler import handle_completion
+from q2lsp.core.document import Document, analyze_document
+from q2lsp.lsp.features import handle_completion
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
 
 
-def _document(source: str) -> TextDocument:
-    return TextDocument(
-        uri="file:///test.sh",
-        source=source,
-        language_id="shellscript",
-        version=1,
-    )
+def _document(source: str) -> Document:
+    return analyze_document(source)
 
 
 def test_handle_completion_returns_items_for_known_hierarchy() -> None:

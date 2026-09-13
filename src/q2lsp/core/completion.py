@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
-from q2lsp.core.types import CompletionItem, CompletionKind, CompletionMode
-from q2lsp.lsp.types import CompletionContext
+from q2lsp.core.types import CompletionItem, CompletionKind
+from q2lsp.core.document import CursorContext
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.catalog_facts import QiimeOptionFact
-from q2lsp.qiime.option_tokens import normalize_option_to_param_name
+from q2lsp.qiime.option_tokens import (
+    group_option_tokens,
+    normalize_option_to_param_name,
+)
 
 
 def get_completions(
-    context: CompletionContext, catalog: QiimeCatalog
+    context: CursorContext, catalog: QiimeCatalog
 ) -> list[CompletionItem]:
-    if context.command is None or context.mode == CompletionMode.NONE:
+    if context.command is None or context.token_index < 1:
         return []
 
     prefix = context.prefix
-    if context.mode == CompletionMode.ROOT:
+    if context.token_index == 1:
         return [
             CompletionItem(
                 label=command.name,
@@ -35,7 +38,7 @@ def get_completions(
     if command is None:
         return []
 
-    if context.mode == CompletionMode.PLUGIN:
+    if context.token_index == 2:
         items = [
             CompletionItem(
                 label=action.name,
@@ -59,7 +62,9 @@ def get_completions(
 
     used_parameters = {
         name
-        for option in context.command.options
+        for option in group_option_tokens(
+            tokens, lambda token: token.text, start_index=3
+        )
         if (name := normalize_option_to_param_name(option.option_text)) is not None
     }
     items = [

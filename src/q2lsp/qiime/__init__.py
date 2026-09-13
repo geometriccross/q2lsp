@@ -1,6 +1,5 @@
-from q2lsp.qiime.q2cli_gateway import (
-    build_qiime_catalog,
-    build_qiime_hierarchy,
-)
+"""QIIME metadata and discovery.
 
-__all__ = ["build_qiime_catalog", "build_qiime_hierarchy"]
+Import q2cli_gateway explicitly for discovery. Importing catalog facts or pure
+option helpers must not eagerly import q2cli and its environment dependencies.
+"""

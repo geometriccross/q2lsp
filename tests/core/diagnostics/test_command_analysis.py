@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from q2lsp.lsp.diagnostics import codes
-from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
-from q2lsp.lsp.diagnostics.command_analysis import _validate_command_with_catalog
-from q2lsp.lsp.types import ParsedCommand, TokenSpan
+from q2lsp.core.diagnostics import codes
+from q2lsp.core.diagnostics.diagnostic_issue import DiagnosticIssue
+from q2lsp.core.diagnostics.command_analysis import analyze_command
+from q2lsp.core.shell import ParsedCommand, TokenSpan
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
 
@@ -15,9 +15,20 @@ from q2lsp.qiime.types import CommandHierarchy
 def validate_command_with_hierarchy(
     command: ParsedCommand, hierarchy: CommandHierarchy
 ) -> list[DiagnosticIssue]:
-    return _validate_command_with_catalog(
-        command, QiimeCatalog.from_hierarchy(hierarchy)
+    return list(
+        analyze_command(
+            command, QiimeCatalog.from_hierarchy(hierarchy), source_for(command)
+        ).issues
     )
+
+
+def source_for(command: ParsedCommand) -> str:
+    """Preserve the hand-built token offsets used by these validation cases."""
+    source = [" "] * command.end
+    for token in command.tokens:
+        width = token.end - token.start
+        source[token.start : token.end] = token.text.ljust(width)
+    return "".join(source)
 
 
 @pytest.fixture
@@ -152,7 +163,7 @@ class TestValidateCommand:
             TokenSpan("summarize", 20, 29),
             TokenSpan("--bad-option", 30, 42),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=42)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=42)
         hierarchy = hierarchy_with_plugins_and_builtins
         hierarchy["qiime"]["feature-table"]["summarize"] = {
             "id": "summarize",
@@ -161,7 +172,7 @@ class TestValidateCommand:
         }
         catalog = QiimeCatalog.from_hierarchy(hierarchy)
 
-        issues = _validate_command_with_catalog(cmd, catalog)
+        issues = analyze_command(cmd, catalog, source_for(cmd)).issues
 
         assert [issue.code for issue in issues] == [
             codes.UNKNOWN_OPTION,
@@ -178,7 +189,7 @@ class TestValidateCommand:
             TokenSpan("--i-table", 30, 39),
             TokenSpan("table.qza", 40, 49),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=49)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -190,7 +201,7 @@ class TestValidateCommand:
             TokenSpan("feature-tabel", 6, 19),  # typo: tabel instead of table
             TokenSpan("summarize", 20, 29),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=29)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=29)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -206,7 +217,7 @@ class TestValidateCommand:
             TokenSpan("inof", 6, 10),  # typo: inof instead of info
             TokenSpan("refresh-cache", 11, 25),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=25)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=25)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -220,7 +231,7 @@ class TestValidateCommand:
             TokenSpan("feature-table", 6, 19),
             TokenSpan("summerize", 20, 29),  # typo: summerize instead of summarize
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=29)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=29)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -235,7 +246,7 @@ class TestValidateCommand:
             TokenSpan("feat-tabel", 6, 17),  # typo in plugin
             TokenSpan("sumerize", 18, 27),  # typo in action
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=27)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=27)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -253,7 +264,7 @@ class TestValidateCommand:
             TokenSpan("feat", 6, 10),  # prefix of "feature-table"
             TokenSpan("sum", 11, 14),  # prefix of "summarize"
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=14)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=14)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -273,7 +284,7 @@ class TestValidateCommand:
             TokenSpan("FEAT", 6, 10),  # prefix (uppercase) of "feature-table"
             TokenSpan("Sum", 11, 14),  # prefix (capitalized) of "summarize"
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=14)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=14)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -293,7 +304,7 @@ class TestValidateCommand:
             TokenSpan("metadata", 6, 14),
             TokenSpan("tabul", 15, 20),  # prefix of "tabulate"
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=20)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=20)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -307,7 +318,7 @@ class TestValidateCommand:
     ) -> None:
         # Commands with less than 3 tokens should not be validated
         tokens = [TokenSpan("qiime", 0, 5)]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=5)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=5)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -322,7 +333,7 @@ class TestValidateCommand:
             TokenSpan("xyz123", 6, 12),  # completely unknown
             TokenSpan("summarize", 13, 22),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=22)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=22)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -340,7 +351,7 @@ class TestValidateCommand:
             TokenSpan("feature-table", 6, 19),
             TokenSpan("xyz123", 20, 26),  # completely unknown
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=26)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=26)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -357,7 +368,7 @@ class TestValidateCommand:
             TokenSpan("qiime", 0, 5),
             TokenSpan("toolss", 6, 12),  # typo: should be "tools"
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=12)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=12)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -375,7 +386,7 @@ class TestValidateCommand:
             TokenSpan("qiime", 0, 5),
             TokenSpan("--help", 6, 12),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=12)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=12)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -387,7 +398,7 @@ class TestValidateCommand:
             TokenSpan("tools", 6, 11),
             TokenSpan("--help", 12, 18),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=18)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=18)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -399,7 +410,7 @@ class TestValidateCommand:
             TokenSpan("tools", 6, 11),
             TokenSpan("-h", 12, 14),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=14)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=14)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -415,7 +426,7 @@ class TestValidateCommand:
             TokenSpan("info", 6, 10),
             TokenSpan("something", 11, 20),  # should not be validated
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=20)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=20)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -431,7 +442,7 @@ class TestValidateCommand:
             TokenSpan("inof", 6, 10),  # typo for "info"
             TokenSpan("something", 11, 20),  # should not be validated
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=20)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=20)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -467,10 +478,10 @@ class TestValidateOptions:
             TokenSpan("--bad", 16, 21),
             TokenSpan("x", 22, 23),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=23)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=23)
         catalog = QiimeCatalog.from_hierarchy(hierarchy)
 
-        issues = _validate_command_with_catalog(cmd, catalog)
+        issues = analyze_command(cmd, catalog, source_for(cmd)).issues
 
         assert [issue.code for issue in issues] == [codes.UNKNOWN_OPTION]
         assert "--bad" in issues[0].message
@@ -486,7 +497,7 @@ class TestValidateOptions:
             TokenSpan("summarize", 20, 29),
             TokenSpan("--i-tabel", 30, 39),  # typo: tabel instead of table
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=39)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=39)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -509,7 +520,7 @@ class TestValidateOptions:
             TokenSpan("summarize", 20, 29),
             TokenSpan("--i-ta", 30, 36),  # prefix of --i-table
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=36)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=36)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -530,7 +541,7 @@ class TestValidateOptions:
             TokenSpan("summarize", 20, 29),
             TokenSpan("--i-table=foo", 30, 43),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=43)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=43)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -570,7 +581,7 @@ class TestValidateRequiredOptions:
             TokenSpan("metadata", 6, 14),
             TokenSpan("tabulate", 15, 23),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=23)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=23)
         issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         missing = [
@@ -591,7 +602,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--p-obs-metadata", 30, 46),
             TokenSpan("foo", 47, 50),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=50)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=50)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -611,7 +622,7 @@ class TestValidateRequiredOptions:
             TokenSpan("summarize", 20, 29),
             TokenSpan("--help", 30, 36),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=36)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=36)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -627,7 +638,7 @@ class TestValidateRequiredOptions:
             TokenSpan("summarize", 20, 29),
             TokenSpan("-h", 30, 32),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=32)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=32)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -644,7 +655,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--p-obs-metadata", 30, 46),
             TokenSpan("-h", 47, 49),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=49)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -668,7 +679,7 @@ class TestValidateRequiredOptions:
             TokenSpan("foo", 47, 50),
             TokenSpan("-h", 51, 53),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=53)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=53)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -707,7 +718,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--verbose", 36, 45),
             TokenSpan("-h", 46, 48),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=48)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=48)
         issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         assert issues == []
@@ -721,7 +732,7 @@ class TestValidateRequiredOptions:
             TokenSpan("summarize", 20, 29),
             TokenSpan("--help=1", 30, 38),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=38)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=38)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -737,7 +748,7 @@ class TestValidateRequiredOptions:
             TokenSpan("summarize", 20, 29),
             TokenSpan("--i-table=table.qza", 30, 49),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=49)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -754,7 +765,7 @@ class TestValidateRequiredOptions:
             TokenSpan("summarize", 20, 29),
             TokenSpan("--i-table", 30, 39),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=39)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=39)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -793,7 +804,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--p-sample-axis", 50, 65),
             TokenSpan("sample", 66, 72),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=72)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=72)
         issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         assert issues == []
@@ -828,7 +839,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--p-sample-axis", 30, 45),
             TokenSpan("sample", 46, 52),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=52)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=52)
         issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         missing_required_issues = [
@@ -849,7 +860,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--table", 30, 37),
             TokenSpan("table.qza", 38, 47),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=47)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=47)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -877,7 +888,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--I-TABLE", 30, 39),
             TokenSpan("table.qza", 40, 49),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=49)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -927,7 +938,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--format", 19, 27),
             TokenSpan("csv", 28, 31),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=31)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=31)
         issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         missing = [
@@ -969,7 +980,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--p-verbose", 36, 47),
             TokenSpan("true", 48, 52),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=52)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=52)
         issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         missing = [
@@ -1013,7 +1024,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--i-metadata", 24, 36),
             TokenSpan("foo", 37, 40),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=40)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=40)
         issues = validate_command_with_hierarchy(cmd, hierarchy)
 
         missing = [
@@ -1034,7 +1045,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--p-where", 35, 44),
             TokenSpan("some condition", 45, 59),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=59)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=59)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -1056,7 +1067,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--i-tabel", 30, 39),
             TokenSpan("table.qza", 40, 49),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=49)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=49)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -1083,7 +1094,7 @@ class TestValidateRequiredOptions:
             TokenSpan("summerize", 20, 29),  # typo for summarize
             TokenSpan("--i-tabel", 30, 39),  # typo for --i-table
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=39)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=39)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -1103,7 +1114,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--i-metadata", 25, 38),  # valid
             TokenSpan("--i-metadat", 39, 50),  # typo (prefix of --i-metadata)
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=50)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=50)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -1138,7 +1149,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--p-where", 90, 99),
             TokenSpan("--p-exclude-ids", 100, 114),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=114)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=114)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -1154,7 +1165,7 @@ class TestValidateRequiredOptions:
             TokenSpan("summarize", 20, 29),
             TokenSpan("--I-TA", 30, 36),  # prefix (uppercase) of --i-table
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=36)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=36)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -1176,7 +1187,7 @@ class TestValidateRequiredOptions:
             TokenSpan("table.qza", 40, 49),
             TokenSpan("--xyz123", 50, 58),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=58)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=58)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -1198,7 +1209,7 @@ class TestValidateRequiredOptions:
             TokenSpan("--p-obs-metadata", 51, 67),
             TokenSpan("metadata.tsv", 68, 80),  # value, not an option
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=80)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=80)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -1215,7 +1226,7 @@ class TestValidateOptionsRequiredSuppression:
             TokenSpan("filter-samples", 20, 34),
             TokenSpan("--i", 35, 38),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=38)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=38)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )
@@ -1242,7 +1253,7 @@ class TestValidateOptionsRequiredSuppression:
             TokenSpan("summarize", 20, 29),
             TokenSpan("--xyz123", 30, 38),
         ]
-        cmd = ParsedCommand(tokens=tokens, start=0, end=38)
+        cmd = ParsedCommand(tokens=tuple(tokens), start=0, end=38)
         issues = validate_command_with_hierarchy(
             cmd, hierarchy_with_plugins_and_builtins
         )

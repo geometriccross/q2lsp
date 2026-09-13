@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import pytest
 from lsprotocol import types
-from pygls.workspace import TextDocument
+from q2lsp.core.document import analyze_document
+from q2lsp.lsp.adapter import offset_to_position, position_to_offset
 
 from q2lsp.core.types import CompletionKind
-from q2lsp.lsp.completion_handler import handle_completion
+from q2lsp.lsp.features import handle_completion
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.catalog_facts import QiimeOptionFact
 from tests.helpers.completions import complete
@@ -200,7 +201,7 @@ def test_lsp_completion_replaces_only_prefix(
 ) -> None:
     text, offset = extract_cursor_offset(text_with_cursor=source)
     result = handle_completion(
-        TextDocument(uri="file:///test.sh", source=text),
+        analyze_document(text),
         types.Position(0, offset),
         lambda: catalog,
     )
@@ -212,12 +213,54 @@ def test_lsp_completion_replaces_only_prefix(
     )
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "echo 😀; qiime feat<CURSOR>",
+        'qiime "feat<CURSOR>"',
+        "qiime 'feat<CURSOR>'",
+        'qiime "feat"<CURSOR>',
+        'qiime "fea\\\nt<CURSOR>"',
+        "qiime fea\\\nt<CURSOR>",
+        "echo 😀\r\nqiime \\\nfeat<CURSOR>",
+    ],
+)
+def test_completion_edit_applies_to_original_source(
+    catalog: QiimeCatalog, source: str
+) -> None:
+    text, offset = extract_cursor_offset(text_with_cursor=source)
+    document = analyze_document(text)
+    position = offset_to_position(document, offset)
+    result = handle_completion(document, position, lambda: catalog)
+    item = next(item for item in result.items if item.label == "feature-table")
+    edit = item.text_edit
+    assert isinstance(edit, types.TextEdit)
+    assert edit.range.start.line == edit.range.end.line == position.line
+    start = position_to_offset(document, edit.range.start)
+    end = position_to_offset(document, edit.range.end)
+    changed = analyze_document(text[:start] + edit.new_text + text[end:])
+    assert [token.text for token in changed.commands[0].tokens] == [
+        "qiime",
+        "feature-table",
+    ]
+
+
+def test_completion_prefix_with_non_bmp_character_uses_utf16() -> None:
+    catalog = QiimeCatalog.from_hierarchy({"qiime": {"😀plugin": {}}})
+    result = handle_completion(
+        analyze_document("qiime 😀"), types.Position(0, 8), lambda: catalog
+    )
+    assert result.items[0].text_edit == types.TextEdit(
+        types.Range(types.Position(0, 6), types.Position(0, 8)), "😀plugin"
+    )
+
+
 def test_later_options_also_count_as_used(catalog: QiimeCatalog) -> None:
     text, offset = extract_cursor_offset(
         text_with_cursor="qiime feature-table summarize --<CURSOR> --i-table table.qza"
     )
     result = handle_completion(
-        TextDocument(uri="file:///test.sh", source=text),
+        analyze_document(text),
         types.Position(0, offset),
         lambda: catalog,
     )
@@ -232,7 +275,7 @@ def test_non_completion_context_does_not_load_catalog(source: str) -> None:
         raise AssertionError("No catalog is needed outside a completion context")
 
     result = handle_completion(
-        TextDocument(uri="file:///test.sh", source=source),
+        analyze_document(source),
         types.Position(0, len(source)),
         fail_catalog,
     )

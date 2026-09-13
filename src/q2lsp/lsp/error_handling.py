@@ -9,14 +9,15 @@ from typing import ParamSpec, TypeVar
 
 P = ParamSpec("P")
 R = TypeVar("R")
+F = TypeVar("F")
 
 
 def wrap_handler(
     *,
     logger: logging.Logger,
     feature_name: str,
-    default_factory: Callable[[], R],
-) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    default_factory: Callable[[], F],
+) -> Callable[[Callable[P, R]], Callable[P, R | F]]:
     """
     Decorator that wraps an LSP feature handler with error handling.
 
@@ -32,9 +33,9 @@ def wrap_handler(
         Decorator function.
     """
 
-    def decorator(func: Callable[P, R]) -> Callable[P, R]:
+    def decorator(func: Callable[P, R]) -> Callable[P, R | F]:
         @functools.wraps(func)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | F:
             try:
                 return func(*args, **kwargs)
             except Exception:

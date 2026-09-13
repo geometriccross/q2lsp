@@ -2,7 +2,57 @@
 
 from __future__ import annotations
 
-from q2lsp.qiime.option_tokens import normalize_option_to_param_name
+import pytest
+
+from q2lsp.qiime.option_tokens import (
+    group_option_tokens,
+    normalize_option_to_param_name,
+)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("--i-table table.qza", [("--i-table", None, ("table.qza",))]),
+        (
+            "--p-where sample id --output-dir out",
+            [
+                ("--p-where", None, ("sample", "id")),
+                ("--output-dir", None, ("out",)),
+            ],
+        ),
+        (
+            "--use-cache --verbose --help",
+            [
+                ("--use-cache", None, ()),
+                ("--verbose", None, ()),
+                ("--help", None, ()),
+            ],
+        ),
+        (
+            "--i-table=table.qza --verbose",
+            [
+                ("--i-table", "table.qza", ()),
+                ("--verbose", None, ()),
+            ],
+        ),
+        (
+            "--p-obs-metadata -h --i-table table.qza",
+            [
+                ("--p-obs-metadata", None, ("-h",)),
+                ("--i-table", None, ("table.qza",)),
+            ],
+        ),
+    ],
+)
+def test_group_options(
+    source: str, expected: list[tuple[str, str | None, tuple[str, ...]]]
+) -> None:
+    tokens = ["qiime", "feature-table", "summarize", *source.split()]
+    groups = group_option_tokens(tokens, str, start_index=3)
+    assert [
+        (group.option_text, group.inline_value, group.value_tokens) for group in groups
+    ] == expected
 
 
 def test_normalize_option_to_param_name_standard_option() -> None:

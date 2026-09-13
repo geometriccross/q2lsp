@@ -11,7 +11,9 @@ from pygls.lsp.server import LanguageServer
 from pygls.workspace import Workspace
 
 import q2lsp.lsp.server as server_mod
-from q2lsp.lsp.diagnostics.codes import MISSING_REQUIRED_OPTION, UNKNOWN_OPTION
+import q2lsp.lsp.session as session_mod
+from q2lsp.core.diagnostics.codes import MISSING_REQUIRED_OPTION, UNKNOWN_OPTION
+from q2lsp.core.document import Document
 from q2lsp.qiime.catalog import make_catalog_provider
 from q2lsp.qiime.types import CommandHierarchy
 
@@ -217,7 +219,7 @@ async def test_failed_diagnostics_do_not_prevent_later_updates(
         def fail(*_args: object) -> list[types.Diagnostic]:
             raise RuntimeError("temporary discovery failure")
 
-        patch.setattr(server_mod, "compute_diagnostics", fail)
+        patch.setattr(session_mod, "compute_diagnostics", fail)
         open_document(server, "qiime unknown")
         await wait_past_debounce()
         assert published.empty()
@@ -226,6 +228,62 @@ async def test_failed_diagnostics_do_not_prevent_later_updates(
     result = await asyncio.wait_for(published.get(), timeout=1)
     assert result.version == 2
     assert result.diagnostics
+
+
+async def test_all_features_reuse_analysis_until_the_document_changes(
+    server_and_published: tuple[
+        LanguageServer, asyncio.Queue[types.PublishDiagnosticsParams]
+    ],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, published = server_and_published
+    analyses: list[Document] = []
+    analyze = session_mod.analyze_document
+
+    def track(source: str) -> Document:
+        document = analyze(source)
+        analyses.append(document)
+        return document
+
+    monkeypatch.setattr(session_mod, "analyze_document", track)
+    open_document(server, "qiime demo step --bad")
+    features = server.protocol.fm.features
+    assert features[types.TEXT_DOCUMENT_COMPLETION](
+        types.CompletionParams(types.TextDocumentIdentifier(URI), types.Position(0, 8))
+    ).items
+    features[types.TEXT_DOCUMENT_HOVER](
+        types.HoverParams(types.TextDocumentIdentifier(URI), types.Position(0, 8))
+    )
+    assert features[types.TEXT_DOCUMENT_CODE_LENS](
+        types.CodeLensParams(types.TextDocumentIdentifier(URI))
+    )
+    assert (await asyncio.wait_for(published.get(), timeout=1)).diagnostics
+    assert len(analyses) == 1
+
+    change_document(server, "echo hello", 2)
+    assert (
+        features[types.TEXT_DOCUMENT_CODE_LENS](
+            types.CodeLensParams(types.TextDocumentIdentifier(URI))
+        )
+        == []
+    )
+    assert (await asyncio.wait_for(published.get(), timeout=1)).diagnostics == []
+    assert len(analyses) == 2
+    assert analyses[0].source == "qiime demo step --bad"
+    assert analyses[1].source == "echo hello"
+
+    close_document(server)
+    published.get_nowait()
+    open_document(server, "echo hello")
+    await asyncio.wait_for(published.get(), timeout=1)
+    assert len(analyses) == 3
+    assert analyses[2] is not analyses[1]
+    close_document(server)
+    published.get_nowait()
+    open_document(server, "echo hello")
+    await asyncio.wait_for(published.get(), timeout=1)
+    assert len(analyses) == 4
+    assert analyses[3] is not analyses[2]
 
 
 async def test_continuation_diagnostic_uses_original_line(

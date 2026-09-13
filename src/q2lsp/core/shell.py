@@ -6,7 +6,27 @@ and QIIME command detection for completion context.
 
 from __future__ import annotations
 
-from q2lsp.lsp.types import ParsedCommand, TokenSpan
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class TokenSpan:
+    """Decoded shell word and its half-open span in merged text."""
+
+    text: str
+    start: int
+    end: int
+    unclosed_quote: str | None = None
+
+
+@dataclass(frozen=True)
+class ParsedCommand:
+    """QIIME command; all offsets refer to merged text, not source text."""
+
+    tokens: tuple[TokenSpan, ...]
+    start: int
+    end: int
 
 
 def merge_line_continuations(text: str) -> tuple[str, list[int]]:
@@ -28,9 +48,10 @@ def merge_line_continuations(text: str) -> tuple[str, list[int]]:
     n = len(text)
 
     while i < n:
-        # Check for backslash followed by newline (line continuation)
-        if text[i] == "\\" and i + 1 < n and text[i + 1] == "\n":
-            # Skip the backslash and newline - don't add to merged
+        if text.startswith("\\\r\n", i):
+            i += 3
+            continue
+        if text.startswith("\\\n", i):
             i += 2
             continue
 
@@ -51,10 +72,10 @@ def tokenize_shell_line(line: str, line_start_offset: int) -> list[TokenSpan]:
 
     Args:
         line: The shell line to tokenize (already merged, no continuations).
-        line_start_offset: Offset in original text where this line starts.
+        line_start_offset: Offset in merged text where this line starts.
 
     Returns:
-        List of TokenSpan with positions relative to original text.
+        List of TokenSpan with positions relative to merged text.
 
     Quote handling:
         - Single quotes: no escapes inside, everything is literal
@@ -75,6 +96,7 @@ def tokenize_shell_line(line: str, line_start_offset: int) -> list[TokenSpan]:
         # Start of a token
         token_start = i
         token_chars: list[str] = []
+        unclosed_quote: str | None = None
 
         while i < n:
             char = line[i]
@@ -90,6 +112,8 @@ def tokenize_shell_line(line: str, line_start_offset: int) -> list[TokenSpan]:
                     i += 1
                 if i < n:
                     i += 1  # Skip closing quote
+                else:
+                    unclosed_quote = "'"
             elif char == '"':
                 # Double quoted string - backslash escapes
                 i += 1  # Skip opening quote
@@ -103,6 +127,8 @@ def tokenize_shell_line(line: str, line_start_offset: int) -> list[TokenSpan]:
                         i += 1
                 if i < n:
                     i += 1  # Skip closing quote
+                else:
+                    unclosed_quote = '"'
             elif char == "\\" and i + 1 < n:
                 # Unquoted backslash escape
                 i += 1  # Skip backslash
@@ -119,6 +145,7 @@ def tokenize_shell_line(line: str, line_start_offset: int) -> list[TokenSpan]:
                     text="".join(token_chars),
                     start=line_start_offset + token_start,
                     end=line_start_offset + i,
+                    unclosed_quote=unclosed_quote,
                 )
             )
 
@@ -152,7 +179,7 @@ def find_qiime_commands(text: str) -> list[ParsedCommand]:
             qiime_tokens = tokens[qiime_token_index:]
             commands.append(
                 ParsedCommand(
-                    tokens=qiime_tokens,
+                    tokens=tuple(qiime_tokens),
                     start=qiime_tokens[0].start,
                     end=seg_end,
                 )
@@ -206,7 +233,7 @@ def _split_commands(text: str) -> list[tuple[int, int]]:
                 i += 1
             elif char == "\\" and i + 1 < n:
                 i += 2  # Skip escaped char
-            elif char == ";" or char == "\n":
+            elif char in ";\r\n":
                 # Single char separator
                 if i > seg_start:
                     segments.append((seg_start, i))
@@ -241,14 +268,14 @@ def _split_commands(text: str) -> list[tuple[int, int]]:
 
 
 def command_at_position(
-    commands: list[ParsedCommand], offset: int
+    commands: Sequence[ParsedCommand], offset: int
 ) -> ParsedCommand | None:
     """
     Find the command containing the given offset.
 
     Args:
         commands: List of parsed QIIME commands.
-        offset: Position in the original text.
+        offset: Position in merged text.
 
     Returns:
     The ParsedCommand containing the offset, or None if not in any command.

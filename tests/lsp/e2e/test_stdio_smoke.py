@@ -50,6 +50,52 @@ class TestStdioE2E:
         await lsp_client.shutdown_exit()
 
     @pytest.mark.asyncio
+    async def test_utf16_incremental_edit_updates_all_feature_snapshots(
+        self, lsp_client: LspTestClient
+    ) -> None:
+        await lsp_client.initialize(
+            capabilities={"general": {"positionEncodings": ["utf-8", "utf-16"]}}
+        )
+        uri = "file:///unicode.sh"
+        await lsp_client.did_open(
+            uri=uri,
+            language_id="shellscript",
+            version=1,
+            text="echo 😀; qiime feat\r\n",
+        )
+        before = await lsp_client.completion(uri=uri, line=0, character=19)
+        assert [item["label"] for item in before["result"]["items"]] == [
+            "feature-table"
+        ]
+        await lsp_client.send_notification(
+            method="textDocument/didChange",
+            params={
+                "textDocument": {"uri": uri, "version": 2},
+                "contentChanges": [
+                    {
+                        "range": {
+                            "start": {"line": 0, "character": 15},
+                            "end": {"line": 0, "character": 19},
+                        },
+                        "text": "feature-table ",
+                    }
+                ],
+            },
+        )
+        after = await lsp_client.completion(uri=uri, line=0, character=29)
+        assert "summarize" in {item["label"] for item in after["result"]["items"]}
+        lenses = await lsp_client.code_lens(uri=uri)
+        assert lenses["result"][0]["command"]["arguments"][0]["tokens"] == [
+            "qiime",
+            "feature-table",
+        ]
+        assert lenses["result"][0]["range"] == {
+            "start": {"line": 0, "character": 9},
+            "end": {"line": 0, "character": 14},
+        }
+        await lsp_client.shutdown_exit()
+
+    @pytest.mark.asyncio
     async def test_completion_roundtrip(self, lsp_client: LspTestClient) -> None:
         """Server returns completion items for a document."""
         # Initialize

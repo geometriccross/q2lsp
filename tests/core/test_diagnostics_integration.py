@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from q2lsp.lsp.diagnostics import collect_diagnostics
-from q2lsp.lsp.diagnostics.codes import UNKNOWN_OPTION, UNKNOWN_ROOT
-from q2lsp.lsp.document_commands import analyze_document
+from q2lsp.core.diagnostics import collect_diagnostics
+from q2lsp.core.diagnostics.codes import UNKNOWN_OPTION, UNKNOWN_ROOT
+from q2lsp.core.document import analyze_document
 from q2lsp.qiime.catalog import QiimeCatalog
 
 

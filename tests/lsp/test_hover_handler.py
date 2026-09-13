@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 from lsprotocol import types
-from pygls.workspace import TextDocument
+from q2lsp.core.document import analyze_document
 
 from q2lsp.lsp.adapter import offset_to_position
-from q2lsp.lsp.hover_handler import handle_hover
+from q2lsp.lsp.features import handle_hover
 from tests.helpers.cursor import extract_cursor_offset
 
 
@@ -26,7 +26,7 @@ def test_hover_requests_cli_help_and_returns_fenced_markdown(
     expected_path: list[str],
 ) -> None:
     text, offset = extract_cursor_offset(text_with_cursor=source)
-    document = TextDocument(uri="file:///test.sh", source=text)
+    document = analyze_document(text)
     calls: list[list[str]] = []
     help_text = (
         "Usage: qiime [OPTIONS] COMMAND [ARGS]...\n\nOptions:\n  --help  Show help."
@@ -58,7 +58,7 @@ def test_hover_requests_cli_help_and_returns_fenced_markdown(
 )
 def test_hover_outside_command_path_does_not_request_help(source: str) -> None:
     text, offset = extract_cursor_offset(text_with_cursor=source)
-    document = TextDocument(uri="file:///test.sh", source=text)
+    document = analyze_document(text)
 
     def fail_help(path: list[str]) -> str | None:
         raise AssertionError(f"Unexpected help request: {path}")
@@ -69,5 +69,5 @@ def test_hover_outside_command_path_does_not_request_help(source: str) -> None:
 
 
 def test_hover_returns_none_when_help_is_unavailable() -> None:
-    document = TextDocument(uri="file:///test.sh", source="qiime unknown")
+    document = analyze_document("qiime unknown")
     assert handle_hover(document, types.Position(0, 8), lambda _path: None) is None

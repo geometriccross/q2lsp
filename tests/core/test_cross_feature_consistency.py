@@ -7,14 +7,14 @@ import pytest
 from tests.helpers.completions import complete
 
 from q2lsp.core.types import CompletionItem
-from q2lsp.lsp.diagnostics.codes import (
+from q2lsp.core.diagnostics.codes import (
     MISSING_REQUIRED_OPTION,
     UNKNOWN_ACTION,
     UNKNOWN_OPTION,
     UNKNOWN_SUBCOMMAND,
 )
-from q2lsp.lsp.diagnostics import collect_diagnostics
-from q2lsp.lsp.document_commands import analyze_document
+from q2lsp.core.diagnostics import collect_diagnostics
+from q2lsp.core.document import analyze_document
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
 

@@ -10,9 +10,9 @@ import difflib
 from collections.abc import Mapping, Sequence
 from typing import NamedTuple
 
-from q2lsp.lsp.diagnostics import codes
-from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
-from q2lsp.lsp.types import ParsedCommand, TokenSpan
+from q2lsp.core.diagnostics import codes
+from q2lsp.core.diagnostics.diagnostic_issue import DiagnosticIssue
+from q2lsp.core.shell import ParsedCommand, TokenSpan
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.catalog_facts import QiimeOptionFact
 from q2lsp.qiime.option_tokens import (
@@ -72,74 +72,21 @@ class CommandAnalysis(NamedTuple):
 def analyze_command(
     command: ParsedCommand, catalog: QiimeCatalog, source_text: str
 ) -> CommandAnalysis:
-    """Collect command-level issues and dependency references."""
-    issues = tuple(_validate_command_with_catalog(command, catalog))
-
-    if len(command.tokens) < 3:
-        return CommandAnalysis(
-            command=command,
-            issues=issues,
-            dependencies=CommandDependencies(),
-        )
-
-    command_name = command.tokens[1].text
-    action_name = command.tokens[2].text
-    if catalog.action(command_name, action_name) is None:
-        return CommandAnalysis(
-            command=command,
-            issues=issues,
-            dependencies=CommandDependencies(),
-        )
-
-    option_tokens = command.tokens[3:]
-    option_groups = command.options
-    flag_option_labels = {
-        option.label
-        for option in catalog.action_options(command_name, action_name)
-        if option.is_bool_flag
-    }
-    if _has_help_invocation(option_tokens, option_groups, flag_option_labels):
-        return CommandAnalysis(
-            command=command,
-            issues=issues,
-            dependencies=CommandDependencies(),
-        )
-
-    invalid_option_spans = {
-        (issue.start, issue.end)
-        for issue in issues
-        if issue.code == codes.UNKNOWN_OPTION
-    }
-    dependencies = _extract_command_dependencies(
-        command,
-        source_text,
-        invalid_option_spans=invalid_option_spans,
-    )
-    return CommandAnalysis(command=command, issues=issues, dependencies=dependencies)
-
-
-# ---------------------------------------------------------------------------
-# Command validation orchestration
-# ---------------------------------------------------------------------------
-
-
-def _validate_command_with_catalog(
-    command: ParsedCommand, catalog: QiimeCatalog
-) -> list[DiagnosticIssue]:
+    """Interpret a command once for validation and dependency extraction."""
     issues: list[DiagnosticIssue] = []
+    dependencies = CommandDependencies()
 
     token1_valid = True
     token1_for_action: str | None = None
     if len(command.tokens) >= 2:
         token1 = command.tokens[1]
         if not token1.text.startswith("-"):
-            issue1 = _validate_plugin_or_builtin_with_catalog(token1, catalog)
+            valid_names = [entry.name for entry in catalog.commands()]
+            issue1 = _validate_root(token1, valid_names)
             if issue1 is not None:
                 issues.append(issue1)
                 token1_valid = False
-                token1_for_action = _get_unique_prefix_match(
-                    token1.text, {command.name for command in catalog.commands()}
-                )
+                token1_for_action = _get_unique_prefix_match(token1.text, valid_names)
             else:
                 token1_for_action = token1.text
 
@@ -153,28 +100,39 @@ def _validate_command_with_catalog(
                 issues.append(issue2)
                 token2_valid = False
 
-    if token1_valid and token2_valid and len(command.tokens) >= 3:
-        token1 = command.tokens[1]
-        token2 = command.tokens[2]
-        plugin_name = token1.text
-        action_name = token2.text
-        option_issues: list[DiagnosticIssue] = []
-        unknown_option_suggestions: dict[str, list[str]] = {}
-        if len(command.tokens) >= 4:
-            option_issues, unknown_option_suggestions = _validate_options_with_catalog(
-                command.tokens[3:], catalog, plugin_name, action_name
-            )
-        issues.extend(option_issues)
-        required_option_issues = _validate_required_options_with_catalog(
-            command.tokens,
-            catalog,
-            plugin_name,
-            action_name,
-            unknown_option_suggestions,
-        )
-        issues.extend(required_option_issues)
+    if len(command.tokens) < 3:
+        return CommandAnalysis(command, tuple(issues), dependencies)
 
-    return issues
+    command_name = command.tokens[1].text
+    action_name = command.tokens[2].text
+    if catalog.action(command_name, action_name) is None:
+        return CommandAnalysis(command, tuple(issues), dependencies)
+
+    option_facts = catalog.action_options(command_name, action_name)
+    option_groups = group_option_tokens(
+        command.tokens, lambda token: token.text, start_index=3
+    )
+    is_help = _has_help_invocation(
+        command.tokens[3:],
+        option_groups,
+        {option.label for option in option_facts if option.is_bool_flag},
+    )
+    valid_groups = option_groups
+    if token1_valid and token2_valid:
+        option_issues, suggestions, valid_groups = _validate_options(
+            option_groups, option_facts
+        )
+        issues.extend(option_issues)
+        if not is_help:
+            issues.extend(
+                _validate_required_options(
+                    command.tokens[2], option_groups, option_facts, suggestions
+                )
+            )
+
+    if not is_help:
+        dependencies = _extract_command_dependencies(valid_groups, source_text)
+    return CommandAnalysis(command, tuple(issues), dependencies)
 
 
 # ---------------------------------------------------------------------------
@@ -182,11 +140,10 @@ def _validate_command_with_catalog(
 # ---------------------------------------------------------------------------
 
 
-def _validate_plugin_or_builtin_with_catalog(
-    token: TokenSpan, catalog: QiimeCatalog
+def _validate_root(
+    token: TokenSpan, all_valid_names: list[str]
 ) -> DiagnosticIssue | None:
     token_text = token.text
-    all_valid_names = [command.name for command in catalog.commands()]
 
     if _is_exact_match(token_text, all_valid_names):
         return None
@@ -242,27 +199,26 @@ def _validate_action_with_catalog(
     )
 
 
-def _validate_options_with_catalog(
-    tokens: list[TokenSpan],
-    catalog: QiimeCatalog,
-    plugin_name: str,
-    action_name: str,
-) -> tuple[list[DiagnosticIssue], dict[str, list[str]]]:
-    """Validate option tokens for a catalog-backed valid command path."""
-    if catalog.action(plugin_name, action_name) is None:
-        return [], {}
-
-    option_facts = catalog.action_options(plugin_name, action_name)
+def _validate_options(
+    option_groups: tuple[OptionGroup[TokenSpan], ...],
+    option_facts: tuple[QiimeOptionFact, ...],
+) -> tuple[
+    list[DiagnosticIssue],
+    dict[str, list[str]],
+    tuple[OptionGroup[TokenSpan], ...],
+]:
+    valid_groups: list[OptionGroup[TokenSpan]] = []
     issues: list[DiagnosticIssue] = []
     unknown_option_suggestions: dict[str, list[str]] = {}
     valid_options = [option.label for option in option_facts]
 
-    for option in group_option_tokens(tokens, lambda token: token.text):
+    for option in option_groups:
         option_name = option.option_text
-        if option_name in ("--help", "-h"):
-            continue
-
-        if not _is_exact_match(option_name, valid_options):
+        if option_name in ("--help", "-h") or _is_exact_match(
+            option_name, valid_options
+        ):
+            valid_groups.append(option)
+        else:
             suggestions = _get_suggestions(option_name, valid_options, limit=3)
             if suggestions:
                 unknown_option_suggestions[option_name] = suggestions
@@ -279,44 +235,16 @@ def _validate_options_with_catalog(
                 )
             )
 
-    return issues, unknown_option_suggestions
+    return issues, unknown_option_suggestions, tuple(valid_groups)
 
 
-def _validate_required_options_with_catalog(
-    tokens: list[TokenSpan],
-    catalog: QiimeCatalog,
-    plugin_name: str,
-    action_name: str,
-    unknown_option_suggestions: Mapping[str, Sequence[str]],
-) -> list[DiagnosticIssue]:
-    """Validate required options for a catalog-backed valid command path."""
-    option_facts = catalog.action_options(plugin_name, action_name)
-    if not option_facts:
-        return []
-
-    return _validate_required_options_for_facts(
-        tokens, option_facts, unknown_option_suggestions
-    )
-
-
-def _validate_required_options_for_facts(
-    tokens: list[TokenSpan],
+def _validate_required_options(
+    action_token: TokenSpan,
+    option_groups: tuple[OptionGroup[TokenSpan], ...],
     option_facts: tuple[QiimeOptionFact, ...],
     unknown_option_suggestions: Mapping[str, Sequence[str]],
 ) -> list[DiagnosticIssue]:
     issues: list[DiagnosticIssue] = []
-
-    if len(tokens) < 3:
-        return issues
-
-    option_tokens = tokens[3:]
-    option_groups = group_option_tokens(option_tokens, lambda token: token.text)
-
-    flag_option_labels = {
-        option.label for option in option_facts if option.is_bool_flag
-    }
-    if _has_help_invocation(option_tokens, option_groups, flag_option_labels):
-        return issues
 
     present_param_names: set[str] = set()
     for option in option_groups:
@@ -345,7 +273,6 @@ def _validate_required_options_for_facts(
         if suggestion_param_name_lower in missing_param_options:
             suppressed_missing.add(suggestion_param_name_lower)
 
-    action_token = tokens[2]
     for missing_param_name, missing_option in missing_param_options.items():
         if missing_param_name in suppressed_missing:
             continue
@@ -367,7 +294,7 @@ def _validate_required_options_for_facts(
 
 
 def _has_help_invocation(
-    option_tokens: list[TokenSpan],
+    option_tokens: tuple[TokenSpan, ...],
     option_groups: tuple[OptionGroup[TokenSpan], ...],
     flag_option_labels: set[str],
 ) -> bool:
@@ -489,19 +416,14 @@ def _get_close_matches(
 
 
 def _extract_command_dependencies(
-    command: ParsedCommand,
+    valid_groups: tuple[OptionGroup[TokenSpan], ...],
     source_text: str,
-    *,
-    invalid_option_spans: set[tuple[int, int]] | None = None,
 ) -> CommandDependencies:
     """Extract input and output dependency paths from grouped command options."""
     inputs: list[DependencyReference] = []
     outputs: list[DependencyReference] = []
-    invalid_option_spans = invalid_option_spans or set()
 
-    for option in command.options:
-        if (option.token.start, option.token.end) in invalid_option_spans:
-            continue
+    for option in valid_groups:
         if _is_dependency_input_option(option.option_text):
             inputs.extend(_iter_option_value_references(option, source_text))
             continue

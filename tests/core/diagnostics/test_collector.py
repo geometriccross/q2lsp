@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-import q2lsp.lsp.diagnostics.codes as diagnostic_codes
-from q2lsp.lsp.diagnostics import collect_diagnostics
-from q2lsp.lsp.diagnostics.codes import DEPENDENCY_CYCLE
-from q2lsp.lsp.diagnostics.command_analysis import analyze_command
-from q2lsp.lsp.document_commands import (
-    analyze_document,
-    to_original_offset,
-)
+import q2lsp.core.diagnostics.codes as diagnostic_codes
+from q2lsp.core.diagnostics import collect_diagnostics
+from q2lsp.core.diagnostics.codes import DEPENDENCY_CYCLE
+from q2lsp.core.diagnostics.command_analysis import analyze_command
+from q2lsp.core.document import analyze_document
 from q2lsp.qiime.catalog import QiimeCatalog
 
 
@@ -418,10 +415,10 @@ def test_collect_diagnostics_maps_cycle_input_span_across_line_continuations(
     matching_issue = next(
         issue
         for issue in cycle_issues
-        if to_original_offset(document, issue.start) == first_input_start
+        if document.original_offset(issue.start) == first_input_start
     )
 
-    assert to_original_offset(document, matching_issue.start) == first_input_start
-    assert to_original_offset(document, matching_issue.end) == first_input_start + len(
+    assert document.original_offset(matching_issue.start) == first_input_start
+    assert document.original_offset(matching_issue.end) == first_input_start + len(
         "b.qza"
     )

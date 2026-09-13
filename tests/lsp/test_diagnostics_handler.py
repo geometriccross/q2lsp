@@ -3,20 +3,14 @@
 from __future__ import annotations
 
 from lsprotocol import types
-from pygls.workspace import TextDocument
-
-from q2lsp.lsp.diagnostics_handler import compute_diagnostics
+from q2lsp.core.document import Document, analyze_document
+from q2lsp.lsp.features import compute_diagnostics
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
 
 
-def _document(source: str) -> TextDocument:
-    return TextDocument(
-        uri="file:///test.sh",
-        source=source,
-        language_id="shellscript",
-        version=1,
-    )
+def _document(source: str) -> Document:
+    return analyze_document(source)
 
 
 def _dependency_hierarchy() -> CommandHierarchy:
@@ -35,6 +29,13 @@ def _dependency_hierarchy() -> CommandHierarchy:
             },
         }
     }
+
+
+def test_non_qiime_document_does_not_load_catalog() -> None:
+    def fail_catalog() -> QiimeCatalog:
+        raise AssertionError("Non-QIIME documents must not trigger discovery")
+
+    assert compute_diagnostics(_document("echo hello"), fail_catalog) == []
 
 
 def test_compute_diagnostics_returns_diagnostic_for_unknown_plugin() -> None:

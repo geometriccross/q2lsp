@@ -13,15 +13,6 @@ class _StrEnum(str, Enum):
         return str(self.value)
 
 
-class CompletionMode(_StrEnum):
-    """Mode determines what kind of completions to offer."""
-
-    ROOT = "root"
-    PLUGIN = "plugin"
-    PARAMETER = "parameter"
-    NONE = "none"
-
-
 class CompletionKind(_StrEnum):
     """Kind categorizes completion items."""
 
