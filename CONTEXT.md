@@ -32,6 +32,22 @@ _Avoid_: feature result, editor output
 A user-facing editor capability backed by QIIME command facts, such as completion, diagnostics, hover text, or CodeLens.
 _Avoid_: feature
 
+**Setup Wizard**:
+A guided q2lsp onboarding flow that helps users either use an existing QIIME 2 environment or create a new QIIME 2 environment before configuring q2lsp to use it.
+_Avoid_: diagnose command, generic setup flow
+
+**QIIME 2 environment**:
+A Python environment that contains QIIME 2 and may also contain q2lsp. The Setup Wizard treats this as the user-facing setup target, while the Python interpreter is the executable path saved for q2lsp.
+_Avoid_: interpreter when referring to the environment as a whole, install
+
+**QIIME 2 environment target**:
+The version, distribution, platform, and environment file combination selected for creating a new QIIME 2 environment. After the Setup Wizard sends a creation command to the terminal, that target becomes the validation target until the user explicitly changes it.
+_Avoid_: version selection, metadata
+
+**Environment Diagnosis**:
+A lightweight readiness check for the QIIME 2 environment q2lsp would use. It tells users whether the environment is ready and can route them to the Setup Wizard when guided repair or creation is needed.
+_Avoid_: setup wizard, onboarding flow
+
 ## Example dialogue
 
 Dev: “Should diagnostics read the command hierarchy directly?”
