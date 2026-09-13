@@ -118,7 +118,6 @@ def fake_server_run(
     server = FakeServer()
     logging_calls: list[tuple[str, Path | None]] = []
 
-    monkeypatch.setattr(cli, "default_hierarchy_provider", lambda: object())
     monkeypatch.setattr(cli, "create_qiime_help_provider", lambda **_kwargs: object())
     monkeypatch.setattr(cli, "create_server", lambda **_kwargs: server)
     monkeypatch.setattr(
@@ -163,8 +162,8 @@ class TestRun:
 
         monkeypatch.setattr(
             cli,
-            "default_hierarchy_provider",
-            lambda: (_ for _ in ()).throw(KeyboardInterrupt),
+            "create_server",
+            lambda **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt),
         )
 
         assert run([]) == 0
@@ -177,8 +176,8 @@ class TestRun:
 
         monkeypatch.setattr(
             cli,
-            "default_hierarchy_provider",
-            lambda: (_ for _ in ()).throw(RuntimeError),
+            "create_server",
+            lambda **_kwargs: (_ for _ in ()).throw(RuntimeError),
         )
 
         assert run([]) == 1
