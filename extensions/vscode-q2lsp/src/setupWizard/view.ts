@@ -4,12 +4,26 @@ import {
 } from './qiimeConstants';
 import { resolveQiimePlatform } from './qiimeMetadata';
 
-export const SETUP_WIZARD_FLOW_STEPS = [
-	{ id: 'packageManager', label: '1 Package Manager' },
-	{ id: 'installManager', label: '2 Install Manager' },
-	{ id: 'installQiime', label: '3 Install QIIME' },
-	{ id: 'installQ2lsp', label: '4 Install q2lsp' },
+export const SETUP_WIZARD_EXISTING_ROUTE_STEPS = [
+	{ id: 'selectInterpreter', label: 'Select Python interpreter' },
+	{ id: 'validateQiime', label: 'Validate QIIME 2' },
+	{ id: 'installOrValidateQ2lsp', label: 'Install or validate q2lsp' },
+	{ id: 'saveInterpreterPath', label: 'Save interpreter path' },
+	{ id: 'complete', label: 'Setup complete' },
 ] as const;
+
+export const SETUP_WIZARD_NEW_ROUTE_STEPS = [
+	{ id: 'chooseManager', label: 'Choose manager' },
+	{ id: 'validateManager', label: 'Validate manager' },
+	{ id: 'chooseTarget', label: 'Choose QIIME 2 target' },
+	{ id: 'createEnvironment', label: 'Create environment in Terminal' },
+	{ id: 'validateQiime', label: 'Validate QIIME 2' },
+	{ id: 'installOrValidateQ2lsp', label: 'Install or validate q2lsp' },
+	{ id: 'saveInterpreterPath', label: 'Save interpreter path' },
+	{ id: 'complete', label: 'Setup complete' },
+] as const;
+
+export const SETUP_WIZARD_FLOW_STEPS = SETUP_WIZARD_NEW_ROUTE_STEPS;
 
 const minicondaInstallerPlatform = process.platform === 'darwin' ? 'MacOSX' : 'Linux';
 const MINICONDA_INSTALL_COMMAND =
@@ -19,48 +33,346 @@ export const SETUP_WIZARD_MANAGERS = [
 	{
 		id: 'conda',
 		label: 'Conda / Miniconda',
-		description: 'Recommended by QIIME 2',
+		description: 'Recommended default for QIIME 2 environments',
 		command: MINICONDA_INSTALL_COMMAND,
 	},
 	{
 		id: 'pixi',
 		label: 'Pixi',
-		description: 'Project-local reproducible setup',
+		description: 'Advanced project-local setup',
 		command: 'curl -fsSL https://pixi.sh/install.sh | sh',
 	},
 	{
 		id: 'manual',
 		label: 'Manual',
-		description: 'Use your own setup and validate later',
+		description: 'Custom setup escape hatch',
 		command: 'Open QIIME 2 Quickstart',
 	},
 ] as const;
 
+export type SetupWizardRoute = 'start' | 'existing' | 'new';
+export type SetupWizardCandidateSource = 'config' | 'pythonExtension' | 'path' | 'manual';
+
+export type SetupWizardInterpreterCandidate = {
+	id: string;
+	label: string;
+	path: string;
+	source: SetupWizardCandidateSource;
+};
+
+
+export type SetupWizardTargetIdentity = {
+	route?: unknown;
+	interpreterPath?: unknown;
+	manager?: unknown;
+	version?: unknown;
+	distribution?: unknown;
+	environmentName?: unknown;
+	environmentUrl?: unknown;
+};
+
+export type SetupWizardSaveState = SetupWizardTargetIdentity & {
+	qiimeStatus?: unknown;
+	q2lspStatus?: unknown;
+	validatedInterpreterPath?: unknown;
+	validatedTargetKey?: unknown;
+	targetKey?: unknown;
+};
+
+export type WizardStepStatus = 'passed' | 'failed' | 'current' | 'not started';
+
+export type WizardState = {
+	route: SetupWizardRoute;
+	manager: string;
+	managerStatus: string;
+	managerStatuses: Record<string, string>;
+	qiimeStatus: string;
+	q2lspStatus: string;
+	q2lspVersion: string;
+	pendingCommand: string;
+	statusMessage: string;
+	selectedCandidateId: string;
+	interpreterPath: string;
+	candidates: SetupWizardInterpreterCandidate[];
+	environments: QiimeEnvironmentOption[];
+	metadataStatus: 'loading' | 'ready' | 'missing';
+	version: string;
+	distribution: string;
+	environmentUrl: string;
+	platform: QiimePlatform;
+	submittedTarget?: { version: string; distribution: string; environmentName: string; environmentUrl: string };
+	savedInterpreterPath: boolean;
+	validatedInterpreterPath?: string;
+	validatedTargetKey?: string;
+};
+
+const normalizeIdentityPart = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+
+export const buildWizardTargetKey = (target: SetupWizardTargetIdentity): string => {
+	const route = normalizeIdentityPart(target.route);
+	if (route === 'existing') {
+		return `existing:${normalizeIdentityPart(target.interpreterPath)}`;
+	}
+	if (route === 'new') {
+		return [
+			'new',
+			normalizeIdentityPart(target.manager),
+			normalizeIdentityPart(target.version),
+			normalizeIdentityPart(target.distribution),
+			normalizeIdentityPart(target.environmentName),
+			normalizeIdentityPart(target.environmentUrl),
+		].join(':');
+	}
+	return `${route}:`;
+};
+
+
 type SetupWizardOptions = {
 	nonce: string;
 	interpreterPath?: string;
+	activePythonInterpreterPath?: string;
+	interpreterCandidates?: SetupWizardInterpreterCandidate[];
 	platform?: QiimePlatform;
 	environments?: QiimeEnvironmentOption[];
+	metadataStatus?: 'loading' | 'ready' | 'missing';
 };
 
+export const buildSetupWizardInterpreterCandidates = (params: {
+	configuredInterpreterPath?: string;
+	activePythonInterpreterPath?: string;
+	pathCandidates?: readonly string[];
+}): SetupWizardInterpreterCandidate[] => {
+	const candidates: SetupWizardInterpreterCandidate[] = [];
+	const seen = new Set<string>();
+	const add = (candidate: SetupWizardInterpreterCandidate): void => {
+		const key = candidate.path.trim();
+		if (!key || seen.has(key)) {
+			return;
+		}
+		seen.add(key);
+		candidates.push({ ...candidate, path: key });
+	};
+
+	add({
+		id: 'configured',
+		label: 'Configured q2lsp interpreter',
+		path: params.configuredInterpreterPath ?? '',
+		source: 'config',
+	});
+	add({
+		id: 'active-python',
+		label: 'Active VS Code: Python interpreter',
+		path: params.activePythonInterpreterPath ?? '',
+		source: 'pythonExtension',
+	});
+	for (const path of params.pathCandidates ?? ['python3', 'python']) {
+		add({
+			id: `path-${path}`,
+			label: `${path} from PATH`,
+			path,
+			source: 'path',
+		});
+	}
+	return candidates;
+};
+
+export const selectedCandidate = (state: WizardState): SetupWizardInterpreterCandidate | undefined =>
+	state.candidates.find((candidate) => candidate.id === state.selectedCandidateId);
+
+export const visibleEnvironments = (state: WizardState): QiimeEnvironmentOption[] =>
+	state.environments.filter((environment) => environment.platform === state.platform.id);
+
+export const selectedEnvironment = (state: WizardState): QiimeEnvironmentOption | undefined =>
+	visibleEnvironments(state).find(
+		(environment) => environment.version === state.version && environment.distribution === state.distribution && environment.url === state.environmentUrl
+	);
+
+export const isSafeEnvironmentName = (value: string): boolean => /^[A-Za-z0-9._:-]+$/.test(String(value || ''));
+
+export const isAllowedQiimeEnvironmentUrl = (value: string): boolean => {
+	try {
+		const url = new URL(String(value || ''));
+		if (url.protocol !== 'https:' || !/\.ya?ml$/.test(url.pathname)) {
+			return false;
+		}
+		if (url.hostname === 'packages.qiime2.org') {
+			return url.pathname.startsWith('/qiime2/');
+		}
+		return url.hostname === 'raw.githubusercontent.com' && url.pathname.startsWith('/qiime2/distributions/refs/heads/dev/');
+	} catch {
+		return false;
+	}
+};
+
+export const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\''`)}'`;
+
+export const environmentName = (state: WizardState): string => selectedEnvironment(state)?.environmentName || '';
+
+export const environmentUrl = (state: WizardState): string => selectedEnvironment(state)?.url || '';
+
+export const selectedInterpreterPath = (state: WizardState): string => state.interpreterPath || selectedCandidate(state)?.path || '';
+
+export const inferredInterpreterPath = (state: WizardState): string => {
+	if (state.route === 'existing') {
+		return selectedInterpreterPath(state);
+	}
+	return state.interpreterPath || selectedCandidate(state)?.path || (state.manager === 'conda' && environmentName(state) ? '/opt/miniconda3/envs/' + environmentName(state) + '/bin/python' : 'python');
+};
+
+export const targetKey = (state: WizardState): string => {
+	if (state.route === 'existing') {
+		return 'existing:' + selectedInterpreterPath(state);
+	}
+	if (state.route === 'new') {
+		return ['new', state.manager || '', state.version || '', state.distribution || '', environmentName(state), environmentUrl(state)].join(':');
+	}
+	return `${state.route}:`;
+};
+
+export const resetValidation = (state: WizardState): void => {
+	state.qiimeStatus = 'unknown';
+	state.q2lspStatus = 'unknown';
+	state.q2lspVersion = '';
+	state.savedInterpreterPath = false;
+	state.validatedInterpreterPath = '';
+	state.validatedTargetKey = '';
+};
+
+export const saveEnabled = (state: SetupWizardSaveState): boolean => {
+	const normalize = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+	const hasWizardCollections = Array.isArray((state as Partial<WizardState>).candidates)
+		&& Array.isArray((state as Partial<WizardState>).environments);
+	const path = normalize(state.interpreterPath) || (hasWizardCollections ? selectedInterpreterPath(state as WizardState) : '');
+	if (!path || state.qiimeStatus !== 'ready' || state.q2lspStatus !== 'ready') {
+		return false;
+	}
+	const currentTargetKey = normalize(state.targetKey)
+		|| (hasWizardCollections ? targetKey(state as WizardState) : buildWizardTargetKey(state));
+	return normalize(state.validatedInterpreterPath) === path
+		&& normalize(state.validatedTargetKey) === currentTargetKey;
+};
+
+export const qiimeCommand = (state: WizardState): string => {
+	if (state.metadataStatus !== 'ready' || !environmentUrl(state)) {
+		return '';
+	}
+	if (state.manager === 'manual') {
+		return 'Open QIIME 2 Quickstart, then return to validate your selected interpreter.';
+	}
+	if (!isAllowedQiimeEnvironmentUrl(environmentUrl(state)) || !isSafeEnvironmentName(environmentName(state))) {
+		return '';
+	}
+	if (state.manager === 'pixi') {
+		return 'pixi init && pixi import --format conda-env ' + shellQuote(environmentUrl(state)) + ' -e ' + shellQuote(environmentName(state)) + ' && pixi install';
+	}
+	const subdirPrefix = state.platform.condaSubdir ? 'CONDA_SUBDIR=' + shellQuote(state.platform.condaSubdir) + ' ' : '';
+	return subdirPrefix + 'conda env create --name ' + shellQuote(environmentName(state)) + ' --file ' + shellQuote(environmentUrl(state));
+};
+
+export const q2lspInstallCommand = (state: WizardState): string => {
+	if (state.route === 'existing') {
+		return selectedInterpreterPath(state) ? shellQuote(selectedInterpreterPath(state)) + ' -m pip install -U q2lsp' : '';
+	}
+	if (state.manager === 'pixi') {
+		return 'pixi run python -m pip install -U q2lsp';
+	}
+	if (state.manager === 'conda' && environmentName(state) && isSafeEnvironmentName(environmentName(state))) {
+		return 'conda run -n ' + shellQuote(environmentName(state)) + ' python -m pip install -U q2lsp';
+	}
+	return shellQuote(inferredInterpreterPath(state)) + ' -m pip install -U q2lsp';
+};
+
+export const statusForStep = (route: SetupWizardRoute, index: number, state: WizardState): WizardStepStatus => {
+	if (route === 'existing') {
+		if (index === 0) {
+			return state.interpreterPath || selectedCandidate(state) ? 'passed' : 'current';
+		}
+		if (index === 1) {
+			return state.qiimeStatus === 'ready' ? 'passed' : state.qiimeStatus === 'missing' ? 'failed' : 'current';
+		}
+		if (index === 2) {
+			return state.q2lspStatus === 'ready' ? 'passed' : state.q2lspStatus === 'missing' ? 'failed' : 'current';
+		}
+		if (index === 3) {
+			return state.savedInterpreterPath ? 'passed' : 'current';
+		}
+		return state.savedInterpreterPath ? 'passed' : 'not started';
+	}
+	if (index === 0) {
+		return state.manager ? 'passed' : 'current';
+	}
+	if (index === 1) {
+		return state.manager === 'manual' || state.managerStatus === 'ready' ? 'passed' : state.managerStatus === 'missing' ? 'failed' : 'current';
+	}
+	if (index === 2) {
+		return selectedEnvironment(state) ? 'passed' : 'current';
+	}
+	if (index === 3) {
+		return state.submittedTarget ? 'passed' : 'current';
+	}
+	if (index === 4) {
+		return state.qiimeStatus === 'ready' ? 'passed' : state.qiimeStatus === 'missing' ? 'failed' : 'current';
+	}
+	if (index === 5) {
+		return state.q2lspStatus === 'ready' ? 'passed' : state.q2lspStatus === 'missing' ? 'failed' : 'current';
+	}
+	if (index === 6) {
+		return state.savedInterpreterPath ? 'passed' : 'current';
+	}
+	return state.savedInterpreterPath ? 'passed' : 'not started';
+};
+
+export const switchManager = (state: WizardState, nextManager: string): void => {
+	if (state.manager !== nextManager) {
+		state.manager = nextManager;
+		state.managerStatus = state.managerStatuses[nextManager] || 'unknown';
+		state.submittedTarget = undefined;
+		resetValidation(state);
+	}
+};
+
+export const selectCandidate = (state: WizardState, candidateId: string): void => {
+	state.selectedCandidateId = candidateId;
+	state.interpreterPath = selectedCandidate(state)?.path || '';
+	resetValidation(state);
+};
+
+const serializeFunction = (name: string, fn: { toString(): string }): string => {
+	const source = fn.toString()
+		.replace(/\(0, exports\.([A-Za-z0-9_]+)\)\(/g, '$1(')
+		.replace(/exports\.([A-Za-z0-9_]+)/g, '$1');
+	return `const ${name} = ${source};`;
+};
+
+export const serializeWebviewScriptFunctions = (): string => [
+	serializeFunction('selectedCandidate', selectedCandidate),
+	serializeFunction('visibleEnvironments', visibleEnvironments),
+	serializeFunction('selectedEnvironment', selectedEnvironment),
+	serializeFunction('isSafeEnvironmentName', isSafeEnvironmentName),
+	serializeFunction('isAllowedQiimeEnvironmentUrl', isAllowedQiimeEnvironmentUrl),
+	serializeFunction('shellQuote', shellQuote),
+	serializeFunction('environmentName', environmentName),
+	serializeFunction('environmentUrl', environmentUrl),
+	serializeFunction('selectedInterpreterPath', selectedInterpreterPath),
+	serializeFunction('inferredInterpreterPath', inferredInterpreterPath),
+	serializeFunction('targetKey', targetKey),
+	serializeFunction('resetValidation', resetValidation),
+	serializeFunction('saveEnabled', saveEnabled),
+	serializeFunction('qiimeCommand', qiimeCommand),
+	serializeFunction('q2lspInstallCommand', q2lspInstallCommand),
+	serializeFunction('statusForStep', statusForStep),
+	serializeFunction('switchManager', switchManager),
+	serializeFunction('selectCandidate', selectCandidate),
+].join('\n');
+
 export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
-	const initialInterpreterPath = options.interpreterPath ?? '';
 	const platform = options.platform ?? resolveQiimePlatform(process.platform, process.arch);
-	const environments = options.environments ?? [];
-	const stepButtons = SETUP_WIZARD_FLOW_STEPS.map(
-		(step, index) => `
-			<div class="step" data-step-index="${index}">
-				<span class="step-index">${index + 1}</span>
-				<span>${escapeHtml(step.label.replace(/^\d\s/, ''))}</span>
-			</div>`
-	).join('');
-	const managerCards = SETUP_WIZARD_MANAGERS.map(
-		(manager) => `
-			<button type="button" class="option-card" data-manager="${manager.id}">
-				<span class="option-title">${escapeHtml(manager.label)}</span>
-				<span class="option-description">${escapeHtml(manager.description)}</span>
-			</button>`
-	).join('');
+	const environments = (options.environments ?? []).filter((environment) => environment.platform === platform.id);
+	const metadataStatus = options.metadataStatus ?? (environments.length > 0 ? 'ready' : 'loading');
+	const interpreterCandidates = options.interpreterCandidates ?? buildSetupWizardInterpreterCandidates({
+		configuredInterpreterPath: options.interpreterPath,
+		activePythonInterpreterPath: options.activePythonInterpreterPath,
+	});
 	const initialVersion = resolveInitialQiimeVersion(environments);
 	const initialDistributions = uniqueQiimeDistributions(environments.filter(
 		(environment) => environment.version === initialVersion
@@ -69,24 +381,19 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 		.filter((environment) => environment.version === initialVersion)
 		.filter((environment) => environment.distribution === (initialDistributions[0] ?? ''))
 		.sort((left, right) => left.fileName.localeCompare(right.fileName));
-	const distributionOptions = initialDistributions.map(
-		(distribution) => `<option value="${escapeHtml(distribution)}">${escapeHtml(distribution)}</option>`
-	).join('');
-	const environmentUrlOptions = initialEnvironmentOptions.map(
-		(environment) => `<option value="${escapeHtml(environment.url)}">${escapeHtml(environment.fileName)}</option>`
-	).join('');
-	const initialVersions = uniqueQiimeVersions(environments);
-	const versionOptions = initialVersions.map((version) => `<option value="${version}">${escapeHtml(version)}</option>`).join('');
-
-	const bootstrapState = JSON.stringify({
-		interpreterPath: initialInterpreterPath,
+	const bootstrapState = serializeWebviewScriptState({
+		interpreterPath: options.interpreterPath ?? interpreterCandidates[0]?.path ?? '',
+		interpreterCandidates,
 		managers: SETUP_WIZARD_MANAGERS,
 		platform,
 		environments,
+		metadataStatus,
 		initialVersion,
 		initialDistribution: initialDistributions[0] ?? '',
 		initialEnvironmentUrl: initialEnvironmentOptions[0]?.url ?? '',
 	});
+
+	const serializedFunctions = serializeWebviewScriptFunctions();
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -96,302 +403,120 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>q2lsp Setup Wizard</title>
 	<style>
-		:root {
-			color-scheme: dark;
-		}
-		body {
-			color: var(--vscode-foreground);
-			background: var(--vscode-editor-background);
-			font-family: var(--vscode-font-family);
-			font-size: var(--vscode-font-size);
-			margin: 0;
-		}
-		button,
-		select {
-			font: inherit;
-		}
-		.shell {
-			box-sizing: border-box;
-			display: grid;
-			gap: 18px;
-			min-height: 100vh;
-			padding: 22px 24px;
-		}
-		.header {
-			border-bottom: 1px solid var(--vscode-widget-border);
-			padding-bottom: 12px;
-		}
-		h1 {
-			font-size: 20px;
-			font-weight: 600;
-			margin: 0 0 14px;
-		}
-		.steps {
-			display: grid;
-			gap: 8px;
-			grid-template-columns: repeat(4, minmax(0, 1fr));
-		}
-		.step {
-			align-items: center;
-			background: transparent;
-			border: 1px solid var(--vscode-widget-border);
-			color: var(--vscode-descriptionForeground);
-			display: flex;
-			gap: 8px;
-			min-height: 34px;
-			padding: 5px 9px;
-			text-align: left;
-		}
-		.step.is-active {
-			border-color: var(--vscode-focusBorder);
-			color: var(--vscode-foreground);
-		}
-		.step.is-complete {
-			color: var(--vscode-testing-iconPassed);
-		}
-		.step-index {
-			align-items: center;
-			border: 1px solid currentColor;
-			border-radius: 50%;
-			display: inline-flex;
-			height: 18px;
-			justify-content: center;
-			width: 18px;
-		}
-		.context-chips {
-			display: flex;
-			flex-wrap: wrap;
-			gap: 6px;
-			margin-top: 8px;
-			min-height: 20px;
-		}
-		.chip {
-			border: 1px solid var(--vscode-widget-border);
-			border-radius: 999px;
-			color: var(--vscode-descriptionForeground);
-			font-size: 11px;
-			line-height: 18px;
-			padding: 0 8px;
-		}
-		.chip.success {
-			border-color: color-mix(in srgb, var(--vscode-testing-iconPassed) 50%, transparent);
-			color: var(--vscode-testing-iconPassed);
-		}
-		.chip.warning {
-			border-color: color-mix(in srgb, var(--vscode-editorWarning-foreground) 55%, transparent);
-			color: var(--vscode-editorWarning-foreground);
-		}
-		main {
-			max-width: 860px;
-		}
-		.screen {
-			display: grid;
-			gap: 16px;
-		}
-		.screen[hidden] {
-			display: none;
-		}
-		h2 {
-			font-size: 18px;
-			font-weight: 600;
-			margin: 0;
-		}
-		.option-grid,
-		.summary-grid {
-			display: grid;
-			gap: 10px;
-		}
-		.option-card {
-			background: var(--vscode-sideBar-background);
-			border: 1px solid var(--vscode-widget-border);
-			color: var(--vscode-foreground);
-			cursor: pointer;
-			display: flex;
-			flex-direction: column;
-			gap: 3px;
-			padding: 10px 12px;
-			text-align: left;
-		}
-		.option-card.is-selected {
-			border-color: var(--vscode-focusBorder);
-			box-shadow: inset 3px 0 0 var(--vscode-focusBorder);
-		}
-		.option-title,
-		.row-label {
-			font-weight: 600;
-		}
-		.option-description,
-		.row-value,
-		.note {
-			color: var(--vscode-descriptionForeground);
-		}
-		.field-row {
-			display: grid;
-			gap: 10px;
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-		.field-row.single {
-			grid-template-columns: minmax(0, 1fr);
-		}
-		label {
-			display: grid;
-			gap: 5px;
-			font-weight: 600;
-		}
-		select {
-			background: var(--vscode-dropdown-background);
-			border: 1px solid var(--vscode-dropdown-border);
-			color: var(--vscode-dropdown-foreground);
-			padding: 6px 8px;
-		}
-		.summary-row {
-			align-items: baseline;
-			border-bottom: 1px solid var(--vscode-widget-border);
-			display: grid;
-			gap: 12px;
-			grid-template-columns: 180px 1fr;
-			padding: 8px 0;
-		}
-		.command-box {
-			background: var(--vscode-textCodeBlock-background);
-			border: 1px solid var(--vscode-widget-border);
-			display: grid;
-			gap: 8px;
-			padding: 10px;
-		}
-		.status-line {
-			border: 1px solid var(--vscode-widget-border);
-			color: var(--vscode-descriptionForeground);
-			min-height: 18px;
-			padding: 8px 10px;
-		}
-		.status-line:empty {
-			display: none;
-		}
-		code {
-			color: var(--vscode-textPreformat-foreground);
-			font-family: var(--vscode-editor-font-family);
-			white-space: pre-wrap;
-			word-break: break-word;
-		}
-		.actions {
-			align-items: center;
-			display: flex;
-			flex-wrap: wrap;
-			gap: 8px;
-			justify-content: flex-end;
-		}
-		.action {
-			background: var(--vscode-button-secondaryBackground);
-			border: 1px solid var(--vscode-button-border, transparent);
-			color: var(--vscode-button-secondaryForeground);
-			cursor: pointer;
-			padding: 6px 11px;
-		}
-		.action.primary {
-			background: var(--vscode-button-background);
-			color: var(--vscode-button-foreground);
-		}
-		.action[data-back] {
-			margin-right: auto;
-		}
-		.action:disabled {
-			cursor: not-allowed;
-			opacity: 0.5;
-		}
+		:root { color-scheme: dark; }
+		body { color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); margin: 0; }
+		button, select { font: inherit; }
+		button:focus-visible, select:focus-visible, .card:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+		.shell { box-sizing: border-box; display: grid; gap: 18px; max-width: 1120px; padding: 22px 24px; }
+		h1 { font-size: 20px; margin: 0; }
+		h2 { font-size: 18px; margin: 0; }
+		h3 { font-size: 15px; margin: 0; }
+		.main-grid { display: grid; gap: 16px; }
+		@media (min-width: 900px) { .main-grid.has-route { grid-template-columns: 280px minmax(0, 1fr); } }
+		.card, .panel { background: var(--vscode-sideBar-background); border: 1px solid var(--vscode-widget-border); color: var(--vscode-foreground); padding: 12px; transition: border-color 120ms ease, background 120ms ease; }
+		.card:hover, button.action:hover:not(:disabled) { border-color: var(--vscode-focusBorder); }
+		.route-grid, .option-grid, .candidate-list, .field-grid, .content-stack { display: grid; gap: 10px; }
+		@media (min-width: 760px) { .route-grid, .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+		.route-card, .option-card { cursor: pointer; text-align: left; }
+		.is-selected { border-color: var(--vscode-focusBorder); box-shadow: inset 3px 0 0 var(--vscode-focusBorder); }
+		.checklist { display: grid; gap: 8px; margin: 0; padding: 0; }
+		.checklist li { align-items: start; display: grid; gap: 8px; grid-template-columns: auto 1fr; list-style: none; }
+		.badge { border: 1px solid currentColor; border-radius: 999px; color: var(--vscode-descriptionForeground); font-size: 11px; padding: 1px 7px; }
+		.badge.current { color: var(--vscode-focusBorder); } .badge.passed { color: var(--vscode-testing-iconPassed); } .badge.failed { color: var(--vscode-testing-iconFailed); }
+		.meta, .muted, .candidate-path { color: var(--vscode-descriptionForeground); }
+		.candidate-status { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+		.status-ready { color: var(--vscode-testing-iconPassed); } .status-missing, .error { color: var(--vscode-testing-iconFailed); }
+		[role="alert"] { border-color: var(--vscode-testing-iconFailed); }
+		.command-box { background: var(--vscode-textCodeBlock-background); border: 1px solid var(--vscode-widget-border); display: grid; gap: 8px; padding: 10px; }
+		code { color: var(--vscode-textPreformat-foreground); font-family: var(--vscode-editor-font-family); white-space: pre-wrap; word-break: break-word; }
+		.actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+		.action { background: var(--vscode-button-secondaryBackground); border: 1px solid var(--vscode-button-border, transparent); color: var(--vscode-button-secondaryForeground); cursor: pointer; padding: 6px 11px; }
+		.action.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); font-weight: 600; }
+		.action:disabled { cursor: not-allowed; opacity: 0.5; }
+		label { display: grid; gap: 5px; font-weight: 600; } select { background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); color: var(--vscode-dropdown-foreground); padding: 6px 8px; }
+		.screen[hidden], .route-panel[hidden], .metadata-error[hidden], .submitted-target[hidden], .manager-missing[hidden] { display: none; }
 	</style>
 </head>
 <body>
 	<div class="shell">
-		<header class="header">
+		<header class="content-stack">
 			<h1>q2lsp Setup Wizard</h1>
-			<nav class="steps" aria-label="Setup flow">
-				${stepButtons}
-			</nav>
-			<div class="context-chips" id="contextChips"></div>
+			<p class="muted">Connect an existing QIIME 2 environment or create a new one. Terminal commands never count as success; validate after commands finish.</p>
+			<div id="globalStatus" role="status" aria-live="polite" class="panel"></div>
 		</header>
-		<main>
-			<section class="screen" data-screen="0">
-				<h2>Choose package manager</h2>
-				<div class="option-grid">
-					${managerCards}
-				</div>
-				<div class="actions">
-					<button type="button" class="action" data-command="selectPythonInterpreter">Select existing QIIME 2 interpreter</button>
-					<button type="button" class="action primary" data-next>Select</button>
-				</div>
-			</section>
-			<section class="screen" data-screen="1" hidden>
-				<h2 id="installManagerHeading">Install selected manager</h2>
-				<div class="summary-grid">
-					<div class="summary-row">
-						<span class="row-label">Selected manager</span>
-						<span class="row-value" id="selectedManagerLabel"></span>
-					</div>
-					<div class="summary-row">
-						<span class="row-label">Status</span>
-						<span class="row-value" id="managerStatus">Not installed</span>
-					</div>
-				</div>
-				<div class="command-box">
-					<code id="managerCommand"></code>
-				</div>
-				<div class="status-line" id="managerStatusMessage"></div>
-				<div class="actions">
-					<button type="button" class="action" data-back>Back</button>
-					<button type="button" class="action" data-command="checkManager">I installed it, skip it</button>
-					<button type="button" class="action primary" id="installManagerPrimaryAction" data-command="installManager">Install in Terminal</button>
+		<main id="mainGrid" class="main-grid">
+			<section class="screen content-stack" id="routeScreen">
+				<h2>What do you want to do?</h2>
+				<div class="route-grid">
+					<button type="button" class="card route-card" data-route="existing">
+						<h3>Use existing QIIME 2 environment</h3>
+						<p class="muted">Pick and validate a Python interpreter that already has QIIME 2.</p>
+					</button>
+					<button type="button" class="card route-card" data-route="new">
+						<h3>Create new QIIME 2 environment</h3>
+						<p class="muted">Choose Conda, Pixi, or Manual and validate each result.</p>
+					</button>
 				</div>
 			</section>
-			<section class="screen" data-screen="2" hidden>
-				<h2>Install QIIME 2 environment</h2>
-				<div class="field-row">
-					<label>
-						Version
-						<select id="versionSelect">
-							${versionOptions}
-						</select>
-					</label>
-					<label>
-						Distribution
-						<select id="distributionSelect">
-							${distributionOptions}
-						</select>
-					</label>
-				</div>
-				<div class="field-row single">
-					<label>
-						Environment file URL
-						<select id="environmentUrlSelect">
-							${environmentUrlOptions}
-						</select>
-					</label>
-				</div>
-				<div class="command-box">
-					<code id="qiimeCommand"></code>
-					<span class="note">Official environment file will be opened or downloaded before running.</span>
-				</div>
-				<div class="status-line" id="qiimeStatusMessage"></div>
+
+			<aside id="checklistPanel" class="panel route-panel" hidden>
+				<h2 id="checklistTitle">Setup checklist</h2>
+				<ol id="checklist" class="checklist" aria-label="Setup checklist"></ol>
+			</aside>
+
+			<section id="existingRoute" class="route-panel content-stack" hidden>
+				<h2>Use existing QIIME 2 environment</h2>
+				<div class="candidate-list" id="candidateList"></div>
 				<div class="actions">
-					<button type="button" class="action" data-back>Back</button>
-					<button type="button" class="action" data-command="validateEnvironment">Validate Environment</button>
-					<button type="button" class="action primary" data-command="createQiimeEnvironment">Create QIIME Environment</button>
-				</div>
-			</section>
-			<section class="screen" data-screen="3" hidden>
-				<h2>Install q2lsp</h2>
-				<div class="command-box">
-					<code id="q2lspCommand"></code>
-					<span class="note">Installs only the language server package into the selected QIIME 2 environment.</span>
-				</div>
-				<div class="status-line" id="q2lspStatusMessage"></div>
-				<div class="actions">
-					<button type="button" class="action" data-back>Back</button>
+					<button type="button" class="action" data-command="browseInterpreter">Browse for another Python interpreter</button>
+					<button type="button" class="action" data-command="validateEnvironment">Validate QIIME 2</button>
 					<button type="button" class="action" data-command="validateQ2lsp">Validate q2lsp</button>
-					<button type="button" class="action" id="saveInterpreterPathAction" data-command="saveInterpreterPath" disabled>Save interpreter path</button>
-					<button type="button" class="action" id="restartServerAction" data-command="restartServer" disabled>Restart q2lsp server</button>
-					<button type="button" class="action primary" data-command="installQ2lsp">Install q2lsp</button>
+					<button type="button" class="action primary" id="saveExistingInterpreterPath" data-command="saveInterpreterPath" disabled>Save interpreter path</button>
 				</div>
+				<div class="panel" id="existingRecovery" role="alert" hidden>
+					<p>QIIME 2 Missing. Choose another interpreter, create a new QIIME 2 environment, or show log.</p>
+					<div class="actions"><button type="button" class="action" data-route="new">Create new QIIME 2 environment</button><button type="button" class="action" data-command="showLog">Show log</button></div>
+				</div>
+			</section>
+
+			<section id="newRoute" class="route-panel content-stack" hidden>
+				<h2>Create new QIIME 2 environment</h2>
+				<div class="option-grid" id="managerCards"></div>
+				<div class="panel manager-missing" id="managerMissing" role="alert">
+					<p><strong>Conda was not found.</strong></p>
+					<p>Install Miniconda, then check again.</p>
+					<div class="actions"><button type="button" class="action primary" data-command="installManager">Install Miniconda in Terminal</button><button type="button" class="action" data-command="checkManager">I installed it — check again</button></div>
+				</div>
+				<div class="metadata-error panel" id="metadataError" role="alert" hidden>
+					<p><strong>Could not load QIIME 2 environment metadata.</strong></p>
+					<p>The Setup Wizard needs the official QIIME 2 environment list before it can create a command.</p>
+					<div class="actions"><button type="button" class="action" data-command="retryQiimeMetadata">Retry</button><button type="button" class="action" data-command="openQiimeQuickstart">Open QIIME 2 Quickstart</button></div>
+				</div>
+				<div class="field-grid" id="targetSelectors" data-metadata-required>
+					<label>Version<select id="versionSelect"></select></label>
+					<label>Distribution<select id="distributionSelect"></select></label>
+				</div>
+				<details>
+					<summary>Advanced details</summary>
+					<label>Environment file URL<select id="environmentUrlSelect" disabled></select></label>
+				</details>
+				<div class="command-box" id="qiimeCommandBox"><code id="qiimeCommand">Loading QIIME 2 environment metadata...</code></div>
+				<div id="submittedTarget" class="panel submitted-target" hidden>
+					<p><strong>Command sent to Terminal for:</strong></p>
+					<p id="submittedTargetSummary"></p>
+					<div class="actions"><button type="button" class="action primary" data-command="validateEnvironment">Validate QIIME 2</button><button type="button" class="action" id="changeTargetAction">Change target</button></div>
+				</div>
+				<div class="actions">
+					<button type="button" class="action" data-command="checkManager">Check installation</button>
+					<button type="button" class="action primary" id="createEnvironmentAction" data-command="createQiimeEnvironment">Create environment in Terminal</button>
+				</div>
+			</section>
+
+			<section id="q2lspPanel" class="route-panel content-stack" hidden>
+				<h2>Install or validate q2lsp</h2>
+				<div class="command-box"><code id="q2lspCommand"></code></div>
+				<p id="q2lspVersionInfo" class="muted">Server package: <span id="q2lspVersionValue">not validated</span></p>
+				<div class="actions"><button type="button" class="action primary" data-command="installQ2lsp">Install q2lsp in Terminal</button><button type="button" class="action" data-command="validateQ2lsp">Validate q2lsp</button><button type="button" class="action" id="saveInterpreterPathAction" data-command="saveInterpreterPath" disabled>Save interpreter path</button></div>
 			</section>
 		</main>
 	</div>
@@ -399,246 +524,116 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 		const vscode = acquireVsCodeApi();
 		const bootstrap = ${bootstrapState};
 		const state = {
-			stepIndex: 0,
+			route: 'start',
 			manager: 'conda',
-			distribution: bootstrap.initialDistribution,
-			version: bootstrap.initialVersion,
-			environmentUrl: bootstrap.initialEnvironmentUrl,
-			interpreterPath: bootstrap.interpreterPath,
 			managerStatus: 'unknown',
+			managerStatuses: {},
 			qiimeStatus: 'unknown',
 			q2lspStatus: 'unknown',
-			savedInterpreterPath: false,
+			q2lspVersion: '',
+			pendingCommand: '',
 			statusMessage: '',
+			selectedCandidateId: bootstrap.interpreterCandidates[0]?.id || '',
+			interpreterPath: bootstrap.interpreterPath,
+			candidates: bootstrap.interpreterCandidates,
 			environments: bootstrap.environments,
+			metadataStatus: bootstrap.metadataStatus,
+			version: bootstrap.initialVersion,
+			distribution: bootstrap.initialDistribution,
+			environmentUrl: bootstrap.initialEnvironmentUrl,
 			platform: bootstrap.platform,
+			submittedTarget: undefined,
+			savedInterpreterPath: false,
 		};
-		const managerById = Object.fromEntries(bootstrap.managers.map((manager) => [manager.id, manager]));
-		const uniqueValues = (values) => Array.from(new Set(values)).sort((left, right) =>
-			right.localeCompare(left, undefined, { numeric: true })
-		);
-		const availableEnvironmentsForVersion = () => state.environments
-			.filter((environment) => environment.version === state.version);
-		const firstEnvironmentForVersion = () => availableEnvironmentsForVersion()
-			.sort((left, right) => left.distribution.localeCompare(right.distribution))[0];
-		const availableEnvironmentsForDistribution = () => availableEnvironmentsForVersion()
-			.filter((environment) => environment.distribution === state.distribution);
-		const firstEnvironmentForDistribution = () => availableEnvironmentsForDistribution()
-			.sort((left, right) => left.url.localeCompare(right.url))[0];
-		const normalizeDistributionForVersion = () => {
-			const distributionsForVersion = new Set(availableEnvironmentsForVersion()
-				.map((environment) => environment.distribution));
-			if (!distributionsForVersion.has(state.distribution)) {
-				state.distribution = firstEnvironmentForVersion()?.distribution || '';
-			}
-		};
-		const normalizeEnvironmentUrlForDistribution = () => {
-			const urlsForDistribution = new Set(availableEnvironmentsForDistribution()
-				.map((environment) => environment.url));
-			if (!urlsForDistribution.has(state.environmentUrl)) {
-				state.environmentUrl = firstEnvironmentForDistribution()?.url || '';
-			}
-		};
+		const existingSteps = ${JSON.stringify(SETUP_WIZARD_EXISTING_ROUTE_STEPS)};
+		const newSteps = ${JSON.stringify(SETUP_WIZARD_NEW_ROUTE_STEPS)};
+		const uniqueValues = (values) => Array.from(new Set(values)).sort((left, right) => right.localeCompare(left, undefined, { numeric: true }));
+		const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+		${serializedFunctions}
 		const updateSelectors = () => {
-			const availableVersions = uniqueValues(state.environments
-				.map((environment) => environment.version));
-			const versionSelect = document.getElementById('versionSelect');
-			versionSelect.innerHTML = availableVersions
-				.map((version) => '<option value="' + version + '">' + version + '</option>')
-				.join('');
-			if (!availableVersions.includes(state.version)) {
-				state.version = availableVersions[0] || '';
-			}
-			versionSelect.value = state.version;
-			normalizeDistributionForVersion();
-
-			const distributionsForVersion = new Set(availableEnvironmentsForVersion()
-				.map((environment) => environment.distribution));
-			const distributionSelect = document.getElementById('distributionSelect');
-			distributionSelect.innerHTML = Array.from(distributionsForVersion).sort()
-				.map((distribution) => '<option value="' + distribution + '">' + distribution + '</option>')
-				.join('');
-			normalizeDistributionForVersion();
-			distributionSelect.value = state.distribution;
-			normalizeEnvironmentUrlForDistribution();
-
-			const environmentUrlSelect = document.getElementById('environmentUrlSelect');
-			environmentUrlSelect.innerHTML = availableEnvironmentsForDistribution()
-				.sort((left, right) => left.fileName.localeCompare(right.fileName))
-				.map((environment) => '<option value="' + environment.url + '">' + environment.fileName + '</option>')
-				.join('');
-			normalizeEnvironmentUrlForDistribution();
-			environmentUrlSelect.value = state.environmentUrl;
+			const environmentsForPlatform = visibleEnvironments(state);
+			const versions = uniqueValues(environmentsForPlatform.map((environment) => environment.version));
+			if (!versions.includes(state.version)) state.version = versions[0] || '';
+			document.getElementById('versionSelect').innerHTML = versions.map((version) => '<option value="' + escapeHtml(version) + '">' + escapeHtml(version) + '</option>').join('');
+			document.getElementById('versionSelect').value = state.version;
+			const distributions = Array.from(new Set(environmentsForPlatform.filter((environment) => environment.version === state.version).map((environment) => environment.distribution))).sort();
+			if (!distributions.includes(state.distribution)) state.distribution = distributions[0] || '';
+			document.getElementById('distributionSelect').innerHTML = distributions.map((distribution) => '<option value="' + escapeHtml(distribution) + '">' + escapeHtml(distribution) + '</option>').join('');
+			document.getElementById('distributionSelect').value = state.distribution;
+			const envs = environmentsForPlatform.filter((environment) => environment.version === state.version && environment.distribution === state.distribution).sort((left, right) => left.fileName.localeCompare(right.fileName));
+			if (!envs.some((environment) => environment.url === state.environmentUrl)) state.environmentUrl = envs[0]?.url || '';
+			document.getElementById('environmentUrlSelect').innerHTML = envs.map((environment) => '<option value="' + escapeHtml(environment.url) + '">' + escapeHtml(environment.url) + '</option>').join('');
+			document.getElementById('environmentUrlSelect').value = state.environmentUrl;
 		};
-
-		const selectedEnvironment = () => state.environments.find((environment) =>
-			environment.distribution === state.distribution &&
-			environment.version === state.version &&
-			environment.url === state.environmentUrl
-		) || firstEnvironmentForDistribution() || firstEnvironmentForVersion();
-		const environmentName = () => selectedEnvironment()?.environmentName || '';
-		const environmentUrl = () => selectedEnvironment()?.url || '';
-		const inferredInterpreterPath = () => state.interpreterPath ||
-			'/opt/miniconda3/envs/' + environmentName() + '/bin/python';
-		const pixiEnvironmentName = () => 'q2:' + state.distribution + ':' + state.version;
-		const qiimeCommand = () => {
-			if (state.manager === 'pixi') {
-				return 'pixi init && pixi import --format conda-env ' + environmentUrl() +
-					' -e ' + pixiEnvironmentName() + ' && pixi install';
-			}
-			if (state.manager === 'manual') {
-				return 'Open QIIME 2 Quickstart, then return to validate the selected interpreter.';
-			}
-			const subdirPrefix = state.platform.condaSubdir ? 'CONDA_SUBDIR=' + state.platform.condaSubdir + ' ' : '';
-			return subdirPrefix + 'conda env create --name ' + environmentName() +
-				' --file ' + environmentUrl();
+		const renderChecklist = () => {
+			const steps = state.route === 'existing' ? existingSteps : newSteps;
+			document.getElementById('checklist').innerHTML = steps.map((step, index) => {
+				const status = statusForStep(state.route, index, state);
+				return '<li><span class="badge ' + escapeHtml(status) + '">' + escapeHtml(status) + '</span><span>' + escapeHtml(step.label) + '</span></li>';
+			}).join('');
 		};
-		const q2lspInstallCommand = () => {
-			if (state.manager === 'pixi') {
-				return 'pixi run python -m pip install -U q2lsp';
-			}
-			if (state.manager === 'conda') {
-				return 'conda run -n ' + environmentName() + ' python -m pip install -U q2lsp';
-			}
-			return inferredInterpreterPath() + ' -m pip install -U q2lsp';
+		const renderCandidates = () => {
+			document.getElementById('candidateList').innerHTML = state.candidates.map((candidate) => '<button type="button" class="card candidate-card ' + (candidate.id === state.selectedCandidateId ? 'is-selected' : '') + '" data-candidate-id="' + escapeHtml(candidate.id) + '"><strong>' + escapeHtml(candidate.label) + '</strong><span class="candidate-path">' + escapeHtml(candidate.path) + '</span><span class="candidate-status"><span>QIIME 2: <span class="status-' + escapeHtml(candidate.qiimeStatus || 'missing') + '">' + (candidate.qiimeStatus === 'ready' ? 'Ready' : candidate.available === false ? 'Unavailable' : 'Missing') + '</span></span><span>q2lsp: <span class="status-' + escapeHtml(candidate.q2lspStatus || 'missing') + '">' + (candidate.q2lspStatus === 'ready' ? 'Ready' : 'Missing') + '</span></span></span></button>').join('');
+			for (const card of document.querySelectorAll('[data-candidate-id]')) card.addEventListener('click', () => { selectCandidate(state, card.dataset.candidateId); render(); });
 		};
-
-		const renderChips = () => {
-			const chips = [];
-			chips.push({ kind: 'neutral', label: 'OS: ' + state.platform.label });
-			if (state.stepIndex >= 1) {
-				chips.push({
-					kind: 'neutral',
-					label: 'Manager: ' + managerById[state.manager].label.replace(' / Miniconda', ''),
-				});
-			}
-			if (state.stepIndex >= 2) {
-				chips.push({ kind: 'neutral', label: 'Distribution: ' + state.distribution });
-				chips.push({ kind: 'neutral', label: 'Version: ' + state.version });
-			}
-			document.getElementById('contextChips').innerHTML = chips
-				.map((chip) => '<span class="chip ' + chip.kind + '">' + chip.label + '</span>')
-				.join('');
+		const renderManagers = () => {
+			document.getElementById('managerCards').innerHTML = bootstrap.managers.map((manager) => '<button type="button" class="card option-card ' + (manager.id === state.manager ? 'is-selected' : '') + '" data-manager="' + escapeHtml(manager.id) + '"><strong>' + escapeHtml(manager.label) + '</strong><span class="muted">' + escapeHtml(manager.description) + '</span></button>').join('');
+			for (const card of document.querySelectorAll('[data-manager]')) card.addEventListener('click', () => { switchManager(state, card.dataset.manager); render(); });
 		};
-
 		const render = () => {
 			updateSelectors();
-			for (const screen of document.querySelectorAll('[data-screen]')) {
-				screen.hidden = Number(screen.dataset.screen) !== state.stepIndex;
-			}
-			for (const step of document.querySelectorAll('[data-step-index]')) {
-				const index = Number(step.dataset.stepIndex);
-				step.classList.toggle('is-active', index === state.stepIndex);
-				step.classList.toggle('is-complete', index < state.stepIndex);
-			}
-			for (const card of document.querySelectorAll('[data-manager]')) {
-				card.classList.toggle('is-selected', card.dataset.manager === state.manager);
-			}
-			const manager = managerById[state.manager];
-			document.getElementById('installManagerHeading').textContent =
-				state.manager === 'manual' ? 'Manual setup' : 'Install ' + manager.label;
-			document.getElementById('selectedManagerLabel').textContent = manager.label;
-			document.getElementById('managerStatus').textContent =
-				state.manager === 'manual'
-					? 'External setup'
-					: state.managerStatus === 'ready'
-						? 'Installed'
-						: state.managerStatus === 'missing'
-							? 'Not installed'
-							: 'Unknown';
-			document.getElementById('managerCommand').textContent = manager.command;
-			document.getElementById('installManagerPrimaryAction').textContent =
-				state.manager === 'conda'
-					? 'Install Miniconda in Terminal'
-					: state.manager === 'pixi'
-						? 'Install Pixi in Terminal'
-						: 'Open QIIME 2 Quickstart';
-			document.getElementById('qiimeCommand').textContent = qiimeCommand();
-			document.getElementById('q2lspCommand').textContent = q2lspInstallCommand();
-			document.getElementById('managerStatusMessage').textContent =
-				state.stepIndex === 1 ? state.statusMessage : '';
-			document.getElementById('qiimeStatusMessage').textContent =
-				state.stepIndex === 2 ? state.statusMessage : '';
-			document.getElementById('q2lspStatusMessage').textContent =
-				state.stepIndex === 3 ? state.statusMessage : '';
-			document.getElementById('saveInterpreterPathAction').disabled = state.q2lspStatus !== 'ready';
-			document.getElementById('restartServerAction').disabled = !state.savedInterpreterPath;
-			renderChips();
+			document.getElementById('mainGrid').classList.toggle('has-route', state.route !== 'start');
+			document.getElementById('routeScreen').hidden = state.route !== 'start';
+			document.getElementById('checklistPanel').hidden = state.route === 'start';
+			document.getElementById('existingRoute').hidden = state.route !== 'existing';
+			document.getElementById('newRoute').hidden = state.route !== 'new';
+			document.getElementById('q2lspPanel').hidden = state.route === 'start';
+			document.getElementById('globalStatus').textContent = state.pendingCommand ? 'Running ' + state.pendingCommand + '...' : state.statusMessage;
+			const qiimeCommandText = qiimeCommand(state);
+			document.getElementById('metadataError').hidden = state.metadataStatus !== 'missing';
+			document.getElementById('targetSelectors').hidden = state.metadataStatus !== 'ready' || !!state.submittedTarget;
+			document.getElementById('createEnvironmentAction').disabled = state.metadataStatus !== 'ready' || !qiimeCommandText || !!state.submittedTarget || (state.manager !== 'manual' && state.managerStatus !== 'ready');
+			document.getElementById('managerMissing').hidden = state.manager === 'manual' || state.managerStatus !== 'missing';
+			document.getElementById('existingRecovery').hidden = state.qiimeStatus !== 'missing';
+			document.getElementById('saveExistingInterpreterPath').disabled = !saveEnabled(state);
+			document.getElementById('saveInterpreterPathAction').disabled = !saveEnabled(state);
+			document.getElementById('qiimeCommandBox').hidden = !qiimeCommandText;
+			document.getElementById('qiimeCommand').textContent = qiimeCommandText || 'Load QIIME 2 environment metadata before creating a command.';
+			document.getElementById('q2lspCommand').textContent = q2lspInstallCommand(state);
+			document.getElementById('q2lspVersionValue').textContent = state.q2lspVersion || 'not validated';
+			document.getElementById('submittedTarget').hidden = !state.submittedTarget;
+			document.getElementById('submittedTargetSummary').textContent = state.submittedTarget ? 'QIIME 2 ' + state.submittedTarget.version + ' ' + state.submittedTarget.distribution + ' — Environment: ' + state.submittedTarget.environmentName : '';
+			renderChecklist(); renderCandidates(); renderManagers();
+			for (const button of document.querySelectorAll('[data-command]')) button.disabled = !!state.pendingCommand && button.dataset.command === state.pendingCommand;
 		};
-
-		document.getElementById('distributionSelect').addEventListener('change', (event) => {
-			state.distribution = event.target.value;
-			normalizeEnvironmentUrlForDistribution();
+		document.getElementById('versionSelect').addEventListener('change', (event) => { state.version = event.target.value; state.environmentUrl = ''; state.submittedTarget = undefined; resetValidation(state); render(); });
+		document.getElementById('distributionSelect').addEventListener('change', (event) => { state.distribution = event.target.value; state.environmentUrl = ''; state.submittedTarget = undefined; resetValidation(state); render(); });
+		document.getElementById('environmentUrlSelect').addEventListener('change', (event) => { state.environmentUrl = event.target.value; state.submittedTarget = undefined; resetValidation(state); render(); });
+		document.getElementById('changeTargetAction').addEventListener('click', () => { state.submittedTarget = undefined; resetValidation(state); render(); });
+		for (const routeButton of document.querySelectorAll('[data-route]')) routeButton.addEventListener('click', () => { if (state.route !== routeButton.dataset.route) resetValidation(state); state.route = routeButton.dataset.route; render(); });
+		document.addEventListener('click', (event) => {
+			const button = event.target.closest('[data-command]');
+			if (!button) return;
+			const command = button.dataset.command;
+			state.pendingCommand = command;
+			vscode.postMessage({ command, commandText: command === 'createQiimeEnvironment' ? qiimeCommand(state) : command === 'installQ2lsp' ? q2lspInstallCommand(state) : undefined, route: state.route, interpreterPath: inferredInterpreterPath(state), manager: state.manager, version: state.version, distribution: state.distribution, environmentName: environmentName(state), environmentUrl: environmentUrl(state), condaSubdir: state.platform.condaSubdir, qiimeStatus: state.qiimeStatus, q2lspStatus: state.q2lspStatus, validatedInterpreterPath: state.validatedInterpreterPath, validatedTargetKey: state.validatedTargetKey, targetKey: targetKey(state) });
 			render();
 		});
-		document.getElementById('environmentUrlSelect').addEventListener('change', (event) => {
-			state.environmentUrl = event.target.value;
-			render();
-		});
-		document.getElementById('versionSelect').addEventListener('change', (event) => {
-			state.version = event.target.value;
-			normalizeDistributionForVersion();
-			normalizeEnvironmentUrlForDistribution();
-			render();
-		});
-		for (const card of document.querySelectorAll('[data-manager]')) {
-			card.addEventListener('click', () => {
-				state.manager = card.dataset.manager;
-				render();
-			});
-		}
-		for (const button of document.querySelectorAll('[data-next]')) {
-			button.addEventListener('click', () => {
-				state.stepIndex = Math.min(3, state.stepIndex + 1);
-				render();
-			});
-		}
-		for (const button of document.querySelectorAll('[data-back]')) {
-			button.addEventListener('click', () => {
-				state.stepIndex = Math.max(0, state.stepIndex - 1);
-				render();
-			});
-		}
-		for (const button of document.querySelectorAll('[data-command]')) {
-			button.addEventListener('click', () => {
-				const command = button.dataset.command;
-				const commandText = command === 'installManager'
-					? managerById[state.manager].command
-					: command === 'createQiimeEnvironment'
-						? qiimeCommand()
-						: command === 'installQ2lsp'
-							? q2lspInstallCommand()
-						: undefined;
-				vscode.postMessage({
-					command,
-					commandText,
-					interpreterPath: inferredInterpreterPath(),
-					manager: state.manager,
-					environmentName: environmentName(),
-					environmentUrl: environmentUrl(),
-					condaSubdir: state.platform.condaSubdir,
-				});
-			});
-		}
 		window.addEventListener('message', (event) => {
-			if (event.data?.type === 'qiimeManifest') {
-				state.environments = event.data.environments;
-				normalizeDistributionForVersion();
-				normalizeEnvironmentUrlForDistribution();
-				render();
-				return;
+			if (event.data?.type === 'qiimeManifest') { state.environments = event.data.environments; state.metadataStatus = event.data.environments.length > 0 ? 'ready' : 'missing'; state.environmentUrl = ''; state.pendingCommand = ''; resetValidation(state); render(); return; }
+			if (event.data?.type !== 'wizardStatus') return;
+			const patch = event.data.patch || {};
+			if (Array.isArray(patch.candidates)) {
+				const mergedCandidates = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
+				for (const candidate of patch.candidates) mergedCandidates.set(candidate.id, { ...(mergedCandidates.get(candidate.id) || {}), ...candidate });
+				patch.candidates = Array.from(mergedCandidates.values());
 			}
-			if (event.data?.type !== 'wizardStatus') {
-				return;
+			if (patch.checkedManager) {
+				state.managerStatuses[patch.checkedManager] = patch.managerStatus;
+				if (patch.checkedManager !== state.manager) delete patch.managerStatus;
+				delete patch.checkedManager;
 			}
-			Object.assign(state, event.data.patch);
-			if (event.data.patch.managerStatus === 'ready' && state.stepIndex === 1) {
-				state.stepIndex = 2;
-			}
-			if (event.data.patch.qiimeStatus === 'ready' && state.stepIndex === 2) {
-				state.stepIndex = 3;
-			}
-			render();
+			Object.assign(state, patch); state.pendingCommand = ''; render();
 		});
 		render();
 	</script>
@@ -646,6 +641,12 @@ export const buildSetupWizardHtml = (options: SetupWizardOptions): string => {
 </html>`;
 };
 
+const serializeWebviewScriptState = (state: unknown): string => JSON.stringify(state)
+	.replace(/</g, '\\u003c')
+	.replace(/>/g, '\\u003e')
+	.replace(/&/g, '\\u0026')
+	.replace(/\u2028/g, '\\u2028')
+	.replace(/\u2029/g, '\\u2029');
 
 const uniqueQiimeDistributions = (environments: QiimeEnvironmentOption[]): string[] => {
 	return Array.from(new Set(environments.map((environment) => environment.distribution))).sort();
@@ -658,13 +659,4 @@ const uniqueQiimeVersions = (environments: QiimeEnvironmentOption[]): string[] =
 
 const resolveInitialQiimeVersion = (environments: QiimeEnvironmentOption[]): string => {
 	return uniqueQiimeVersions(environments)[0] ?? '';
-};
-
-const escapeHtml = (value: string): string => {
-	return value
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#39;');
 };

@@ -3,8 +3,18 @@ import * as vscode from 'vscode';
 import { selectPythonInterpreter } from '../diagnosis';
 import { VALIDATION_TIMEOUT_MS, buildInterpreterValidationSnippet, parseInterpreterValidationStdout } from '../interpreter';
 import { execFileForValidation, validateInterpreter } from '../interpreter';
+import type { ValidationResult } from '../interpreter';
 
-import { buildSetupWizardHtml } from './view';
+import {
+	buildSetupWizardHtml,
+	buildSetupWizardInterpreterCandidates,
+	buildWizardTargetKey,
+	saveEnabled,
+	type SetupWizardInterpreterCandidate,
+	shellQuote,
+	isSafeEnvironmentName,
+	isAllowedQiimeEnvironmentUrl,
+} from './view';
 import {
 	QIIME_QUICKSTART_URL,
 	type QiimePlatform,
@@ -13,15 +23,42 @@ import { resolveQiimePlatform } from './qiimeMetadata';
 import { refreshQiimeManifest } from './qiimeRemote';
 
 export {
+	SETUP_WIZARD_EXISTING_ROUTE_STEPS,
 	SETUP_WIZARD_FLOW_STEPS,
 	SETUP_WIZARD_MANAGERS,
+	SETUP_WIZARD_NEW_ROUTE_STEPS,
 	buildSetupWizardHtml,
+	buildSetupWizardInterpreterCandidates,
+	buildWizardTargetKey,
+	type WizardState,
+	type WizardStepStatus,
+	selectedCandidate,
+	visibleEnvironments,
+	selectedEnvironment,
+	environmentName,
+	environmentUrl,
+	selectedInterpreterPath,
+	inferredInterpreterPath,
+	targetKey,
+	resetValidation,
+	saveEnabled,
+	qiimeCommand,
+	q2lspInstallCommand,
+	statusForStep,
+	switchManager,
+	selectCandidate,
+	serializeWebviewScriptFunctions,
+	shellQuote,
+	isSafeEnvironmentName,
+	isAllowedQiimeEnvironmentUrl,
 } from './view';
 export {
 	QIIME_DISTRIBUTIONS,
 	QIIME_PACKAGES_BASE_URL,
 	QIIME_QUICKSTART_URL,
 	QIIME_VERSIONS,
+	type QiimeEnvironmentOption,
+	type QiimePlatform,
 } from './qiimeConstants';
 export {
 	buildFallbackQiimeEnvironments,
@@ -35,11 +72,21 @@ export { buildQiimeEnvironmentsFromTree } from './qiimeRemote';
 type SetupWizardMessage = {
 	command?: unknown;
 	commandText?: unknown;
+	route?: unknown;
 	interpreterPath?: unknown;
 	manager?: unknown;
 	environmentName?: unknown;
 	environmentUrl?: unknown;
 	condaSubdir?: unknown;
+};
+
+// Executable seams used by wizard handlers. Default implementation runs the
+// real child-process probes; tests inject fakes to drive behavior without a
+// Python interpreter or a live webview.
+export type WizardExecutors = {
+	runPythonValidation: (interpreterPath: string, modules: readonly string[]) => Promise<{ ok: true } | { ok: false; message: string }>;
+	validateInterpreter: (interpreterPath: string) => Promise<ValidationResult>;
+	resolveEnvironmentInterpreter: (manager: string | undefined, environmentName: string | undefined) => Promise<{ ok: true; interpreterPath: string } | { ok: false; message: string }>;
 };
 
 let currentPanel: vscode.WebviewPanel | undefined;
@@ -97,15 +144,17 @@ export const openSetupWizard = (params: {
 };
 
 
-const handleSetupWizardMessage = async (params: {
+export const handleSetupWizardMessage = async (params: {
 	message: SetupWizardMessage;
 	outputChannel?: vscode.OutputChannel;
 	webview: vscode.Webview;
+	executors?: WizardExecutors;
 }): Promise<void> => {
 	const command = toNonEmptyString(params.message.command);
 	if (!command) {
 		return;
 	}
+	const executors: WizardExecutors = params.executors ?? defaultExecutors;
 
 	switch (command) {
 		case 'installManager':
@@ -118,11 +167,11 @@ const handleSetupWizardMessage = async (params: {
 			});
 			return;
 		case 'createQiimeEnvironment':
-			await createQiimeEnvironmentForWizard(params.webview, params.message);
+			await createQiimeEnvironmentForWizard(params.webview, params.message, executors);
 			return;
 		case 'installQ2lsp': {
 			const manager = toNonEmptyString(params.message.manager);
-			const interpreterResult = await resolveWizardInterpreter(params.message);
+			const interpreterResult = await resolveWizardInterpreter(params.message, executors);
 			if (!interpreterResult.ok) {
 				await postWizardStatus(params.webview, {
 					q2lspStatus: 'missing',
@@ -162,13 +211,13 @@ const handleSetupWizardMessage = async (params: {
 			await checkSelectedManager(params.webview, params.message.manager);
 			return;
 		case 'validateEnvironment':
-			await validateQiimeEnvironment(params.webview, params.message);
+			await validateQiimeEnvironment(params.webview, params.message, executors);
 			return;
 		case 'validateQ2lsp':
-			await validateQ2lsp(params.webview, params.message);
+			await validateQ2lsp(params.webview, params.message, executors);
 			return;
 		case 'saveInterpreterPath':
-			await saveInterpreterPath(params.webview, params.message);
+			await saveInterpreterPath(params.webview, params.message, executors);
 			return;
 		case 'restartServer':
 			await vscode.commands.executeCommand('q2lsp.restartServer');
@@ -206,7 +255,8 @@ const checkSelectedManager = async (webview: vscode.Webview, managerValue: unkno
 
 const createQiimeEnvironmentForWizard = async (
 	webview: vscode.Webview,
-	message: SetupWizardMessage
+	message: SetupWizardMessage,
+	executors: WizardExecutors
 ): Promise<void> => {
 	const manager = toNonEmptyString(message.manager);
 	const environmentName = toNonEmptyString(message.environmentName);
@@ -259,7 +309,7 @@ const createQiimeEnvironmentForWizard = async (
 		return;
 	}
 
-	const interpreterResult = await resolveWizardInterpreter(message);
+	const interpreterResult = await resolveWizardInterpreter(message, executors);
 	if (!interpreterResult.ok) {
 		await postWizardStatus(webview, {
 			qiimeStatus: 'missing',
@@ -323,8 +373,8 @@ const createPixiQiimeEnvironment = async (
 	return installResult.ok ? { ok: true } : { ok: false, message: installResult.message };
 };
 
-const validateQiimeEnvironment = async (webview: vscode.Webview, message: SetupWizardMessage): Promise<void> => {
-	const interpreterResult = await resolveWizardInterpreter(message);
+const validateQiimeEnvironment = async (webview: vscode.Webview, message: SetupWizardMessage, executors: WizardExecutors): Promise<void> => {
+	const interpreterResult = await resolveWizardInterpreter(message, executors);
 	if (!interpreterResult.ok) {
 		await postWizardStatus(webview, {
 			qiimeStatus: 'missing',
@@ -335,11 +385,13 @@ const validateQiimeEnvironment = async (webview: vscode.Webview, message: SetupW
 	}
 	const interpreterPath = interpreterResult.interpreterPath;
 
-	const result = await runPythonValidation(interpreterPath, ['q2cli', 'qiime2']);
+	const result = await executors.runPythonValidation(interpreterPath, ['q2cli', 'qiime2']);
 	if (result.ok) {
 		await postWizardStatus(webview, {
 			interpreterPath,
 			qiimeStatus: 'ready',
+			validatedInterpreterPath: interpreterPath,
+			validatedTargetKey: buildWizardTargetKey({ ...message, interpreterPath }),
 			message: 'QIIME 2 validation passed.',
 		});
 		return;
@@ -352,8 +404,8 @@ const validateQiimeEnvironment = async (webview: vscode.Webview, message: SetupW
 	});
 };
 
-const validateQ2lsp = async (webview: vscode.Webview, message: SetupWizardMessage): Promise<void> => {
-	const interpreterResult = await resolveWizardInterpreter(message);
+const validateQ2lsp = async (webview: vscode.Webview, message: SetupWizardMessage, executors: WizardExecutors): Promise<void> => {
+	const interpreterResult = await resolveWizardInterpreter(message, executors);
 	if (!interpreterResult.ok) {
 		await postWizardStatus(webview, {
 			q2lspStatus: 'missing',
@@ -363,12 +415,13 @@ const validateQ2lsp = async (webview: vscode.Webview, message: SetupWizardMessag
 	}
 	const interpreterPath = interpreterResult.interpreterPath;
 
-	const result = await validateInterpreter(execFileForValidation, interpreterPath, VALIDATION_TIMEOUT_MS);
+	const result = await executors.validateInterpreter(interpreterPath);
 	if (result.ok) {
 		await postWizardStatus(webview, {
 			interpreterPath,
-			qiimeStatus: 'ready',
 			q2lspStatus: 'ready',
+			validatedInterpreterPath: interpreterPath,
+			validatedTargetKey: buildWizardTargetKey({ ...message, interpreterPath }),
 			message: 'q2lsp validation passed.',
 		});
 		return;
@@ -383,8 +436,8 @@ const validateQ2lsp = async (webview: vscode.Webview, message: SetupWizardMessag
 	});
 };
 
-const saveInterpreterPath = async (webview: vscode.Webview, message: SetupWizardMessage): Promise<void> => {
-	const interpreterResult = await resolveWizardInterpreter(message);
+const saveInterpreterPath = async (webview: vscode.Webview, message: SetupWizardMessage, executors: WizardExecutors): Promise<void> => {
+	const interpreterResult = await resolveWizardInterpreter(message, executors);
 	if (!interpreterResult.ok) {
 		await postWizardStatus(webview, {
 			message: interpreterResult.message,
@@ -392,6 +445,12 @@ const saveInterpreterPath = async (webview: vscode.Webview, message: SetupWizard
 		return;
 	}
 	const interpreterPath = interpreterResult.interpreterPath;
+	if (!saveEnabled({ ...message, interpreterPath })) {
+		await postWizardStatus(webview, {
+			message: 'Validate QIIME 2 and q2lsp for the selected target before saving.',
+		});
+		return;
+	}
 
 	const scope = await vscode.window.showQuickPick(
 		[
@@ -430,35 +489,36 @@ const saveInterpreterPath = async (webview: vscode.Webview, message: SetupWizard
 };
 
 const resolveWizardInterpreter = async (
-	message: SetupWizardMessage
+	message: SetupWizardMessage,
+	executors: WizardExecutors
 ): Promise<{ ok: true; interpreterPath: string } | { ok: false; message: string }> => {
+	const route = toNonEmptyString(message.route);
 	const manager = toNonEmptyString(message.manager);
 	const environmentName = toNonEmptyString(message.environmentName);
 	const explicitInterpreterPath = toNonEmptyString(message.interpreterPath);
 
+	// Existing-route validation targets the explicit interpreter the user
+	// selected. Never resolve a manager environment here, even when stale
+	// new-route fields linger in the message.
+	if (route !== 'new') {
+		if (explicitInterpreterPath) {
+			return { ok: true, interpreterPath: explicitInterpreterPath };
+		}
+		return { ok: false, message: 'Select a Python interpreter before continuing.' };
+	}
+
 	if (manager === 'conda' && environmentName) {
-		const result = await runExecutable('conda', [
-			'run',
-			'-n',
-			environmentName,
-			'python',
-			'-c',
-			'import sys; print(sys.executable)',
-		]);
+		const result = await executors.resolveEnvironmentInterpreter(manager, environmentName);
 		if (result.ok) {
-			return { ok: true, interpreterPath: result.stdout.trim() };
+			return result;
 		}
 		return { ok: false, message: `Could not resolve Conda environment ${environmentName}: ${result.message}` };
 	}
 
 	if (manager === 'pixi') {
-		const result = await runExecutable(
-			'pixi',
-			['run', 'python', '-c', 'import sys; print(sys.executable)'],
-			resolvePixiProjectCwd()
-		);
+		const result = await executors.resolveEnvironmentInterpreter(manager, environmentName);
 		if (result.ok) {
-			return { ok: true, interpreterPath: result.stdout.trim() };
+			return result;
 		}
 		return { ok: false, message: `Could not resolve Pixi Python interpreter: ${result.message}` };
 	}
@@ -540,6 +600,29 @@ const runPythonValidation = async (
 	return { ok: true };
 };
 
+// Production executors wrapping the real child-process probes. Tests pass their
+// own WizardExecutors to drive handlers without touching the filesystem.
+const resolveEnvironmentInterpreterDefault = async (
+	manager: string | undefined,
+	environmentName: string | undefined
+): Promise<{ ok: true; interpreterPath: string } | { ok: false; message: string }> => {
+	if (manager === 'conda' && environmentName) {
+		const result = await runExecutable('conda', ['run', '-n', environmentName, 'python', '-c', 'import sys; print(sys.executable)']);
+		return result.ok ? { ok: true, interpreterPath: result.stdout.trim() } : { ok: false, message: result.message };
+	}
+	if (manager === 'pixi') {
+		const result = await runExecutable('pixi', ['run', 'python', '-c', 'import sys; print(sys.executable)'], resolvePixiProjectCwd());
+		return result.ok ? { ok: true, interpreterPath: result.stdout.trim() } : { ok: false, message: result.message };
+	}
+	return { ok: false, message: 'No environment manager selected.' };
+};
+
+const defaultExecutors: WizardExecutors = {
+	runPythonValidation,
+	validateInterpreter: (interpreterPath) => validateInterpreter(execFileForValidation, interpreterPath, VALIDATION_TIMEOUT_MS),
+	resolveEnvironmentInterpreter: resolveEnvironmentInterpreterDefault,
+};
+
 const runExecutable = async (
 	file: string,
 	args: readonly string[],
@@ -606,6 +689,41 @@ const confirmAndRunInTerminal = async (action: string, commandText: unknown): Pr
 	const terminal = vscode.window.createTerminal({ name: 'q2lsp Setup Wizard' });
 	terminal.show(true);
 	terminal.sendText(command);
+};
+
+const minicondaInstallerPlatform = process.platform === 'darwin' ? 'MacOSX' : 'Linux';
+const MINICONDA_INSTALL_COMMAND =
+	`curl -fsSLo Miniconda3.sh "https://repo.anaconda.com/miniconda/Miniconda3-latest-${minicondaInstallerPlatform}-$(uname -m).sh" && bash Miniconda3.sh`;
+const PIXI_INSTALL_COMMAND = 'curl -fsSL https://pixi.sh/install.sh | sh';
+
+export const buildManagerInstallCommand = (manager: string | undefined): string | undefined => {
+	if (manager === 'conda') {
+		return MINICONDA_INSTALL_COMMAND;
+	}
+	if (manager === 'pixi') {
+		return PIXI_INSTALL_COMMAND;
+	}
+	return undefined;
+};
+
+export const buildQ2lspInstallCommand = (
+	route: string | undefined,
+	manager: string | undefined,
+	environmentName: string | undefined,
+	interpreterPath: string | undefined
+): string | undefined => {
+	if (route === 'existing') {
+		return interpreterPath ? `${shellQuote(interpreterPath)} -m pip install -U q2lsp` : undefined;
+	}
+	if (manager === 'pixi') {
+		return 'pixi run python -m pip install -U q2lsp';
+	}
+	if (manager === 'conda' && environmentName) {
+		return isSafeEnvironmentName(environmentName)
+			? `conda run -n ${shellQuote(environmentName)} python -m pip install -U q2lsp`
+			: undefined;
+	}
+	return interpreterPath ? `${shellQuote(interpreterPath)} -m pip install -U q2lsp` : undefined;
 };
 
 const toNonEmptyString = (value: unknown): string | undefined => {
