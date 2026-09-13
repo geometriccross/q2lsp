@@ -4,21 +4,17 @@ status: accepted
 
 # Collapse diagnostics validation into one deep module
 
-The diagnostics pipeline was split across five shallow modules — `validator.py`, `stages.py`, `matching.py`, `command_level.py`, and `models.py` — with private functions leaking across module boundaries (e.g. `_has_help_invocation` imported by `command_level.py` from `stages.py`). We decided to collapse all five into a single deep module, `command_analysis.py`, with three public functions:
+The diagnostics pipeline was split across five shallow modules — `validator.py`, `stages.py`, `matching.py`, `command_level.py`, and `models.py` — with private functions leaking across module boundaries (e.g. `_has_help_invocation` imported by `command_level.py` from `stages.py`). We decided to collapse all five into a single module, `command_analysis.py`. Its public entry point is `analyze_command()`, which returns `CommandAnalysis` with issues and dependency references.
 
-- `analyze_command()` — primary entry point: returns `CommandAnalysis` with issues and dependency references.
-- `validate_command_with_catalog()` — validation-only entry point for callers that need issue lists without dependency extraction.
-- `extract_command_dependencies()` — dependency extraction entry point for callers that need references without validation.
-
-The latter two exist because validation tests and dependency extraction tests are independently extensive; forcing them through `analyze_command()` would add noise (requiring `source_text` for pure validation tests, or catalog setup for pure dependency tests).
+The initial implementation also exposed validation-only and dependency-only wrappers for tests. These had no production callers and have been removed. Validation helpers remain private; focused validation tests can exercise them without adding production APIs. Dependency extraction is tested through `analyze_command()`.
 
 **Considered options**
 
 - Keep the five-module split and make leaked private functions public.
 - Keep the five-module split and duplicate `_has_help_invocation` in each consumer.
-- Collapse into `command_analysis.py` with only `analyze_command()` public.
-- Collapse into `command_analysis.py` with all three functions public (chosen).
+- Collapse into `command_analysis.py` with only `analyze_command()` public (current).
+- Collapse into `command_analysis.py` with all three functions public (initial choice, subsequently simplified).
 
 **Consequences**
 
-The diagnostics directory shrinks from 11 files to 6. Private validation stages, matching helpers, help-invocation detection, and dependency extraction all stay internal to `command_analysis.py`. The type definitions `CommandAnalysis`, `CommandDependencies`, and `DependencyReference` move into the same module since they are the return types of `analyze_command()`. `diagnostics_handler.py` switches from calling `validate_command_with_catalog()` directly to calling `analyze_command()` and reading `.issues` — this is a necessary follow-up change, not a semantic behavior change. Document-level diagnostics wiring (switching `diagnostics_handler.py` to use `collect_diagnostics`) was originally out of scope but has since been implemented. `diagnostics_handler.py` now calls `collect_diagnostics(doc, catalog)` and converts both command-level and document-level diagnostics into LSP diagnostics.
+Private validation stages, matching helpers, help-invocation detection, and dependency extraction stay internal to `command_analysis.py`. The return types `CommandAnalysis`, `CommandDependencies`, and `DependencyReference` live in the same module. `diagnostics_handler.py` calls `collect_diagnostics(doc, catalog)`, which combines command analysis and cross-command checks, then converts their issues into LSP diagnostics. Scheduling belongs to the server, not to command analysis.

@@ -69,13 +69,6 @@ class CommandAnalysis(NamedTuple):
 # ---------------------------------------------------------------------------
 
 
-def validate_command_with_catalog(
-    command: ParsedCommand, catalog: QiimeCatalog
-) -> list[DiagnosticIssue]:
-    """Validate a QIIME command against a QIIME command catalog."""
-    return _validate_command_with_catalog(command, catalog)
-
-
 def analyze_command(
     command: ParsedCommand, catalog: QiimeCatalog, source_text: str
 ) -> CommandAnalysis:
@@ -516,18 +509,6 @@ def _extract_command_dependencies(
             outputs.extend(_iter_option_value_references(option, source_text))
 
     return CommandDependencies(inputs=tuple(inputs), outputs=tuple(outputs))
-
-
-def extract_command_dependencies(
-    command: ParsedCommand,
-    source_text: str,
-    *,
-    invalid_option_spans: set[tuple[int, int]] | None = None,
-) -> CommandDependencies:
-    """Extract input and output dependency paths from grouped command options."""
-    return _extract_command_dependencies(
-        command, source_text, invalid_option_spans=invalid_option_spans
-    )
 
 
 def _is_dependency_input_option(option_text: str) -> bool:

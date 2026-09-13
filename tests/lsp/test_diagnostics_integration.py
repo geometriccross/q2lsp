@@ -1,99 +1,59 @@
-"""Integration tests for parsing and validating QIIME diagnostics.
-
-These tests verify that parsed QIIME commands produce validation issues
-for typos without exercising LSP diagnostic publishing.
-"""
+"""Parsing and validation through the document diagnostics entry point."""
 
 from __future__ import annotations
 
 import pytest
 
-from q2lsp.lsp.diagnostics.command_analysis import validate_command_with_catalog
+from q2lsp.lsp.diagnostics import collect_diagnostics
+from q2lsp.lsp.diagnostics.codes import UNKNOWN_OPTION, UNKNOWN_ROOT
 from q2lsp.lsp.document_commands import analyze_document
 from q2lsp.qiime.catalog import QiimeCatalog
-from q2lsp.qiime.types import CommandHierarchy
 
 
-class TestDiagnosticsParserValidatorIntegration:
-    """Integration tests for QIIME command parsing and validation."""
-
-    @pytest.fixture
-    def mock_hierarchy(self) -> CommandHierarchy:
-        """Create a mock hierarchy for testing."""
-        return {
+@pytest.mark.parametrize(
+    ("source", "code", "span", "suggestion"),
+    [
+        ("qiime feature-tabel summarize", UNKNOWN_ROOT, (6, 19), "feature-table"),
+        (
+            "qiime feature-table summarize --i-tabel",
+            UNKNOWN_OPTION,
+            (30, 39),
+            "--i-table",
+        ),
+        ("qiime feature-table summarize --i-table table.qza", None, None, None),
+    ],
+)
+def test_command_diagnostics(
+    source: str,
+    code: str | None,
+    span: tuple[int, int] | None,
+    suggestion: str | None,
+) -> None:
+    catalog = QiimeCatalog.from_hierarchy(
+        {
             "qiime": {
-                "name": "qiime",
-                "help": "QIIME 2 CLI",
-                "builtins": ["info"],
-                "info": {
-                    "name": "info",
-                    "short_help": "Display info",
-                    "type": "builtin",
-                },
                 "feature-table": {
-                    "id": "feature-table",
-                    "name": "feature-table",
                     "summarize": {
-                        "id": "summarize",
-                        "name": "summarize",
-                        "description": "Summarize table",
                         "signature": [
-                            {
-                                "name": "table",
-                                "type": "input",
-                            },
+                            {"name": "table", "type": "input"},
                             {
                                 "name": "obs_metadata",
                                 "type": "parameter",
                                 "default": None,
                             },
-                        ],
-                    },
-                },
+                        ]
+                    }
+                }
             }
         }
-
-    def test_typo_produces_validation_issue(
-        self, mock_hierarchy: CommandHierarchy
-    ) -> None:
-        """Test that a typo in a plugin name produces a validation issue."""
-
-        doc = analyze_document("qiime feature-tabel summarize")
-
-        issues = validate_command_with_catalog(
-            doc.commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-
-        assert len(issues) == 1
-        assert "feature-tabel" in issues[0].message
-        assert "Did you mean" in issues[0].message
-        assert issues[0].start == 6
-        assert issues[0].end == 19
-
-    def test_valid_command_no_issues(self, mock_hierarchy: CommandHierarchy) -> None:
-        """Test that a valid command produces no validation issues."""
-        doc = analyze_document("qiime feature-table summarize --i-table table.qza")
-
-        issues = validate_command_with_catalog(
-            doc.commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-
+    )
+    issues = collect_diagnostics(analyze_document(source), catalog)
+    if code is None:
         assert issues == []
-
-    def test_option_typo_validation_issue(
-        self, mock_hierarchy: CommandHierarchy
-    ) -> None:
-        """Test that an option typo produces a validation issue with correct code."""
-        doc = analyze_document("qiime feature-table summarize --i-tabel")
-
-        issues = validate_command_with_catalog(
-            doc.commands[0], QiimeCatalog.from_hierarchy(mock_hierarchy)
-        )
-
+    else:
         assert len(issues) == 1
-        assert "--i-tabel" in issues[0].message
-        assert "Did you mean" in issues[0].message
-        assert "'--i-table'" in issues[0].message
-        assert issues[0].code == "q2lsp-dni/unknown-option"
-        assert issues[0].start == 30  # position of --i-tabel
-        assert issues[0].end == 39
+        issue = issues[0]
+        assert issue.code == code
+        assert (issue.start, issue.end) == span
+        assert f"'{suggestion}'" in issue.message
+        assert "Did you mean" in issue.message

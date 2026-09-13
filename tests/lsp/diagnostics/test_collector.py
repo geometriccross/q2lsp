@@ -7,18 +7,11 @@ import pytest
 import q2lsp.lsp.diagnostics.codes as diagnostic_codes
 from q2lsp.lsp.diagnostics import collect_diagnostics
 from q2lsp.lsp.diagnostics.codes import DEPENDENCY_CYCLE
-from q2lsp.lsp.diagnostics.command_analysis import (
-    CommandAnalysis,
-    CommandDependencies,
-    extract_command_dependencies,
-)
-from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
+from q2lsp.lsp.diagnostics.command_analysis import analyze_command
 from q2lsp.lsp.document_commands import (
-    AnalyzedDocument,
     analyze_document,
     to_original_offset,
 )
-from q2lsp.lsp.types import ParsedCommand, TokenSpan
 from q2lsp.qiime.catalog import QiimeCatalog
 
 
@@ -55,72 +48,35 @@ def dependency_hierarchy() -> dict:
     }
 
 
-def test_collect_diagnostics_runs_command_level_before_document_level(mocker) -> None:
-    cmd1 = ParsedCommand(tokens=[TokenSpan("qiime", 0, 5)], start=0, end=5)
-    cmd2 = ParsedCommand(tokens=[TokenSpan("qiime", 6, 11)], start=6, end=11)
-    document = AnalyzedDocument(merged_text="", offset_map=(0,), commands=(cmd1, cmd2))
-
-    issue1 = DiagnosticIssue("command-1", 0, 1, "code-1")
-    issue2 = DiagnosticIssue("command-2", 1, 2, "code-2")
-    document_issue = DiagnosticIssue("document", 2, 3, "code-3")
-
-    call_order: list[tuple[str, object]] = []
-
-    analyses = [
-        CommandAnalysis(
-            command=cmd1,
-            issues=(issue1,),
-            dependencies=CommandDependencies(),
-        ),
-        CommandAnalysis(
-            command=cmd2,
-            issues=(issue2,),
-            dependencies=CommandDependencies(),
-        ),
-    ]
-
-    def fake_analyze_command(
-        command: ParsedCommand, catalog: QiimeCatalog, source_text: str
-    ) -> CommandAnalysis:
-        del catalog, source_text
-        call_order.append(("command", command))
-        return analyses[len(call_order) - 1]
-
-    def fake_collect_document_diagnostics(
-        command_analyses: tuple[CommandAnalysis, ...],
-    ) -> list[DiagnosticIssue]:
-        call_order.append(("document", command_analyses))
-        return [document_issue]
-
-    mocker.patch(
-        "q2lsp.lsp.diagnostics.collector.analyze_command",
-        side_effect=fake_analyze_command,
+def test_command_issues_precede_document_issues(dependency_hierarchy: dict) -> None:
+    document = analyze_document(
+        "qiime demo step --i-table in.qza --o-result shared.qza --bad\n"
+        "qiime demo step --i-table in.qza --o-result shared.qza"
     )
-    mocker.patch(
-        "q2lsp.lsp.diagnostics.collector.collect_document_diagnostics",
-        side_effect=fake_collect_document_diagnostics,
+    issues = collect_diagnostics(
+        document, QiimeCatalog.from_hierarchy(dependency_hierarchy)
     )
-
-    issues = collect_diagnostics(document, QiimeCatalog.from_hierarchy({"qiime": {}}))
-
-    assert issues == [issue1, issue2, document_issue]
-    assert call_order == [
-        ("command", cmd1),
-        ("command", cmd2),
-        ("document", tuple(analyses)),
+    assert [issue.code for issue in issues] == [
+        diagnostic_codes.UNKNOWN_OPTION,
+        diagnostic_codes.DUPLICATE_OUTPUT_PATH,
+        diagnostic_codes.DUPLICATE_OUTPUT_PATH,
     ]
 
 
-def test_extract_command_dependencies_uses_grouped_options_and_inline_values() -> None:
+def test_command_dependencies_use_grouped_options_and_inline_values(
+    dependency_hierarchy: dict,
+) -> None:
     source = (
         "qiime tools export --input-path=in.qza --output-path out-dir "
         "--p-threads 4 --m-metadata-file meta.tsv"
     )
     document = analyze_document(source)
 
-    dependencies = extract_command_dependencies(
-        document.commands[0], document.merged_text
-    )
+    dependencies = analyze_command(
+        document.commands[0],
+        QiimeCatalog.from_hierarchy(dependency_hierarchy),
+        document.merged_text,
+    ).dependencies
 
     input_start = source.index("in.qza")
     output_start = source.index("out-dir")
@@ -135,13 +91,17 @@ def test_extract_command_dependencies_uses_grouped_options_and_inline_values() -
     assert dependencies.outputs[0].end == output_start + len("out-dir")
 
 
-def test_extract_command_dependencies_trims_inline_quoted_value_span() -> None:
+def test_command_dependencies_trim_inline_quoted_value_span(
+    dependency_hierarchy: dict,
+) -> None:
     source = 'qiime demo step --i-table="a.qza" --o-result out.qza'
     document = analyze_document(source)
 
-    dependencies = extract_command_dependencies(
-        document.commands[0], document.merged_text
-    )
+    dependencies = analyze_command(
+        document.commands[0],
+        QiimeCatalog.from_hierarchy(dependency_hierarchy),
+        document.merged_text,
+    ).dependencies
 
     input_start = source.index("a.qza")
 

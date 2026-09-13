@@ -6,7 +6,7 @@ import pytest
 
 from q2lsp.lsp.diagnostics import codes
 from q2lsp.lsp.diagnostics.diagnostic_issue import DiagnosticIssue
-from q2lsp.lsp.diagnostics.command_analysis import validate_command_with_catalog
+from q2lsp.lsp.diagnostics.command_analysis import _validate_command_with_catalog
 from q2lsp.lsp.types import ParsedCommand, TokenSpan
 from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.types import CommandHierarchy
@@ -15,7 +15,7 @@ from q2lsp.qiime.types import CommandHierarchy
 def validate_command_with_hierarchy(
     command: ParsedCommand, hierarchy: CommandHierarchy
 ) -> list[DiagnosticIssue]:
-    return validate_command_with_catalog(
+    return _validate_command_with_catalog(
         command, QiimeCatalog.from_hierarchy(hierarchy)
     )
 
@@ -161,7 +161,7 @@ class TestValidateCommand:
         }
         catalog = QiimeCatalog.from_hierarchy(hierarchy)
 
-        issues = validate_command_with_catalog(cmd, catalog)
+        issues = _validate_command_with_catalog(cmd, catalog)
 
         assert [issue.code for issue in issues] == [
             codes.UNKNOWN_OPTION,
@@ -470,7 +470,7 @@ class TestValidateOptions:
         cmd = ParsedCommand(tokens=tokens, start=0, end=23)
         catalog = QiimeCatalog.from_hierarchy(hierarchy)
 
-        issues = validate_command_with_catalog(cmd, catalog)
+        issues = _validate_command_with_catalog(cmd, catalog)
 
         assert [issue.code for issue in issues] == [codes.UNKNOWN_OPTION]
         assert "--bad" in issues[0].message
