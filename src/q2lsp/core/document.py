@@ -4,18 +4,6 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class DocumentSnapshot:
-    """Immutable text snapshot independent of any LSP transport object."""
-
-    uri: str
-    text: str
-    version: int | None = None
-
-    def offset_mapper(self) -> "OffsetMapper":
-        return OffsetMapper(self.text)
-
-
-@dataclass(frozen=True)
 class OffsetMapper:
     """Map between Python string offsets and LSP UTF-16 positions."""
 

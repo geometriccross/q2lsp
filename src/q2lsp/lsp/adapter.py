@@ -5,7 +5,7 @@ from __future__ import annotations
 from lsprotocol import types
 from pygls.workspace import TextDocument
 
-from q2lsp.core.document import DocumentSnapshot
+from q2lsp.core.document import OffsetMapper
 from q2lsp.core.types import (
     CompletionItem as InternalCompletionItem,
     CompletionKind,
@@ -40,8 +40,7 @@ def position_to_offset(document: TextDocument, position: types.Position) -> int:
     Returns:
         0-based offset in the document
     """
-    snapshot = _document_snapshot(document)
-    return snapshot.offset_mapper().position_to_offset(
+    return OffsetMapper(document.source).position_to_offset(
         position.line, position.character
     )
 
@@ -57,15 +56,8 @@ def offset_to_position(document: TextDocument, offset: int) -> types.Position:
     Returns:
         LSP Position with 0-based line and character
     """
-    snapshot = _document_snapshot(document)
-    line, character = snapshot.offset_mapper().offset_to_position(offset)
+    line, character = OffsetMapper(document.source).offset_to_position(offset)
     return types.Position(line=line, character=character)
-
-
-def _document_snapshot(document: TextDocument) -> DocumentSnapshot:
-    return DocumentSnapshot(
-        uri=document.uri, text=document.source, version=document.version
-    )
 
 
 def completion_kind_to_lsp(kind: CompletionKind | str) -> types.CompletionItemKind:

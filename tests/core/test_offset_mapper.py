@@ -1,23 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
-
-import pytest
-
-from q2lsp.core.document import DocumentSnapshot, OffsetMapper
-
-
-def test_document_snapshot_is_immutable() -> None:
-    snapshot = DocumentSnapshot(uri="file:///workflow.sh", text="qiime info", version=1)
-
-    with pytest.raises(FrozenInstanceError):
-        snapshot.text = "changed"  # type: ignore[misc]
-
-
-def test_document_snapshot_offset_mapper_uses_snapshot_text() -> None:
-    snapshot = DocumentSnapshot(uri="file:///workflow.sh", text="a😀b", version=1)
-
-    assert snapshot.offset_mapper().offset_to_position(2) == (0, 3)
+from q2lsp.core.document import OffsetMapper
 
 
 def test_offset_mapper_round_trips_ascii_position() -> None:
