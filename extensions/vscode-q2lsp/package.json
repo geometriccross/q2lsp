@@ -17,7 +17,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onLanguage:shellscript"
+    "onLanguage:shellscript",
+    "onWalkthrough:q2lsp.setup"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -43,11 +44,63 @@
         "category": "q2lsp"
       },
       {
+        "command": "q2lsp.setupEnvironment",
+        "title": "Set Up QIIME 2 Environment",
+        "category": "q2lsp"
+      },
+      {
+        "command": "q2lsp.setupServer",
+        "title": "Prepare q2lsp",
+        "category": "q2lsp"
+      },
+      {
+        "command": "q2lsp.finishSetup",
+        "title": "Check and Save Setup",
+        "category": "q2lsp"
+      },
+      {
         "command": "q2lsp.runCommand",
         "title": "Run QIIME Command",
         "category": "q2lsp"
       }
     ],
+    "walkthroughs": [
+      {
+        "id": "q2lsp.setup",
+        "title": "Set Up QIIME 2",
+        "description": "Connect your QIIME 2 environment and get shell-script completions with q2lsp.",
+        "steps": [
+          {
+            "id": "environment",
+            "title": "Set up your QIIME 2 environment",
+            "description": "Choose an existing Python environment or create one. We'll check that QIIME 2 is available.\n[Choose Environment](command:q2lsp.setupEnvironment)",
+            "media": { "markdown": "media/setup-environment.md" },
+            "completionEvents": ["onContext:false"]
+          },
+          {
+            "id": "server",
+            "title": "Prepare q2lsp",
+            "description": "Check for q2lsp in your selected environment. If it is missing, you can install it here.\n[Prepare q2lsp](command:q2lsp.setupServer)",
+            "media": { "markdown": "media/setup-server.md" },
+            "completionEvents": ["onContext:false"]
+          },
+          {
+            "id": "finish",
+            "title": "Check and save your setup",
+            "description": "Recheck your environment and choose where to save it. Then open a shell script to start using q2lsp.\n[Check and Save](command:q2lsp.finishSetup)",
+            "media": { "markdown": "media/setup-finish.md" },
+            "completionEvents": ["onContext:false"]
+          }
+        ]
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "q2lsp.setupEnvironment", "when": "false" },
+        { "command": "q2lsp.setupServer", "when": "false" },
+        { "command": "q2lsp.finishSetup", "when": "false" }
+      ]
+    },
     "configuration": {
       "title": "q2lsp",
       "type": "object",

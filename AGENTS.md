@@ -92,6 +92,10 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 │       ├── CHANGELOG.md
 │       ├── eslint.config.mjs
 │       ├── LICENSE
+│       ├── media/
+│       │   ├── setup-environment.md
+│       │   ├── setup-finish.md
+│       │   └── setup-server.md
 │       ├── package.json
 │       ├── pnpm-lock.yaml
 │       ├── README.md
@@ -118,6 +122,7 @@ Snapshot for navigation only; do not edit between the markers. Regenerate using 
 │       │       ├── interpreterPath.test.ts
 │       │       ├── interpreterSources.test.ts
 │       │       ├── runCommand.test.ts
+│       │       ├── setupEnvironment.test.ts
 │       │       └── setupWizard.test.ts
 │       ├── tsconfig.json
 │       └── vsc-extension-quickstart.md

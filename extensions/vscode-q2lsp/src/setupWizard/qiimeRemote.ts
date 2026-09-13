@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import {
 	QIIME_DISTRIBUTIONS_TREE_URL,
 	type QiimeEnvironmentOption,
@@ -9,23 +8,7 @@ import {
 	inferQiimePlatformId,
 } from './qiimeMetadata';
 
-export const refreshQiimeManifest = async (webview: vscode.Webview): Promise<void> => {
-	const remoteEnvironments = await fetchQiimeEnvironmentsFromTree();
-	if (remoteEnvironments.length > 0) {
-		await webview.postMessage({
-			type: 'qiimeManifest',
-			environments: remoteEnvironments,
-		});
-		return;
-	}
-
-	await webview.postMessage({
-		type: 'qiimeManifest',
-		environments: [],
-	});
-};
-
-const fetchQiimeEnvironmentsFromTree = async (): Promise<QiimeEnvironmentOption[]> => {
+export const fetchQiimeEnvironments = async (): Promise<QiimeEnvironmentOption[]> => {
 	try {
 		return buildQiimeEnvironmentsFromTree(await fetchGitHubTree());
 	} catch {
@@ -48,6 +31,7 @@ type GitHubTreeEntry = {
 
 const fetchGitHubTree = async (): Promise<GitHubTreeEntry[]> => {
 	const response = await fetch(QIIME_DISTRIBUTIONS_TREE_URL, {
+		signal: AbortSignal.timeout(10000),
 		headers: {
 			Accept: 'application/vnd.github+json',
 		},

@@ -1,708 +1,390 @@
 import * as assert from 'assert';
-import type * as vscode from 'vscode';
-import {
-	SETUP_WIZARD_EXISTING_ROUTE_STEPS,
-	SETUP_WIZARD_MANAGERS,
-	SETUP_WIZARD_NEW_ROUTE_STEPS,
-	buildFallbackQiimeEnvironments,
-	buildQiimeEnvironmentsFromTree,
-	buildManagerInstallCommand,
-	buildQ2lspInstallCommand,
-	buildSetupWizardHtml,
-	buildSetupWizardInterpreterCandidates,
-	buildSyntheticQiimeEnvironment,
-	buildWizardTargetKey,
-	mergeQiimeEnvironments,
-	parseQiimeEnvironmentPath,
-	resolveQiimePlatform,
-	WizardState,
-	QiimeEnvironmentOption,
-	resetValidation,
-	saveEnabled,
-	qiimeCommand,
-	statusForStep,
-	switchManager,
-	selectCandidate,
-	targetKey,
-	serializeWebviewScriptFunctions,
-	selectedInterpreterPath,
-	q2lspInstallCommand,
-	handleSetupWizardMessage,
-	type WizardExecutors,
-} from '../setupWizard/index';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import * as path from 'path';
+import * as vscode from 'vscode';
+import { registerSetupWizard } from '../setupWizard/index';
+import type { SetupTools } from '../setupWizard/environment';
+import type { InterpreterValidationDetails } from '../interpreter';
 
-suite('q2lsp setup wizard tests', () => {
-	const makeState = (overrides: Partial<WizardState> = {}): WizardState => ({
-		route: 'start',
-		manager: 'conda',
-		managerStatus: 'unknown',
-		managerStatuses: {},
-		qiimeStatus: 'unknown',
-		q2lspStatus: 'unknown',
-		q2lspVersion: '',
-		pendingCommand: '',
-		statusMessage: '',
-		selectedCandidateId: '',
-		interpreterPath: '',
-		candidates: [],
-		environments: [],
-		metadataStatus: 'loading',
-		version: '',
-		distribution: '',
-		environmentUrl: '',
-		platform: { id: 'linux-64', label: 'Linux x64' },
-		submittedTarget: undefined,
-		savedInterpreterPath: false,
-		validatedInterpreterPath: '',
-		validatedTargetKey: '',
-		...overrides,
-	});
-
-	const makeEnvironment = (overrides: Partial<QiimeEnvironmentOption> = {}): QiimeEnvironmentOption => ({
-		version: '2026.4',
-		distribution: 'tiny',
-		platform: 'linux-64',
-		fileName: 'qiime2-tiny-2026.4-linux-64-conda.yml',
-		url: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-64-conda.yml',
-		environmentName: 'qiime2-tiny-2026.4',
-		...overrides,
-	});
-
-	// Captures every message the host posts back to the webview.
-	const makeCapturingWebview = (): { webview: vscode.Webview; posted: Array<Record<string, unknown>> } => {
-		const posted: Array<Record<string, unknown>> = [];
-		const webview = {
-			postMessage: async (message: unknown): Promise<boolean> => {
-				posted.push(message as Record<string, unknown>);
-				return true;
-			},
-		} as unknown as vscode.Webview;
-		return { webview, posted };
+suite('q2lsp setup walkthrough', () => {
+	const originalWindow = {
+		showQuickPick: vscode.window.showQuickPick,
+		showOpenDialog: vscode.window.showOpenDialog,
+		showWarningMessage: vscode.window.showWarningMessage,
+		showErrorMessage: vscode.window.showErrorMessage,
+		showInformationMessage: vscode.window.showInformationMessage,
+		withProgress: vscode.window.withProgress,
 	};
-
-	// Finds the last wizardStatus patch carrying a given field value.
-	const findPatch = (posted: Array<Record<string, unknown>>, field: string, value: unknown): Record<string, unknown> | undefined => {
-		const patches = posted
-			.filter((message) => message.type === 'wizardStatus')
-			.map((message) => message.patch as Record<string, unknown> | undefined);
-		for (let index = patches.length - 1; index >= 0; index -= 1) {
-			const patch = patches[index];
-			if (patch && patch[field] === value) {
-				return patch;
-			}
-		}
-		return undefined;
+	const originalCommands = {
+		registerCommand: vscode.commands.registerCommand,
+		executeCommand: vscode.commands.executeCommand,
 	};
+	const originalConfiguration = vscode.workspace.getConfiguration;
+	const originalGetExtension = vscode.extensions.getExtension;
+	const originalOpenExternal = vscode.env.openExternal;
+	const trustDescriptor = Object.getOwnPropertyDescriptor(vscode.workspace, 'isTrusted')!;
+	const foldersDescriptor = Object.getOwnPropertyDescriptor(vscode.workspace, 'workspaceFolders')!;
+	let handlers: Map<string, () => Promise<void>>;
+	let completed: Map<string, boolean>;
+	let choices: Array<string | undefined>;
+	let confirmations: Array<string | undefined>;
+	let warningDetails: string[];
+	let dialogs: vscode.Uri[] | undefined;
+	let errors: string[];
+	let messages: string[];
+	let logs: string[];
+	let openedUrls: string[];
+	let selectedSteps: string[];
+	let checkedPaths: string[];
+	let calls: Array<{ file: string; args: string[] }>;
+	let saves: string[];
+	let pickerLabels: string[][];
+	let configured: string | undefined;
+	let trusted: boolean;
+	let tools: SetupTools;
+	let token: vscode.CancellationTokenSource;
 
-	test('existing route validation success stamps validated target identity (tracer bullet)', async () => {
-		const { webview, posted } = makeCapturingWebview();
-		const executors: WizardExecutors = {
-			runPythonValidation: async () => ({ ok: true }),
-			validateInterpreter: async () => ({ ok: true }),
-			resolveEnvironmentInterpreter: async () => ({ ok: false, message: 'no conda environment in existing route test' }),
-		};
+	const details = (missing: string[] = [], executable = '/qiime/bin/python'): InterpreterValidationDetails => ({
+		missing, executable, version: '3.10',
+	});
+	const command = (name: string): Promise<void> => handlers.get(`q2lsp.${name}`)!();
+	const progress = (): boolean[] => ['environment', 'server', 'finish'].map((step) => completed.get(step) ?? false);
 
-		await handleSetupWizardMessage({
-			message: { command: 'validateEnvironment', route: 'existing', interpreterPath: '/env-a/bin/python' },
-			webview,
-			executors,
+	setup(async () => {
+		handlers = new Map();
+		completed = new Map();
+		choices = [];
+		confirmations = [];
+		warningDetails = [];
+		dialogs = undefined;
+		errors = [];
+		messages = [];
+		logs = [];
+		openedUrls = [];
+		selectedSteps = [];
+		checkedPaths = [];
+		calls = [];
+		saves = [];
+		pickerLabels = [];
+		configured = undefined;
+		trusted = true;
+		token = new vscode.CancellationTokenSource();
+		Object.defineProperties(vscode.workspace, {
+			isTrusted: { configurable: true, get: () => trusted },
+			workspaceFolders: { configurable: true, get: () => undefined },
 		});
-
-		const patch = findPatch(posted, 'qiimeStatus', 'ready');
-		assert.ok(patch, 'expected a ready status patch after QIIME 2 validation passes');
-		assert.strictEqual(patch!.validatedInterpreterPath, '/env-a/bin/python');
-		assert.strictEqual(patch!.validatedTargetKey, 'existing:/env-a/bin/python');
-	});
-
-	test('new route conda resolution stamps validated target bound to manager and target identity', async () => {
-		const { webview, posted } = makeCapturingWebview();
-		const message = {
-			command: 'validateEnvironment',
-			route: 'new',
-			manager: 'conda',
-			version: '2026.4',
-			distribution: 'tiny',
-			environmentName: 'qiime2-tiny-2026.4',
-			environmentUrl: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-64-conda.yml',
-		};
-		const executors: WizardExecutors = {
-			runPythonValidation: async () => ({ ok: true }),
-			validateInterpreter: async () => ({ ok: true }),
-			resolveEnvironmentInterpreter: async () => ({ ok: true, interpreterPath: '/conda-env/bin/python' }),
-		};
-
-		await handleSetupWizardMessage({ message, webview, executors });
-
-		const patch = findPatch(posted, 'qiimeStatus', 'ready');
-		assert.ok(patch, 'expected a ready status patch after QIIME 2 validation passes');
-		assert.strictEqual(patch!.validatedInterpreterPath, '/conda-env/bin/python');
-		assert.strictEqual(
-			patch!.validatedTargetKey,
-			buildWizardTargetKey({ ...message, interpreterPath: '/conda-env/bin/python' })
-		);
-	});
-
-	test('existing route never resolves a conda environment even when manager and environment name linger', async () => {
-		const { webview, posted } = makeCapturingWebview();
-		// Stale new-route fields remain in the message, but the user is on the
-		// existing route with an explicit interpreter selected.
-		const condaCalled: string[] = [];
-		const executors: WizardExecutors = {
-			runPythonValidation: async () => ({ ok: true }),
-			validateInterpreter: async () => ({ ok: true }),
-			resolveEnvironmentInterpreter: async (manager, environmentName) => {
-				condaCalled.push(`${manager}:${environmentName ?? ''}`);
-				return { ok: true, interpreterPath: '/conda-env/bin/python' };
+		Object.assign(vscode.window, {
+			showQuickPick: async (items: vscode.QuickPickItem[]) => {
+				pickerLabels.push(items.map((item) => item.label));
+				const choice = choices.shift();
+				return items.find((item) => item.label === choice);
 			},
-		};
-
-		await handleSetupWizardMessage({
-			message: {
-				command: 'validateEnvironment',
-				route: 'existing',
-				interpreterPath: '/explicit/bin/python',
-				manager: 'conda',
-				environmentName: 'qiime2-tiny-2026.4',
-			},
-			webview,
-			executors,
-		});
-
-		assert.deepStrictEqual(condaCalled, [], 'existing route must not resolve a conda environment');
-		const patch = findPatch(posted, 'qiimeStatus', 'ready');
-		assert.ok(patch, 'expected validation to pass for the explicit interpreter');
-		assert.strictEqual(patch!.validatedInterpreterPath, '/explicit/bin/python');
-	});
-
-	test('q2lsp validation does not mark QIIME 2 as ready', async () => {
-		const { webview, posted } = makeCapturingWebview();
-		const executors: WizardExecutors = {
-			runPythonValidation: async () => ({ ok: true }),
-			validateInterpreter: async () => ({ ok: true }),
-			resolveEnvironmentInterpreter: async () => ({ ok: false, message: 'no conda environment' }),
-		};
-
-		await handleSetupWizardMessage({
-			message: { command: 'validateQ2lsp', route: 'existing', interpreterPath: '/env/bin/python' },
-			webview,
-			executors,
-		});
-
-		const q2lspPatch = posted
-			.filter((message) => message.type === 'wizardStatus')
-			.map((message) => message.patch as Record<string, unknown>)
-			.find((patch) => patch.q2lspStatus === 'ready');
-		assert.ok(q2lspPatch, 'expected q2lsp validation to pass');
-		assert.notStrictEqual(q2lspPatch!.qiimeStatus, 'ready', 'q2lsp validation must not mark QIIME 2 as ready');
-	});
-
-	test('save is reachable after both validations pass for the existing route', async () => {
-		const { webview, posted } = makeCapturingWebview();
-		const executors: WizardExecutors = {
-			runPythonValidation: async () => ({ ok: true }),
-			validateInterpreter: async () => ({ ok: true }),
-			resolveEnvironmentInterpreter: async () => ({ ok: false, message: 'no conda environment' }),
-		};
-		const message = { command: '', route: 'existing', interpreterPath: '/env/bin/python' } as const;
-
-		await handleSetupWizardMessage({ message: { ...message, command: 'validateEnvironment' }, webview, executors });
-		await handleSetupWizardMessage({ message: { ...message, command: 'validateQ2lsp' }, webview, executors });
-
-		// Reconstruct the webview state by applying every status patch in order.
-		const patched = makeState({ route: 'existing', interpreterPath: '/env/bin/python' });
-		for (const postedMessage of posted) {
-			if (postedMessage.type === 'wizardStatus') {
-				Object.assign(patched, postedMessage.patch);
-			}
-		}
-
-		assert.strictEqual(patched.qiimeStatus, 'ready');
-		assert.strictEqual(patched.q2lspStatus, 'ready');
-		assert.strictEqual(saveEnabled(patched), true);
-	});
-
-	test('existing validation is bound to the selected interpreter identity', () => {
-		assert.strictEqual(buildWizardTargetKey({ route: 'existing', interpreterPath: '/env-a/bin/python' }), 'existing:/env-a/bin/python');
-		const base = makeState({
-			route: 'existing',
-			interpreterPath: '/env-a/bin/python',
-			qiimeStatus: 'ready',
-			q2lspStatus: 'ready',
-			validatedInterpreterPath: '/env-a/bin/python',
-			validatedTargetKey: 'existing:/env-a/bin/python',
-		});
-		assert.strictEqual(saveEnabled(base), true);
-		assert.strictEqual(saveEnabled({ ...base, interpreterPath: '/env-b/bin/python' }), false);
-	});
-
-	test('new environment validation is bound to route manager and target identity', () => {
-		const env = makeEnvironment({
-			url: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-conda.yml',
-			environmentName: 'qiime2-tiny-2026.4',
-		});
-		const targetA = {
-			route: 'new' as const,
-			manager: 'conda',
-			version: '2026.4',
-			distribution: 'tiny',
-			environmentName: 'qiime2-tiny-2026.4',
-			environmentUrl: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-conda.yml',
-		};
-		const stateForKey = makeState({
-			...targetA,
-			environments: [env],
-			version: '2026.4',
-			distribution: 'tiny',
-			environmentUrl: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-conda.yml',
-			interpreterPath: '/env-a/bin/python',
-		});
-		const targetKeyA = targetKey(stateForKey);
-
-		const base = makeState({
-			...targetA,
-			environments: [env],
-			version: '2026.4',
-			distribution: 'tiny',
-			environmentUrl: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-conda.yml',
-			interpreterPath: '/env-a/bin/python',
-			qiimeStatus: 'ready',
-			q2lspStatus: 'ready',
-			validatedInterpreterPath: '/env-a/bin/python',
-			validatedTargetKey: targetKeyA,
-		});
-		assert.strictEqual(saveEnabled(base), true);
-		assert.strictEqual(saveEnabled({ ...base, distribution: 'amplicon' }), false);
-		assert.strictEqual(saveEnabled({ ...base, route: 'existing' }), false);
-	});
-
-	test('statusForStep reflects existing route checklist state', () => {
-		const base = makeState({ route: 'existing' });
-		assert.strictEqual(statusForStep('existing', 0, base), 'current');
-		assert.strictEqual(statusForStep('existing', 0, { ...base, interpreterPath: '/usr/bin/python' }), 'passed');
-		assert.strictEqual(statusForStep('existing', 1, { ...base, qiimeStatus: 'ready' }), 'passed');
-		assert.strictEqual(statusForStep('existing', 1, { ...base, qiimeStatus: 'missing' }), 'failed');
-		assert.strictEqual(statusForStep('existing', 2, { ...base, q2lspStatus: 'ready' }), 'passed');
-		assert.strictEqual(statusForStep('existing', 2, { ...base, q2lspStatus: 'missing' }), 'failed');
-		assert.strictEqual(statusForStep('existing', 3, { ...base, savedInterpreterPath: true }), 'passed');
-		assert.strictEqual(statusForStep('existing', 4, { ...base, savedInterpreterPath: true }), 'passed');
-		assert.strictEqual(statusForStep('existing', 4, base), 'not started');
-	});
-
-	test('statusForStep reflects new route checklist state', () => {
-		const base = makeState({ route: 'new', manager: 'conda' });
-		assert.strictEqual(statusForStep('new', 0, base), 'passed');
-		assert.strictEqual(statusForStep('new', 1, { ...base, managerStatus: 'ready' }), 'passed');
-		assert.strictEqual(statusForStep('new', 1, { ...base, managerStatus: 'missing' }), 'failed');
-		assert.strictEqual(statusForStep('new', 1, { ...base, manager: 'manual' }), 'passed');
-		const withEnv = {
-			...base,
-			environments: [makeEnvironment()],
-			metadataStatus: 'ready' as const,
-			version: '2026.4',
-			distribution: 'tiny',
-			environmentUrl: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-64-conda.yml',
-		};
-		assert.strictEqual(statusForStep('new', 2, withEnv), 'passed');
-		assert.strictEqual(statusForStep('new', 3, {
-			...withEnv,
-			submittedTarget: {
-				version: '2026.4',
-				distribution: 'tiny',
-				environmentName: 'qiime2-tiny-2026.4',
-				environmentUrl: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-64-conda.yml',
-			},
-		}), 'passed');
-		assert.strictEqual(statusForStep('new', 4, { ...withEnv, qiimeStatus: 'ready' }), 'passed');
-		assert.strictEqual(statusForStep('new', 4, { ...withEnv, qiimeStatus: 'missing' }), 'failed');
-		assert.strictEqual(statusForStep('new', 5, { ...withEnv, q2lspStatus: 'ready' }), 'passed');
-		assert.strictEqual(statusForStep('new', 6, { ...withEnv, savedInterpreterPath: true }), 'passed');
-		assert.strictEqual(statusForStep('new', 7, { ...withEnv, savedInterpreterPath: true }), 'passed');
-		assert.strictEqual(statusForStep('new', 7, withEnv), 'not started');
-	});
-
-	test('saveEnabled requires ready statuses and matching identity', () => {
-		const base = makeState({
-			route: 'existing',
-			interpreterPath: '/env/bin/python',
-			qiimeStatus: 'ready',
-			q2lspStatus: 'ready',
-			validatedInterpreterPath: '/env/bin/python',
-			validatedTargetKey: 'existing:/env/bin/python',
-		});
-		assert.strictEqual(saveEnabled(base), true);
-		assert.strictEqual(saveEnabled({ ...base, qiimeStatus: 'missing' }), false);
-		assert.strictEqual(saveEnabled({ ...base, q2lspStatus: 'missing' }), false);
-		assert.strictEqual(saveEnabled({ ...base, interpreterPath: '/other/bin/python' }), false);
-		assert.strictEqual(saveEnabled({ ...base, validatedTargetKey: 'existing:/other/bin/python' }), false);
-		assert.strictEqual(saveEnabled({ ...base, validatedInterpreterPath: '' }), false);
-	});
-
-	test('saveEnabled accepts server-side wizard message identity', () => {
-		assert.strictEqual(saveEnabled({
-			route: 'new',
-			interpreterPath: '/env/bin/python',
-			qiimeStatus: 'ready',
-			q2lspStatus: 'ready',
-			validatedInterpreterPath: '/env/bin/python',
-			validatedTargetKey: 'new:conda:2026.4:tiny:qiime2-tiny-2026.4:https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-64-conda.yml',
-			targetKey: 'new:conda:2026.4:tiny:qiime2-tiny-2026.4:https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-64-conda.yml',
-		}), true);
-	});
-
-	test('resetValidation clears validation fields', () => {
-		const state = makeState({
-			qiimeStatus: 'ready',
-			q2lspStatus: 'ready',
-			q2lspVersion: '1.0.0',
-			savedInterpreterPath: true,
-			validatedInterpreterPath: '/env/bin/python',
-			validatedTargetKey: 'existing:/env/bin/python',
-		});
-		resetValidation(state);
-		assert.strictEqual(state.qiimeStatus, 'unknown');
-		assert.strictEqual(state.q2lspStatus, 'unknown');
-		assert.strictEqual(state.q2lspVersion, '');
-		assert.strictEqual(state.savedInterpreterPath, false);
-		assert.strictEqual(state.validatedInterpreterPath, '');
-		assert.strictEqual(state.validatedTargetKey, '');
-	});
-
-	test('qiimeCommand returns empty when metadata is unavailable', () => {
-		assert.strictEqual(qiimeCommand(makeState({ metadataStatus: 'loading' })), '');
-		assert.strictEqual(qiimeCommand(makeState({ metadataStatus: 'missing' })), '');
-	});
-
-	test('qiimeCommand returns manual message for manual manager', () => {
-		const state = makeState({
-			route: 'new',
-			manager: 'manual',
-			metadataStatus: 'ready',
-			environments: [makeEnvironment()],
-			version: '2026.4',
-			distribution: 'tiny',
-			environmentUrl: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-64-conda.yml',
-		});
-		assert.strictEqual(qiimeCommand(state), 'Open QIIME 2 Quickstart, then return to validate your selected interpreter.');
-	});
-
-	test('qiimeCommand validates URL and environment name safety', () => {
-		const safe = makeState({
-			route: 'new',
-			manager: 'conda',
-			metadataStatus: 'ready',
-			environments: [makeEnvironment()],
-			version: '2026.4',
-			distribution: 'tiny',
-			environmentUrl: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-64-conda.yml',
-		});
-		assert.ok(qiimeCommand(safe).includes('conda env create'));
-		const pixi = { ...safe, manager: 'pixi' };
-		assert.strictEqual(
-			qiimeCommand(pixi),
-			"pixi init && pixi import --format conda-env 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-64-conda.yml' -e 'qiime2-tiny-2026.4' && pixi install"
-		);
-
-		const unsafeUrl = { ...safe, environmentUrl: 'https://evil.com/env.yml' };
-		assert.strictEqual(qiimeCommand(unsafeUrl), '');
-
-		const unsafeName = makeState({
-			route: 'new',
-			manager: 'conda',
-			metadataStatus: 'ready',
-			environments: [makeEnvironment({ environmentName: 'evil; rm -rf /' })],
-			version: '2026.4',
-			distribution: 'tiny',
-			environmentUrl: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-linux-64-conda.yml',
-		});
-		assert.strictEqual(qiimeCommand(unsafeName), '');
-	});
-
-	test('qiimeCommand includes conda subdir when platform provides it', () => {
-		const state = makeState({
-			route: 'new',
-			manager: 'conda',
-			metadataStatus: 'ready',
-			platform: { id: 'osx-64', label: 'macOS x64', condaSubdir: 'osx-64' },
-			environments: [makeEnvironment({ platform: 'osx-64', fileName: 'qiime2-tiny-2026.4-osx-64-conda.yml', url: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-osx-64-conda.yml' })],
-			version: '2026.4',
-			distribution: 'tiny',
-			environmentUrl: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/qiime2-tiny-2026.4-osx-64-conda.yml',
-		});
-		assert.ok(qiimeCommand(state).startsWith("CONDA_SUBDIR='osx-64' conda env create"));
-	});
-
-	test('switchManager updates state and resets validation when manager changes', () => {
-		const state = makeState({ manager: 'conda', managerStatus: 'ready', managerStatuses: { conda: 'ready' }, qiimeStatus: 'ready', q2lspStatus: 'ready' });
-		switchManager(state, 'pixi');
-		assert.strictEqual(state.manager, 'pixi');
-		assert.strictEqual(state.managerStatus, 'unknown');
-		assert.strictEqual(state.submittedTarget, undefined);
-		assert.strictEqual(state.qiimeStatus, 'unknown');
-		assert.strictEqual(state.q2lspStatus, 'unknown');
-
-		switchManager(state, 'pixi'); // no-op
-		assert.strictEqual(state.manager, 'pixi');
-	});
-
-	test('selectCandidate updates interpreter path and resets validation', () => {
-		const state = makeState({
-			candidates: [
-				{ id: 'c1', label: 'A', path: '/a/bin/python', source: 'config' },
-				{ id: 'c2', label: 'B', path: '/b/bin/python', source: 'path' },
-			],
-			selectedCandidateId: 'c1',
-			interpreterPath: '/a/bin/python',
-			qiimeStatus: 'ready',
-		});
-		selectCandidate(state, 'c2');
-		assert.strictEqual(state.selectedCandidateId, 'c2');
-		assert.strictEqual(state.interpreterPath, '/b/bin/python');
-		assert.strictEqual(state.qiimeStatus, 'unknown');
-	});
-
-	test('buildSetupWizardInterpreterCandidates orders sources correctly', () => {
-		const candidates = buildSetupWizardInterpreterCandidates({
-			configuredInterpreterPath: '/configured/bin/python',
-			activePythonInterpreterPath: '/active/bin/python',
-		});
-		assert.deepStrictEqual(candidates.map((candidate) => candidate.label), [
-			'Configured q2lsp interpreter',
-			'Active VS Code: Python interpreter',
-			'python3 from PATH',
-			'python from PATH',
-		]);
-	});
-
-	test('buildManagerInstallCommand builds commands for valid managers only', () => {
-		assert.strictEqual(buildManagerInstallCommand('pixi'), 'curl -fsSL https://pixi.sh/install.sh | sh');
-		assert.ok(buildManagerInstallCommand('conda')?.includes('Miniconda3-latest-'));
-		assert.strictEqual(buildManagerInstallCommand('manual'), undefined);
-		assert.strictEqual(buildManagerInstallCommand('$(touch owned)'), undefined);
-	});
-
-	test('buildQ2lspInstallCommand prefers explicit interpreter for existing route', () => {
-		assert.strictEqual(
-			buildQ2lspInstallCommand('existing', 'conda', 'metadata-env', '/existing qiime/bin/python'),
-			"'/existing qiime/bin/python' -m pip install -U q2lsp"
-		);
-		assert.strictEqual(
-			buildQ2lspInstallCommand('new', 'conda', 'metadata-env', '/existing qiime/bin/python'),
-			"conda run -n 'metadata-env' python -m pip install -U q2lsp"
-		);
-	});
-
-	test('apple silicon resolves to osx-64 conda subdir', () => {
-		const platform = resolveQiimePlatform('darwin', 'arm64');
-		assert.strictEqual(platform.id, 'osx-64');
-		assert.strictEqual(platform.condaSubdir, 'osx-64');
-	});
-
-	test('fallback qiime environments include platform-specific files', () => {
-		const platform = resolveQiimePlatform('linux', 'x64');
-		const environments = buildFallbackQiimeEnvironments(platform);
-		assert.ok(environments.some((environment) => environment.fileName.endsWith('linux-conda.yml')));
-		assert.ok(environments.some((environment) => environment.distribution === 'amplicon'));
-		assert.ok(environments.some((environment) => environment.distribution === 'moshpit'));
-		assert.ok(environments.some((environment) => environment.distribution === 'pathogenome'));
-		assert.ok(environments.some((environment) => environment.distribution === 'tiny'));
-		assert.ok(environments.some((environment) => environment.version === '2024.10'));
-	});
-
-	test('remote qiime environments replace bundled distributions for matching versions', () => {
-		const platform = resolveQiimePlatform('linux', 'x64');
-		const fallbackEnvironments = buildFallbackQiimeEnvironments(platform);
-		const remoteEnvironments = [
-			{
-				version: '2025.10',
-				distribution: 'amplicon',
-				platform: platform.id,
-				fileName: 'qiime2-amplicon-2025.10-py310-linux-conda.yml',
-				url: 'https://example.test/amplicon.yml',
-				environmentName: 'qiime2-amplicon-2025.10',
-			},
-			{
-				version: '2025.10',
-				distribution: 'metagenome',
-				platform: platform.id,
-				fileName: 'qiime2-metagenome-2025.10-py310-linux-conda.yml',
-				url: 'https://example.test/metagenome.yml',
-				environmentName: 'qiime2-metagenome-2025.10',
-			},
-		];
-
-		const mergedEnvironments = mergeQiimeEnvironments(fallbackEnvironments, remoteEnvironments);
-		const merged2025Distributions = mergedEnvironments
-			.filter((environment) => environment.version === '2025.10' && environment.platform === platform.id)
-			.map((environment) => environment.distribution)
-			.sort();
-
-		assert.deepStrictEqual(merged2025Distributions, ['amplicon', 'metagenome']);
-		assert.ok(mergedEnvironments.some((environment) => environment.version === '2025.7'));
-	});
-
-	test('remote qiime environment paths accept files without version naming assumptions', () => {
-		const environment = parseQiimeEnvironmentPath(
-			'2025.10/qiime2/released/rachis-qiime2-linux-64-conda.yml'
-		);
-		assert.strictEqual(environment?.fileName, 'rachis-qiime2-linux-64-conda.yml');
-		assert.strictEqual(environment?.version, '2025.10');
-	});
-
-	test('remote qiime environment paths accept version-matched legacy distributions', () => {
-		const environment = parseQiimeEnvironmentPath(
-			'2025.10/metagenome/released/qiime2-metagenome-2025.10-py310-linux-conda.yml'
-		);
-		assert.strictEqual(environment?.distribution, 'metagenome');
-		assert.strictEqual(environment.version, '2025.10');
-	});
-
-	test('synthetic qiime environments reject legacy qiime2 distribution entries', () => {
-		const platform = resolveQiimePlatform('linux', 'x64');
-		assert.strictEqual(buildSyntheticQiimeEnvironment('2025.10', 'qiime2', platform), undefined);
-	});
-
-	test('synthetic qiime environments use packages.qiime2.org urls', () => {
-		const platform = resolveQiimePlatform('linux', 'x64');
-		const environment = buildSyntheticQiimeEnvironment('2026.4', 'tiny', platform);
-		assert.ok(environment?.url.startsWith('https://packages.qiime2.org/qiime2/2026.4/tiny/released/'));
-	});
-
-	test('git tree parser extracts released qiime environment files', () => {
-		const environments = buildQiimeEnvironmentsFromTree([
-			{ type: 'tree', path: '2026.4/qiime2/released' },
-			{ type: 'blob', path: '2026.4/qiime2/released/rachis-qiime2-linux-64-conda.yml' },
-			{ type: 'blob', path: '2026.4/qiime2/dev/rachis-qiime2-linux-64-conda.yml' },
-			{ type: 'blob', path: '2025.10/amplicon/released/qiime2-amplicon-2025.10-py310-osx-conda.yml' },
-			{ type: 'blob', path: '2025.10/amplicon/released/README.md' },
-		]);
-
-		assert.deepStrictEqual(
-			environments.map((environment) => ({
-				version: environment.version,
-				distribution: environment.distribution,
-				platform: environment.platform,
-				fileName: environment.fileName,
-			})),
-			[
-				{
-					version: '2026.4',
-					distribution: 'qiime2',
-					platform: 'linux-64',
-					fileName: 'rachis-qiime2-linux-64-conda.yml',
-				},
-				{
-					version: '2025.10',
-					distribution: 'amplicon',
-					platform: 'osx-64',
-					fileName: 'qiime2-amplicon-2025.10-py310-osx-conda.yml',
-				},
-			]
-		);
-	});
-
-	test('serialized setup wizard functions behave like TypeScript helpers', () => {
-		const state = makeState({
-			route: 'existing',
-			interpreterPath: '/env/bin/python',
-			qiimeStatus: 'ready',
-			q2lspStatus: 'ready',
-			validatedInterpreterPath: '/env/bin/python',
-			validatedTargetKey: 'existing:/env/bin/python',
-		});
-		const script = `${serializeWebviewScriptFunctions()}\nreturn { selectedInterpreterPath, saveEnabled, q2lspInstallCommand };`;
-		const serialized = new Function(script)() as {
-			selectedInterpreterPath: (state: WizardState) => string;
-			saveEnabled: (state: WizardState) => boolean;
-			q2lspInstallCommand: (state: WizardState) => string;
-		};
-
-		assert.strictEqual(serialized.selectedInterpreterPath(state), selectedInterpreterPath(state));
-		assert.strictEqual(serialized.saveEnabled(state), saveEnabled(state));
-		assert.strictEqual(serialized.q2lspInstallCommand(state), q2lspInstallCommand(state));
-	});
-
-	test('setup wizard HTML contains required accessibility and action elements', () => {
-		const html = buildSetupWizardHtml({ nonce: 'test-nonce-123' });
-		const elementById = (id: string): { tag: string; attributes: Map<string, string | true> } => {
-			const elementPattern = /<([a-z][a-z0-9-]*)(\s[^>]*)?>/gi;
-			let match: RegExpExecArray | null;
-			while ((match = elementPattern.exec(html)) !== null) {
-				const attributes = parseAttributes(match[2] ?? '');
-				if (attributes.get('id') === id) {
-					return { tag: match[1], attributes };
+			showOpenDialog: async () => dialogs,
+			showWarningMessage: async (_message: string, options?: vscode.MessageOptions | string) => {
+				if (typeof options === 'object' && options.detail) {
+					warningDetails.push(options.detail);
 				}
-			}
-			assert.fail(`missing element id: ${id}`);
-		};
-		const elementsByAttribute = (name: string, value?: string): Array<{ tag: string; attributes: Map<string, string | true> }> => {
-			const elements: Array<{ tag: string; attributes: Map<string, string | true> }> = [];
-			const elementPattern = /<([a-z][a-z0-9-]*)(\s[^>]*)?>/gi;
-			let match: RegExpExecArray | null;
-			while ((match = elementPattern.exec(html)) !== null) {
-				const attributes = parseAttributes(match[2] ?? '');
-				if (attributes.has(name) && (value === undefined || attributes.get(name) === value)) {
-					elements.push({ tag: match[1], attributes });
+				return confirmations.shift();
+			},
+			showErrorMessage: async (message: string) => { errors.push(message); return undefined; },
+			showInformationMessage: async (message: string) => { messages.push(message); return undefined; },
+			withProgress: async <T>(_options: vscode.ProgressOptions, task: (progress: vscode.Progress<{ message?: string }>, token: vscode.CancellationToken) => Thenable<T>) => task({ report: () => undefined }, token.token),
+		});
+		Object.assign(vscode.commands, {
+			registerCommand: (id: string, handler: () => Promise<void>) => {
+				handlers.set(id, handler);
+				return new vscode.Disposable(() => handlers.delete(id));
+			},
+			executeCommand: async (id: string, argument: string | { step: string }) => {
+				if (id === 'workbench.action.openWalkthrough') {
+					selectedSteps.push((argument as { step: string }).step);
+				} else if (id === 'welcome.markStepComplete' || id === 'welcome.markStepIncomplete') {
+					completed.set((argument as string).split('#').at(-1)!, id === 'welcome.markStepComplete');
 				}
-			}
-			return elements;
+			},
+		});
+		Object.assign(vscode.workspace, {
+			getConfiguration: () => ({
+				get: (key: string) => key === 'interpreterPath' ? configured : undefined,
+				update: async (_key: string, value: string) => { saves.push(value); configured = value; },
+			}),
+		});
+		Object.assign(vscode.extensions, { getExtension: () => undefined });
+		Object.assign(vscode.env, { openExternal: async (uri: vscode.Uri) => { openedUrls.push(uri.toString()); return true; } });
+		tools = {
+			check: async (path) => { checkedPaths.push(path); return details(['q2lsp']); },
+			run: async (file, args) => {
+				calls.push({ file, args });
+				return JSON.stringify({ envs: ['/created/qiime2-tiny-2026.4'] });
+			},
+			environments: async () => [{
+				version: '2026.4', distribution: 'tiny', platform: process.platform === 'darwin' ? 'osx-64' : 'linux-64',
+				fileName: 'tiny.yml', environmentName: 'qiime2-tiny-2026.4',
+				url: 'https://packages.qiime2.org/qiime2/2026.4/tiny/released/tiny.yml',
+			}],
 		};
-		const assertHidden = (id: string): void => assert.strictEqual(elementById(id).attributes.has('hidden'), true, `expected #${id} hidden`);
-		const assertVisible = (id: string): void => assert.strictEqual(elementById(id).attributes.has('hidden'), false, `expected #${id} visible`);
+		await registerSetupWizard({
+			extension: { id: 'geometriccross.qiime-language-server' }, subscriptions: [],
+		} as unknown as vscode.ExtensionContext, {
+			appendLine: (line: string) => logs.push(line), show: () => undefined,
+		} as unknown as vscode.OutputChannel, tools);
+	});
 
-		for (const id of [
-			'globalStatus',
-			'routeScreen',
-			'checklistPanel',
-			'checklist',
-			'existingRoute',
-			'newRoute',
-			'q2lspPanel',
-			'candidateList',
-			'managerCards',
-			'versionSelect',
-			'distributionSelect',
-			'environmentUrlSelect',
-			'qiimeCommandBox',
-			'submittedTarget',
-			'managerMissing',
-			'metadataError',
-			'saveExistingInterpreterPath',
-			'saveInterpreterPathAction',
-			'createEnvironmentAction',
-		]) {
-			elementById(id);
+	teardown(() => {
+		token.dispose();
+		Object.assign(vscode.window, originalWindow);
+		Object.assign(vscode.commands, originalCommands);
+		Object.assign(vscode.workspace, { getConfiguration: originalConfiguration });
+		Object.defineProperty(vscode.workspace, 'isTrusted', trustDescriptor);
+		Object.defineProperty(vscode.workspace, 'workspaceFolders', foldersDescriptor);
+		Object.assign(vscode.extensions, { getExtension: originalGetExtension });
+		Object.assign(vscode.env, { openExternal: originalOpenExternal });
+	});
+
+	test('opening the walkthrough does not probe Python, fetch metadata, or install anything', async () => {
+		tools.environments = async () => assert.fail('opening must not fetch metadata');
+		await command('openSetupWizard');
+		assert.deepStrictEqual(selectedSteps, ['environment']);
+		assert.deepStrictEqual(checkedPaths, []);
+		assert.deepStrictEqual(calls, []);
+		assert.deepStrictEqual(progress(), [false, false, false]);
+	});
+
+	test('existing environment is validated and the next necessary step is selected', async () => {
+		tools.environments = async () => assert.fail('existing environments need no network');
+		choices.push('python3');
+		await command('setupEnvironment');
+		assert.deepStrictEqual(checkedPaths, ['python3']);
+		assert.deepStrictEqual(progress(), [true, false, false]);
+		assert.deepStrictEqual(selectedSteps, ['server']);
+		assert.deepStrictEqual(saves, []);
+		assert.deepStrictEqual(messages, []);
+	});
+
+	test('successful checks save the resolved absolute interpreter, not a PATH alias', async () => {
+		tools.check = async (path) => { checkedPaths.push(path); return details(); };
+		choices.push('python3', 'User');
+		await command('setupEnvironment');
+		assert.deepStrictEqual(progress(), [true, true, false]);
+		await command('finishSetup');
+		assert.deepStrictEqual(checkedPaths, ['python3', '/qiime/bin/python']);
+		assert.deepStrictEqual(saves, ['/qiime/bin/python']);
+		assert.deepStrictEqual(progress(), [true, true, true]);
+		assert.deepStrictEqual(pickerLabels.at(-1), ['User']);
+	});
+
+	test('choosing another interpreter invalidates all previous completion', async () => {
+		tools.check = async () => details();
+		choices.push('python3', 'User');
+		await command('setupEnvironment');
+		await command('finishSetup');
+		tools.check = async () => details(['qiime2', 'q2cli'], '/other/bin/python');
+		choices.push('Browse for Python…');
+		dialogs = [vscode.Uri.file('/other/bin/python')];
+		await command('setupEnvironment');
+		assert.deepStrictEqual(progress(), [false, false, false]);
+		assert.ok(errors[0].includes('Missing qiime2, q2cli'));
+		assert.deepStrictEqual(saves, ['/qiime/bin/python']);
+	});
+
+	test('cancelling selection or browsing preserves the current validated target', async () => {
+		choices.push('python3');
+		await command('setupEnvironment');
+		choices.push(undefined, 'Browse for Python…');
+		await command('setupEnvironment');
+		await command('setupEnvironment');
+		assert.deepStrictEqual(checkedPaths, ['python3']);
+		assert.deepStrictEqual(progress(), [true, false, false]);
+	});
+
+	test('q2lsp installation is confirmed, targets the selected interpreter, and is rechecked', async () => {
+		choices.push('python3');
+		await command('setupEnvironment');
+		confirmations.push('Install q2lsp');
+		tools.run = async (file, args) => {
+			calls.push({ file, args });
+			tools.check = async () => details();
+			return '';
+		};
+		await command('setupServer');
+		assert.deepStrictEqual(calls, [{ file: '/qiime/bin/python', args: ['-m', 'pip', 'install', '-U', 'q2lsp'] }]);
+		assert.deepStrictEqual(progress(), [true, true, false]);
+		assert.strictEqual(selectedSteps.at(-1), 'finish');
+	});
+
+	test('declining installation does not run pip or complete the step', async () => {
+		choices.push('python3');
+		await command('setupEnvironment');
+		await command('setupServer');
+		assert.deepStrictEqual(calls, []);
+		assert.deepStrictEqual(progress(), [true, false, false]);
+	});
+
+	test('an install command exiting successfully is not proof that q2lsp is ready', async () => {
+		choices.push('python3');
+		confirmations.push('Install q2lsp');
+		await command('setupServer');
+		assert.deepStrictEqual(progress(), [true, false, false]);
+		assert.ok(errors[0].includes('still missing'));
+		tools.check = async () => details();
+		await command('setupServer');
+		assert.deepStrictEqual(progress(), [true, true, false]);
+	});
+
+	test('failed checks prevent installing and saving', async () => {
+		choices.push('python3');
+		tools.check = async () => details(['qiime2', 'q2cli']);
+		await command('setupServer');
+		await command('finishSetup');
+		assert.deepStrictEqual(calls, []);
+		assert.deepStrictEqual(saves, []);
+		assert.deepStrictEqual(progress(), [false, false, false]);
+	});
+
+	test('a failed recheck clears previous completion, and saving requires another successful check', async () => {
+		tools.check = async () => details();
+		choices.push('python3');
+		await command('setupEnvironment');
+		tools.check = async () => { throw new Error('Python is no longer available'); };
+		await command('finishSetup');
+		assert.deepStrictEqual(saves, []);
+		assert.deepStrictEqual(progress(), [false, false, false]);
+		assert.ok(errors[0].includes('no longer available'));
+	});
+
+	test('cancelling save leaves the final step incomplete', async () => {
+		tools.check = async () => details();
+		choices.push('python3');
+		await command('finishSetup');
+		assert.deepStrictEqual(saves, []);
+		assert.deepStrictEqual(progress(), [true, true, false]);
+	});
+
+	test('Conda creation requires confirmation and validates the created interpreter', async () => {
+		choices.push('Create a QIIME 2 environment…', 'Conda / Miniconda', 'tiny');
+		confirmations.push('Create Environment');
+		await command('setupEnvironment');
+		assert.deepStrictEqual(calls.map((call) => call.args[0]), ['--version', 'env', 'env']);
+		assert.deepStrictEqual(checkedPaths, ['/created/qiime2-tiny-2026.4/bin/python']);
+		assert.deepStrictEqual(progress(), [true, false, false]);
+		assert.strictEqual(messages.length, 1);
+		assert.ok(messages[0].includes('conda activate qiime2-tiny-2026.4'));
+		assert.ok(logs.includes(messages[0]));
+	});
+
+	for (const qiimeReady of [true, false]) {
+		test(`Pixi activation instructions ${qiimeReady ? 'use the validated default environment' : 'are not shown after a failed check'}`, async () => {
+			const originalFetch = globalThis.fetch;
+			const project = await mkdtemp(path.join(tmpdir(), 'q2lsp-wizard-pixi-'));
+			const environmentName = 'qiime2-tiny-2026.4';
+			const prefix = path.join(project, '.pixi', 'envs', 'default');
+			const manifest = '[workspace]\nname = "existing-project"\nchannels = ["conda-forge"]\nplatforms = ["linux-64"]\n';
+			try {
+				await writeFile(path.join(project, 'pixi.toml'), manifest);
+				globalThis.fetch = async () => new Response('name: qiime\ndependencies: [python, qiime2, q2cli]\n');
+				tools.run = async (file, args) => {
+					calls.push({ file, args });
+					return JSON.stringify({ environments_info: [
+						{ name: 'default', prefix },
+						{ name: environmentName, prefix: path.join(project, '.pixi', 'envs', environmentName) },
+					] });
+				};
+				tools.check = async (candidate) => {
+					assert.deepStrictEqual(messages, [], 'activation guidance must wait for validation');
+					checkedPaths.push(candidate);
+					return details(qiimeReady ? ['q2lsp'] : ['q2cli', 'q2lsp'], candidate);
+				};
+				dialogs = [vscode.Uri.file(project)];
+				choices.push('Create a QIIME 2 environment…', 'Pixi', 'tiny');
+				confirmations.push('Create Environment');
+				await command('setupEnvironment');
+
+				assert.ok(warningDetails[0].includes('replace the default environment'), 'replacing default must be disclosed before confirmation');
+				assert.deepStrictEqual(calls.map((call) => call.args[0]), ['--version', 'import', 'workspace', 'install', 'info']);
+				assert.deepStrictEqual(calls[3], { file: 'pixi', args: ['install', '-e', 'default'] });
+				assert.deepStrictEqual(checkedPaths, [path.join(prefix, 'bin', 'python')]);
+				if (qiimeReady) {
+					assert.strictEqual(messages.length, 1);
+					assert.ok(messages[0].includes(project), 'instructions must identify the Pixi project folder');
+					assert.ok(messages[0].includes('"pixi shell"'));
+					assert.ok(messages[0].includes('default'));
+					assert.ok(!messages[0].includes(' -e '), 'default must not need an environment flag');
+					assert.ok(logs.includes(messages[0]), 'instructions remain available in the output channel');
+					assert.deepStrictEqual(progress(), [true, false, false]);
+					assert.deepStrictEqual(selectedSteps, ['server']);
+					assert.deepStrictEqual(errors, []);
+				} else {
+					assert.deepStrictEqual(messages, []);
+					assert.deepStrictEqual(progress(), [false, false, false]);
+					assert.ok(errors[0].includes('Missing q2cli'));
+				}
+			} finally {
+				globalThis.fetch = originalFetch;
+				await rm(project, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test('cancelling creation runs no environment creation command', async () => {
+		choices.push('Create a QIIME 2 environment…', 'Conda / Miniconda', 'tiny');
+		await command('setupEnvironment');
+		assert.deepStrictEqual(calls, [{ file: 'conda', args: ['--version'] }]);
+		assert.deepStrictEqual(checkedPaths, []);
+		assert.deepStrictEqual(messages, []);
+		assert.deepStrictEqual(progress(), [false, false, false]);
+	});
+
+	test('declining Pixi creation does not replace the default environment', async () => {
+		choices.push('Create a QIIME 2 environment…', 'Pixi', 'tiny');
+		dialogs = [vscode.Uri.file('/existing-pixi-project')];
+		await command('setupEnvironment');
+		assert.ok(warningDetails[0].includes('replace the default environment'));
+		assert.deepStrictEqual(calls, [{ file: 'pixi', args: ['--version'] }]);
+		assert.deepStrictEqual(checkedPaths, []);
+		assert.deepStrictEqual(messages, []);
+	});
+
+	test('manual setup opens documentation without falsely completing a step', async () => {
+		choices.push('Create a QIIME 2 environment…', 'Manual setup');
+		await command('setupEnvironment');
+		assert.strictEqual(openedUrls.length, 1);
+		assert.deepStrictEqual(calls, []);
+		assert.deepStrictEqual(progress(), [false, false, false]);
+	});
+
+	test('unavailable metadata does not generate a guessed installation command', async () => {
+		tools.environments = async () => [];
+		choices.push('Create a QIIME 2 environment…', 'Conda / Miniconda');
+		await command('setupEnvironment');
+		assert.deepStrictEqual(calls, [{ file: 'conda', args: ['--version'] }]);
+		assert.ok(errors[0].includes('Could not load'));
+	});
+
+	test('a second setup action cannot overlap an active check', async () => {
+		let resolveCheck!: (value: InterpreterValidationDetails) => void;
+		tools.check = () => new Promise((resolve) => { resolveCheck = resolve; });
+		choices.push('python3');
+		const first = command('setupEnvironment');
+		while (!resolveCheck) {
+			await new Promise((resolve) => setTimeout(resolve, 0));
 		}
-		assert.strictEqual(elementById('globalStatus').attributes.get('role'), 'status');
-		assert.strictEqual(elementById('globalStatus').attributes.get('aria-live'), 'polite');
-		assert.ok(elementsByAttribute('data-command', 'validateEnvironment').length > 0);
-		assert.ok(elementsByAttribute('data-command', 'validateQ2lsp').length > 0);
-		assert.ok(elementsByAttribute('data-command', 'saveInterpreterPath').length > 0);
-		assert.ok(elementsByAttribute('data-command', 'createQiimeEnvironment').length > 0);
-		assert.ok(elementsByAttribute('data-route', 'existing').length > 0);
-		assert.ok(elementsByAttribute('data-route', 'new').length > 0);
+		await command('setupServer');
+		resolveCheck(details(['q2lsp']));
+		await first;
+		assert.deepStrictEqual(calls, []);
+		assert.strictEqual(pickerLabels.length, 1);
+	});
 
-		assertVisible('routeScreen');
-		assertHidden('existingRoute');
-		assertHidden('newRoute');
-		assertHidden('q2lspPanel');
-		assertVisible('candidateList');
-		assertVisible('managerCards');
-		assertHidden('submittedTarget');
-		assertVisible('managerMissing');
-		assertHidden('metadataError');
-		assert.strictEqual(elementById('saveExistingInterpreterPath').attributes.has('disabled'), true);
-		assert.strictEqual(elementById('saveInterpreterPathAction').attributes.has('disabled'), true);
-		assert.strictEqual(elementById('environmentUrlSelect').attributes.has('disabled'), true);
-		assert.strictEqual(elementById('createEnvironmentAction').attributes.has('disabled'), false);
+	test('untrusted workspaces can view the wizard but cannot run setup tools', async () => {
+		trusted = false;
+		await command('openSetupWizard');
+		await command('setupEnvironment');
+		await command('setupServer');
+		await command('finishSetup');
+		assert.deepStrictEqual(selectedSteps, ['environment']);
+		assert.deepStrictEqual(checkedPaths, []);
+		assert.deepStrictEqual(calls, []);
+		assert.deepStrictEqual(pickerLabels, []);
 	});
 });
-
-const parseAttributes = (source: string): Map<string, string | true> => {
-	const attributes = new Map<string, string | true>();
-	const attributePattern = /([:\w-]+)(?:\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
-	let match: RegExpExecArray | null;
-	while ((match = attributePattern.exec(source)) !== null) {
-		attributes.set(match[1], match[3] ?? match[4] ?? match[5] ?? true);
-	}
-	return attributes;
-};

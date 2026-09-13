@@ -27,7 +27,7 @@ import {
 	resolveQiimeRunTerminal,
 	toQiimeRunCommandPayload,
 } from './runCommand';
-import { openSetupWizard } from './setupWizard/index';
+import { registerSetupWizard } from './setupWizard/index';
 import { resolveConfiguredPythonInterpreter, resolveInterpreter } from './interpreter_resolver';
 
 let client: LanguageClient | undefined;
@@ -45,7 +45,7 @@ const shouldRestartOnConfigChange = (affectsConfiguration: (section: string) => 
 	return affectsConfiguration('q2lsp.interpreterPath') || affectsConfiguration('q2lsp.serverEnv');
 };
 
-export async function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	outputChannel = vscode.window.createOutputChannel('q2lsp');
 	context.subscriptions.push(outputChannel);
 
@@ -74,20 +74,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
-	context.subscriptions.push(
-		vscode.commands.registerCommand('q2lsp.openSetupWizard', async () => {
-			const activeDocument = vscode.window.activeTextEditor?.document;
-			const { interpreterPath: normalizedInterpreter } = resolveQ2lspConfig(activeDocument);
-			const pythonExtensionInterpreter = normalizedInterpreter
-				? undefined
-				: await resolveConfiguredPythonInterpreter(outputChannel);
-			openSetupWizard({
-				context,
-				outputChannel,
-				interpreterPath: normalizedInterpreter ?? pythonExtensionInterpreter,
-			});
-		})
-	);
+	registerSetupWizard(context, outputChannel);
+	const isShellscript = (document: vscode.TextDocument): boolean => document.languageId === 'shellscript';
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('q2lsp.runCommand', (payload: unknown) => {
@@ -112,16 +100,30 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(async (event) => {
-			if (shouldRestartOnConfigChange((section) => event.affectsConfiguration(section))) {
+			if ((client || vscode.workspace.textDocuments.some(isShellscript))
+				&& shouldRestartOnConfigChange((section) => event.affectsConfiguration(section))) {
 				await restartClient(context);
 			}
 		})
 	);
 
-	await startClient(context);
+	// Opening the walkthrough must not trigger interpreter errors before setup.
+	if (vscode.workspace.textDocuments.some(isShellscript)) {
+		await startClient(context);
+	} else {
+		const onOpen = vscode.workspace.onDidOpenTextDocument(async (document) => {
+			if (isShellscript(document)) {
+				onOpen.dispose();
+				if (!client) {
+					await startClient(context);
+				}
+			}
+		});
+		context.subscriptions.push(onOpen);
+	}
 }
 
-export async function deactivate() {
+export async function deactivate(): Promise<void> {
 	await stopClient();
 }
 
