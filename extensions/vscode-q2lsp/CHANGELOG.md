@@ -8,6 +8,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - No changes yet.
 
+## [4.1.0] - 2026-09-14
+
+### Fixed
+- With q2lsp server 4.1.0, metadata options such as `--m-metadata-file` and `--m-metadata-column` are no longer reported as unknown or incorrectly suggested as `--p-metadata`.
+- Metadata file and column options are tracked independently for completions and required-option diagnostics.
+
+### Upgrade notes
+- These fixes are in the Python language server, which is not bundled with the extension. Upgrade `q2lsp` to 4.1.0 in the Python environment selected by `q2lsp.interpreterPath`, then run **q2lsp: Restart q2lsp Server**.
+
 ## [4.0.0] - 2026-09-14
 
 ### Added

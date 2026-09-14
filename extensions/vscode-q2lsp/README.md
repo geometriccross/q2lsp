@@ -119,14 +119,14 @@ gh secret set OVSX_ACCESS_TOKEN --env openvsx --repo geometriccross/q2lsp
 
 After committing and pushing the workflow changes, run `extension-release` from the Actions UI with `dry_run` enabled. This builds, lints, tests, and uploads a VSIX artifact without publishing.
 
-For a release, push a tag named `vscode-q2lsp-v<version>` matching `package.json` (for example, `vscode-q2lsp-v4.0.0`). **A release tag publishes the same VSIX to both VS Code Marketplace and Open VSX**; the Marketplace job also requires `AZURE_ACCESS_TOKEN` in its `vscode-marketplace` environment. Manual runs publish only when the selected ref is a matching release tag and `dry_run` is disabled. Branch runs never publish.
+For a release, push a tag named `vscode-q2lsp-v<version>` matching `package.json` (for example, `vscode-q2lsp-v4.1.0`). **A release tag publishes the same VSIX to both VS Code Marketplace and Open VSX**; the Marketplace job also requires `AZURE_ACCESS_TOKEN` in its `vscode-marketplace` environment. Manual runs publish only when the selected ref is a matching release tag and `dry_run` is disabled. Branch runs never publish.
 
 ### Publish only to Open VSX
 
 For the first Open VSX upload, or to avoid republishing to VS Code Marketplace, download and extract the VSIX artifact from a successful dry run. With `OVSX_PAT` set and namespace access checked, run from the repository root:
 
 ```bash
-pixi run -e dev pnpm dlx ovsx@0.10.9 publish /path/to/qiime-language-server-4.0.0.vsix
+pixi run -e dev pnpm dlx ovsx@0.10.9 publish /path/to/qiime-language-server-4.1.0.vsix
 unset OVSX_PAT
 ```
 
