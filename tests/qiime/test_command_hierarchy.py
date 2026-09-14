@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import shlex
 from typing import cast
 
+import click
 import pytest
+from q2cli.commands import RootCommand
 
+from q2lsp.core.diagnostics import collect_diagnostics
+from q2lsp.core.diagnostics.codes import UNKNOWN_OPTION
+from q2lsp.core.document import analyze_document
+from q2lsp.qiime.catalog import QiimeCatalog
 from q2lsp.qiime.q2cli_gateway import build_qiime_hierarchy
 from q2lsp.qiime.types import CommandHierarchy, JsonObject
 
@@ -131,3 +138,57 @@ def test_build_qiime_hierarchy_builtin_details(hierarchy: CommandHierarchy) -> N
         assert isinstance(builtin_entry["help"], str | None)
         assert isinstance(builtin_entry["short_help"], str | None)
         assert builtin_entry["type"] == "builtin"
+
+
+@pytest.mark.parametrize(
+    ("action_name", "arguments", "sdk_option"),
+    [
+        (
+            "tabulate",
+            ["--m-input-file", "metadata.tsv", "--o-visualization", "out.qzv"],
+            "--p-input",
+        ),
+        (
+            "distance-matrix",
+            [
+                "--m-metadata-file",
+                "metadata.tsv",
+                "--m-metadata-column",
+                "group",
+                "--o-distance-matrix",
+                "out.qza",
+            ],
+            "--p-metadata",
+        ),
+    ],
+)
+def test_metadata_options_match_q2cli_parser(
+    hierarchy: CommandHierarchy,
+    action_name: str,
+    arguments: list[str],
+    sdk_option: str,
+) -> None:
+    root = RootCommand()
+    root_ctx = click.Context(root)
+    plugin = root.get_command(root_ctx, "metadata")
+    assert isinstance(plugin, click.MultiCommand)
+    plugin_ctx = click.Context(plugin, parent=root_ctx)
+    action = plugin.get_command(plugin_ctx, action_name)
+    assert isinstance(action, click.Command)
+
+    # Parsing option names does not load files or invoke the QIIME action.
+    parser = action.make_parser(click.Context(action, parent=plugin_ctx))
+    _, remaining, _ = parser.parse_args(arguments.copy())
+    assert remaining == []
+    with pytest.raises(click.NoSuchOption):
+        parser.parse_args([sdk_option, "metadata.tsv"])
+
+    catalog = QiimeCatalog.from_hierarchy(hierarchy)
+    source = f"qiime metadata {action_name} {shlex.join(arguments)}"
+    assert collect_diagnostics(analyze_document(source), catalog) == []
+
+    source += f" {sdk_option} metadata.tsv"
+    issues = collect_diagnostics(analyze_document(source), catalog)
+    assert [(issue.code, source[issue.start : issue.end]) for issue in issues] == [
+        (UNKNOWN_OPTION, sdk_option)
+    ]

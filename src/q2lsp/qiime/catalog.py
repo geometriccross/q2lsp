@@ -118,16 +118,26 @@ class QiimeCatalog:
         thawed_action = cast(JsonObject, _thaw_json(action_node))
         options: list[QiimeOptionFact] = []
         for name, option_prefix, param in iter_signature_params(thawed_action):
-            options.append(
+            option_names = (name,)
+            metadata = param.get("metadata")
+            if metadata in ("file", "column"):
+                option_prefix = "m"
+                option_names = (f"{name}_file",)
+                if metadata == "column":
+                    # One SDK parameter needs two independently supplied CLI options.
+                    option_names += (f"{name}_column",)
+
+            options.extend(
                 QiimeOptionFact(
-                    name=name,
-                    label=format_qiime_option_label(option_prefix, name),
+                    name=option_name,
+                    label=format_qiime_option_label(option_prefix, option_name),
                     kind=_option_kind(option_prefix),
                     required=param_is_required(param),
                     description=_param_text(param, "description"),
                     value_type=_param_text(param, "type"),
                     is_bool_flag=param.get("is_bool_flag") is True,
                 )
+                for option_name in option_names
             )
         return tuple(options)
 

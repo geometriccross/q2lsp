@@ -91,7 +91,8 @@ def shared_hierarchy() -> CommandHierarchy:
                         },
                         {
                             "name": "metadata",
-                            "signature_type": "metadata",
+                            "type": "parameter",
+                            "metadata": "file",
                             "description": "Sample metadata",
                         },
                         {
@@ -125,7 +126,7 @@ class TestCompletionsDiagnosticsConsistency:
             "--i-table",
             "--i-phylogeny",
             "--p-sampling-depth",
-            "--m-metadata",
+            "--m-metadata-file",
             "--p-n-jobs",
         }
 
@@ -151,7 +152,7 @@ class TestCompletionsDiagnosticsConsistency:
             "--i-table",
             "--i-phylogeny",
             "--p-sampling-depth",
-            "--m-metadata",
+            "--m-metadata-file",
         }
 
         missing_metadata_codes = _issue_codes(
@@ -179,7 +180,7 @@ class TestCompletionsDiagnosticsConsistency:
                 "y",
                 "--p-sampling-depth",
                 "100",
-                "--m-metadata",
+                "--m-metadata-file",
                 "m",
             ],
             catalog,
@@ -238,7 +239,7 @@ class TestCompletionsDiagnosticsConsistency:
                 "y",
                 "--p-sampling-depth",
                 "100",
-                "--m-metadata",
+                "--m-metadata-file",
                 "m",
             ]
         )
