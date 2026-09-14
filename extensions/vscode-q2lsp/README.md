@@ -86,3 +86,48 @@ If that fails, install `q2lsp` into that environment and confirm the same comman
 - Run VS Code in WSL (Remote - WSL).
 - Set `q2lsp.interpreterPath` to the Linux path inside WSL (for example `/usr/bin/python3`).
 - Do not use Windows paths; the extension host runs in the WSL environment.
+
+## Publishing (maintainers)
+
+The extension ID is `geometriccross.qiime-language-server`: `publisher` in `package.json` is the Open VSX namespace, and `name` is the extension name. Keep both unchanged when publishing updates. The manifest already includes the version, MIT license, repository, and VS Code engine requirement; Open VSX does not need a separate manifest.
+
+### One-time Open VSX setup
+
+1. Sign the [Open VSX Publisher Agreement](https://github.com/eclipse/openvsx/wiki/Publishing-Extensions) with your linked Eclipse account. Generating an access token alone is not sufficient.
+2. Make the token available locally as `OVSX_PAT` using a secret manager or a hidden shell prompt. Do not put it in `package.json`, a committed file, or a command-line argument.
+3. Check [your namespaces](https://open-vsx.org/user-settings/namespaces). Only if `geometriccross` does not already exist, create it from the repository root:
+
+   ```bash
+   pixi run -e dev pnpm dlx ovsx@0.10.9 create-namespace geometriccross
+   ```
+
+4. Check that your token can publish to the namespace:
+
+   ```bash
+   pixi run -e dev pnpm dlx ovsx@0.10.9 verify-pat geometriccross
+   ```
+
+Creating a namespace grants contributor access, not verified ownership. To have the extension marked as verified, [claim namespace ownership](https://github.com/eclipse/openvsx/wiki/Namespace-Access#how-to-claim-a-namespace). If the namespace already exists but you cannot publish to it, resolve membership or ownership before proceeding.
+
+### GitHub Actions releases
+
+In this repository's **Settings → Environments → openvsx**, add an environment secret named `OVSX_ACCESS_TOKEN`. The release workflow passes this secret to the CLI as `OVSX_PAT`. With GitHub CLI, you can set it through a hidden interactive prompt:
+
+```bash
+gh secret set OVSX_ACCESS_TOKEN --env openvsx --repo geometriccross/q2lsp
+```
+
+After committing and pushing the workflow changes, run `vscode-extension-release` from the Actions UI with `dry_run` enabled. This builds, lints, tests, and uploads a VSIX artifact without publishing.
+
+For a release, push a tag named `vscode-q2lsp-v<version>` matching `package.json` (for example, `vscode-q2lsp-v4.0.0`). **A release tag publishes the same VSIX to both VS Code Marketplace and Open VSX**; the Marketplace job also requires `AZURE_ACCESS_TOKEN` in its `vscode-marketplace` environment. Manual runs publish only when the selected ref is a matching release tag and `dry_run` is disabled. Branch runs never publish.
+
+### Publish only to Open VSX
+
+For the first Open VSX upload, or to avoid republishing to VS Code Marketplace, download and extract the VSIX artifact from a successful dry run. With `OVSX_PAT` set and namespace access checked, run from the repository root:
+
+```bash
+pixi run -e dev pnpm dlx ovsx@0.10.9 publish /path/to/qiime-language-server-4.0.0.vsix
+unset OVSX_PAT
+```
+
+Use the actual downloaded filename and confirm its version before publishing. After the CLI reports success, check the metadata at [Open VSX](https://open-vsx.org/extension/geometriccross/qiime-language-server). Use a new version number for subsequent releases.
