@@ -8,10 +8,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - No changes yet.
 
-## [4.0.0] - 2026-05-20
+## [4.0.0] - 2026-09-14
 
 ### Added
-- Setup Wizard webview for guided QIIME 2 environment configuration
+- Native VS Code setup walkthrough for guided QIIME 2 environment configuration, validation, installation, and saving the selected interpreter
+- Open VSX distribution alongside VS Code Marketplace
 - QIIME CodeLens commands (runnable actions directly in the editor)
 - Dependency cycle diagnostics across QIIME commands
 - Duplicate output path detection
