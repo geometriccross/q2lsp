@@ -3,7 +3,7 @@
 This runbook describes how to operate the release pipelines:
 
 - Python package workflow: `release-publish`
-- VS Code extension workflow: `vscode-extension-release`
+- VS Code extension workflow: `extension-release`
 
 Policy rules remain in `doc/prompts/RELEASE_POLICY.md`.
 
@@ -13,7 +13,7 @@ Before pushing a release tag, confirm all of the following:
 
 - GitHub workflows exist on the release commit:
   - `.github/workflows/release-publish.yml` (Python package)
-  - `.github/workflows/vscode-extension-release.yml` (VS Code extension)
+  - `.github/workflows/extension-release.yml` (VS Code extension)
 - GitHub environments exist: `testpypi` and `pypi`.
 - Environment protections are configured (reviewers/approval gates as required).
 - Trusted Publisher is registered on both indexes for this repo/workflow/environment pair:
@@ -60,7 +60,7 @@ Expected routing:
 2. Create and push the annotated tag:
    - `git tag -a vscode-q2lsp-vX.Y.Z -m "VS Code extension release vscode-q2lsp-vX.Y.Z"`
    - `git push origin vscode-q2lsp-vX.Y.Z`
-3. Monitor GitHub Actions `vscode-extension-release` run.
+3. Monitor GitHub Actions `extension-release` run.
 
 Expected routing:
 
@@ -85,7 +85,7 @@ After the workflow completes:
      - `python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ q2lsp==X.Y.Z...`
    - PyPI stable check:
      - `python -m pip install q2lsp==X.Y.Z`
-6. For extension tags, confirm the `vscode-extension-release` run uploaded one `.vsix` artifact and (when publish is enabled) completed both publish jobs.
+6. For extension tags, confirm the `extension-release` run uploaded one `.vsix` artifact and (when publish is enabled) completed both publish jobs.
 
 ## 6) Failure handling playbooks
 

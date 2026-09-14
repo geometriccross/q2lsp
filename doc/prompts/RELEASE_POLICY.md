@@ -6,7 +6,7 @@ Operational runbooks for executing releases and handling incidents are in
 `doc/prompts/RELEASING.md`.
 
 VS Code extension publish operations are documented in `doc/prompts/RELEASING.md`
-under the `vscode-extension-release` workflow runbook.
+under the `extension-release` workflow runbook.
 
 ## 1) Publish targets
 

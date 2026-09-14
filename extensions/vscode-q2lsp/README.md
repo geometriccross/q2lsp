@@ -117,7 +117,7 @@ In this repository's **Settings → Environments → openvsx**, add an environme
 gh secret set OVSX_ACCESS_TOKEN --env openvsx --repo geometriccross/q2lsp
 ```
 
-After committing and pushing the workflow changes, run `vscode-extension-release` from the Actions UI with `dry_run` enabled. This builds, lints, tests, and uploads a VSIX artifact without publishing.
+After committing and pushing the workflow changes, run `extension-release` from the Actions UI with `dry_run` enabled. This builds, lints, tests, and uploads a VSIX artifact without publishing.
 
 For a release, push a tag named `vscode-q2lsp-v<version>` matching `package.json` (for example, `vscode-q2lsp-v4.0.0`). **A release tag publishes the same VSIX to both VS Code Marketplace and Open VSX**; the Marketplace job also requires `AZURE_ACCESS_TOKEN` in its `vscode-marketplace` environment. Manual runs publish only when the selected ref is a matching release tag and `dry_run` is disabled. Branch runs never publish.
 

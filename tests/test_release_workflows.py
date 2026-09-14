@@ -131,7 +131,7 @@ def test_extension_release_metadata(
         json.dumps({"version": version}), encoding="utf-8"
     )
     result, outputs = _run_release_metadata(
-        "vscode-extension-release.yml",
+        "extension-release.yml",
         "build-package",
         tmp_path,
         f"refs/tags/vscode-q2lsp-v{version}",
@@ -149,7 +149,7 @@ def test_extension_release_rejects_invalid_tags(tmp_path: Path, tag: str) -> Non
         json.dumps({"version": "1.2.3"}), encoding="utf-8"
     )
     result, outputs = _run_release_metadata(
-        "vscode-extension-release.yml", "build-package", tmp_path, f"refs/tags/{tag}"
+        "extension-release.yml", "build-package", tmp_path, f"refs/tags/{tag}"
     )
 
     assert result.returncode != 0
@@ -160,7 +160,7 @@ def test_extension_branch_dry_run_does_not_require_a_release_tag(
     tmp_path: Path,
 ) -> None:
     result, outputs = _run_release_metadata(
-        "vscode-extension-release.yml", "build-package", tmp_path, "refs/heads/main"
+        "extension-release.yml", "build-package", tmp_path, "refs/heads/main"
     )
 
     assert result.returncode == 0, result.stderr

@@ -1,4 +1,4 @@
-name: vscode-extension-release
+name: extension-release
 
 on:
   push:
@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: vscode-extension-release-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'tag' }}
+  group: extension-release-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'tag' }}
   cancel-in-progress: true
 
 jobs:

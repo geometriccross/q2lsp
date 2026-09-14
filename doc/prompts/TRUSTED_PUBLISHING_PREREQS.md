@@ -5,7 +5,7 @@ the release publish workflow.
 
 Scope: this document is only for Python package publishing (`q2lsp`) via
 `release-publish`. It does not apply to VS Code extension tags
-(`vscode-q2lsp-v...`) or the `vscode-extension-release` workflow.
+(`vscode-q2lsp-v...`) or the `extension-release` workflow.
 
 ## 1) GitHub environments
 
